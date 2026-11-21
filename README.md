@@ -1,9 +1,31 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (c) 2026 Open25-DM32 Contributors -->
 
+<p align="center">
+  <img src="images/open25-logo.svg" width="180" alt="Open25 logo">
+</p>
+
 # Open25-DM32
 
 **Experimental firmware for the Baofeng DM-32UV, with two editions: Classic and Next.**
+
+> [!CAUTION]
+>
+> ### ⚠️ IMPORTANT — FCC Warning & Disclaimer
+>
+> **Open25-DM32 is experimental firmware. It is NOT approved for commercial, public safety, emergency, or other critical communications.**
+>
+> **FCC Certification:** The Baofeng DM-32UV is FCC Part 90 certified for certain DMR and analog FM transmissions. **It is NOT certified for P25.** Installing this firmware does not change that certification or make the radio legal to use for P25 on commercial or public safety radio systems.
+>
+> **Transmit Restrictions:** To help prevent illegal use, this firmware blocks P25 transmission on certain frequencies commonly used by police, fire, EMS, and other public safety agencies. The radio may still receive signals on these frequencies, but transmitting P25 is blocked.
+>
+> **These restrictions do not cover every public safety frequency.** Just because the firmware allows you to transmit on a frequency does not mean you are legally allowed to use it. See the frequency table for a full list of allowed P25 transmit ranges.
+>
+> **Your Responsibility:** You are responsible for following FCC rules and making sure you have permission to transmit. Do not use this firmware to access, interfere with, or transmit on public safety radio systems. Keep in mind that P25 trunked radios may transmit registration and affiliation messages even when you are not pressing PTT.
+>
+> **Disclaimer:** This firmware is provided **AS IS**, with no warranty. The developers are not responsible for illegal transmissions, interference, FCC fines, damaged radios, lost data, or any other problems caused by using this firmware, to the extent allowed by law.
+>
+> **DO NOT RELY ON THIS FIRMWARE FOR EMERGENCY COMMUNICATIONS.**
 
 [![Donate via GitHub Sponsors](https://img.shields.io/badge/Donate-GitHub%20Sponsors-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/tylerwatt12?metadata_project=open25-dm32)
 [![Donate via Ko-fi](https://img.shields.io/badge/Donate-Ko--fi-FF6433?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/kd8zmm)
@@ -49,159 +71,99 @@ and dark themes.
 | Extended RX included by default | ✅ | ✅ |
 | Source in this repository | ✅ | ❌ Private |
 
-FPP means programming from the radio's front panel. Classic r14 uses contacts
-for P25 group, private and all-call destinations, with separate receive and
-transmit NACs. Its matched CPS also edits FM, DMR and NXDN. The CPS retains a
-separate Classic r9–r13 profile for earlier files and browser drafts; changing
-the profile does not convert those files to r14.
 
-Next adds P25 trunked systems and sites, scan lists, receive-only control-channel
-monitoring, site discovery, caller aliases, recent calls and P25 encryption.
-Its programming tools must match the development firmware. Encryption and
-interoperability testing are ongoing.
+## Get started
 
-**P25 Phase 2 and LSM are not supported.** Extended 700/800 MHz ranges are
-available for receive-only tuning, but reception throughout those ranges is
-not hardware-qualified. A listed feature does not establish compatibility with
-every radio, system or hardware revision.
+**Classic r14 is available now.** Next is still in development and has no public
+firmware download. See the [release notes](https://github.com/tylerwatt12/Open25-DM32/releases)
+for earlier versions.
 
-## Release status
+1. Open [Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html) in desktop Chrome or Edge.
+2. Connect your DM-32UV and choose **Classic → Standard · DM-32UV**.
+3. Save a full-radio backup and keep it somewhere safe. A CPS settings file is not a full backup. Only restore a backup to the radio it came from.
+4. Follow the flasher's steps to install the firmware. If it asks you to save a recovery ZIP, keep that too.
+5. Open [Classic CPS](https://kd8zmm.com/open25-dm32/classic-cps/) and choose **Read from Radio** before making changes.
 
-**Classic and Next remain experimental firmware.** Classic
-**0.1.0-rc1-r14** is available in
-[Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html), under
-**Open25-DM32 Classic → Standard · DM-32UV**. Next remains in private development;
-there is no public Next firmware package or announced release date.
+### Upgrading from r13
 
-Classic r14 refreshes the upstream radio interface and conventional protocol
-implementations, retains the necessary audio and state-handling repairs, adds
-NXDN, and includes the Open25 boot emblem and Home identity band. Extended RX
-is always enabled, and the transmit policy is described below.
+The flasher can convert settings from the published r13 build to r14. It checks
+the radio first and requires a saved recovery ZIP before making changes.
 
-The r14 upgrade changes P25 programming from the earlier direct-talkgroup
-extension to native contact links. The updated flasher performs the one-time
-conversion and saves a verified recovery file before writing. Use the matched
-Classic CPS after upgrading.
+**Do not write an old r13 settings file or saved draft to r14.** P25 settings
+now use contacts to choose who you call. Use the r14 profile in Classic CPS.
+Switching CPS profiles does not convert an old file.
 
-Earlier revisions addressed P25 transmit startup and cleanup (r13), speaker
-playback servicing (r12), P25 detection in Classic CPS (r11), and RFKV-based
-programming (r9). See the [release history](https://github.com/tylerwatt12/Open25-DM32/releases)
-for their original notes and qualification limits.
+Other firmware versions do not have a supported direct upgrade to r14.
+The [older r13 package](https://kd8zmm.com/open25-dm32/releases/classic/standard/Open25-DM32-Classic-0.1.0-rc1-r13-p25-tx-cleanup-application.zip)
+can be used as an extra step for compatible installations through the flasher's
+local-file option. Check compatibility first; older settings may need to be
+entered again. A recovery ZIP does not replace your full-radio backup.
 
-**Known limits:** Classic P25 transmit audio can be quieter than Next. NXDN
-recovery after damaged traffic, intermittent startup/cable behavior and long-term
-traffic handling remain under investigation. The earlier PL/CTCSS issue while sending
-DTMF has not been established as resolved. Host tests and bounded radio checks
-do not establish full endurance, physical power-cut recovery or compatibility
-with every DM-32UV revision.
+## Programming
 
-## Installing or upgrading Classic
+Both editions can be programmed from the radio's buttons. For browser programming,
+use **[Classic CPS](https://kd8zmm.com/open25-dm32/classic-cps/)** for Classic and
+**[Next CPS](https://kd8zmm.com/open25-dm32/cps/)** for a matching Next build.
+Their settings files are not interchangeable.
 
-1. Open [Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html) in desktop Chrome or Edge and select Classic.
-2. Connect the radio, select the release candidate, and read the proposed operation.
-3. Save and keep a verified full-radio backup before installing. If a programming conversion is required, also save and retain the flasher's verified recovery ZIP.
-4. Install the selected package and check that the radio starts normally.
-5. Open the matched [Classic CPS](https://kd8zmm.com/open25-dm32/classic-cps/) and **Read from Radio** before editing.
+Classic r14 supports P25 group, private and all-call contacts, with separate
+receive and transmit NACs. The CPS also supports FM, DMR and NXDN.
 
-The exact public r13 build has a supported migration to r14. The flasher checks
-the source firmware and programming, shows the conversion plan, and requires a
-saved and verified recovery ZIP before any write. Unsupported records, unknown
-source firmware or insufficient space stop the upgrade. The radio itself does
-not perform the r13 conversion.
+## Frequency table
 
-**Do not write an old r13 BIN or draft over migrated r14 programming.** Keep the
-recovery file if you need to restore the earlier application and affected
-programming to the same physical radio. A migration recovery ZIP covers the
-upgrade's affected data; it is not a substitute for a full-radio backup.
+Applies to both builds. All ranges are in MHz.
 
-Older or OEM firmware is not a qualified direct r14 migration source. The
-[previous r13 application package](https://kd8zmm.com/open25-dm32/releases/classic/standard/Open25-DM32-Classic-0.1.0-rc1-r13-p25-tx-cleanup-application.zip)
-remains available through Flasher v3's local-file workflow as an intermediate
-for compatible installations. Check its compatibility first and establish
-supported r13 programming before selecting r14; unsupported older codeplugs
-are not converted. Retired pre-RFKV programming must be recreated in the
-appropriate CPS.
+| Frequency range (MHz) | TX | RX |
+| --- | --- | --- |
+| 16–65 | ❌ | FM, DMR, P25, NXDN |
+| 136–144 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 144–148 (US 2M HAM) | FM, DMR, P25, NXDN | FM, DMR, P25, NXDN |
+| 148–151.820 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 151.820–151.940 (MURS) | FM, DMR, P25, NXDN | FM, DMR, P25, NXDN |
+| 151.940–154.570 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 154.570–154.600 (MURS) | FM, DMR, P25, NXDN | FM, DMR, P25, NXDN |
+| 154.600–174 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 174–400 | ❌ | FM, DMR, P25, NXDN |
+| 400–420 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 420–450 (US 70CM HAM) | FM, DMR, P25, NXDN | FM, DMR, P25, NXDN |
+| 450–462.550 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 462.550–462.725 (FRS/GMRS) | FM, DMR, P25, NXDN | FM, DMR, P25, NXDN |
+| 462.725–467.550 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 467.550–467.725 (FRS/GMRS) | FM, DMR, P25, NXDN | FM, DMR, P25, NXDN |
+| 467.725–480 | FM, DMR, NXDN | FM, DMR, P25, NXDN |
+| 480–700 | ❌ | FM, DMR, P25, NXDN |
+| 700–740 (Experimental with significantly reduced sensitivity) | ❌ | FM, DMR, P25, NXDN |
+| 764–776 (Experimental with significantly reduced sensitivity) | ❌ | FM, DMR, P25, NXDN |
+| 794–824 (Experimental with significantly reduced sensitivity) | ❌ | FM, DMR, P25, NXDN |
+| 851–870 (Experimental with significantly reduced sensitivity) | ❌ | FM, DMR, P25, NXDN |
 
-The r14 package contains no proprietary codec. It uses the radio's existing
-compatible codec and preserves the bootloader and calibration. Codec preparation,
-full-radio backup/restore and factory recovery are separate flasher operations.
-Use only a backup belonging to that same radio.
+## Known limits
 
-## Programming and firmware tools
+- P25 Phase 2 and LSM are not supported.
+- Extended 700/800 MHz reception has not been fully tested on the hardware.
+- Classic P25 transmit audio can be quieter than Next.
+- Startup and programming-cable problems, NXDN recovery after damaged signals, and behavior during long periods of traffic are still being checked.
+- CTCSS tones may drop while sending DTMF keypad tones.
 
-- **[Classic CPS](https://kd8zmm.com/open25-dm32/classic-cps/):** program Classic's FM, DMR, conventional P25 and NXDN channels; save BIN/CSV files; select the native r14 or legacy r9–r13 profile.
-- **[Next CPS](https://kd8zmm.com/open25-dm32/cps/):** separate tools for Next development. Use a version matched to the firmware being tested.
-- **[Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html):** install or update supported firmware, make full-radio backups, restore a backup, or prepare a factory update file.
+Testing is ongoing. Support for a feature does not guarantee it will work with
+every radio or system.
 
-The [tools homepage](https://kd8zmm.com/open25-dm32/) links these tools. Retired
-Flasher v1/v2 public entry URLs redirect to Flasher v3.
+## Source and credits
 
-For P25, **Same as RX** inherits the receive NAC, using `293` when RX is wildcard
-`F7E`. An explicit TX NAC, including `000` or a value equal to RX, remains fixed
-when RX changes. TX NAC `F7E` and `F7F` cannot be sent.
+Classic builds on [RadioFoundry](https://github.com/RadioFoundry/RadioFoundry).
+See [LICENSE](LICENSE), [LICENSES](LICENSES), [notices](notices) and
+[FORKING.md](FORKING.md) for licenses and credits, including the ISC mbelib notice.
 
-## Frequency policy
+This repository contains **Classic source only**. Next source is private.
+Firmware downloads are hosted on kd8zmm.com.
+**[BUILD.md](BUILD.md)** has the source and build instructions.
 
-Extended RX is included by default in both current builds. FM, DMR and NXDN TX
-is allowed within **136–174 MHz** and **400–480 MHz**. P25 TX is limited to:
+## Support the project
 
-- **144 ≤ MHz < 148** and **420 ≤ MHz < 450**.
-- **151.820–151.940 MHz** and **154.570–154.600 MHz**.
-- **462.550–462.725 MHz** and **467.550–467.725 MHz**.
-
-The service exceptions are continuous ranges: endpoints and frequencies between
-channel centers are included. Extended receive ranges remain receive-only.
-Saved RX-only choices and normal transmit-admission checks remain active.
-These firmware limits do not grant permission to transmit.
-
-> [!WARNING]
-> **THERE IS NO EASY WAY TO RESTORE THE RADIO WITHOUT A BACKUP.**
->
-> **Keep a verified full-radio backup before installing firmware.**
-> A CPS codeplug file is **not** a full firmware backup.
->
-> **Use only DM-32 handheld hardware. Other models have not been validated.**
->
-> **I am not responsible for bricked radios.**
-
-Full backups can contain identifiers, keys and factory calibration. Store them
-privately and restore only a backup belonging to that same radio.
-
-## Usage disclaimer
-
-This firmware is for amateur radio, authorized P25 communications and technical
-research. Trunked monitoring is receive-only by default. The project does not
-provide assistance with unauthorized system access, subscriber impersonation,
-or bypassing system access controls.
-
-**On trunked systems, registration and affiliation transmit even without pressing
-PTT.** Only transmit on frequencies and systems you are authorized to use;
-registration and affiliation require the system operator's permission.
-Interference with public-safety communications can disrupt emergency response
-and cause loss of life.
-
-## Credits and license
-
-Open25-DM32 builds on [RadioFoundry](https://github.com/RadioFoundry/RadioFoundry)
-and other open-source projects. Classic's firmware is based on MIT-licensed
-RadioFoundry; its native IMBE implementation retains the applicable ISC mbelib
-notice. Other dependencies keep their original licenses and attributions. See
-[LICENSE](LICENSE), [LICENSES](LICENSES), [notices](notices) and
-[FORKING.md](FORKING.md).
-
-This repository contains **Classic source only**. Next source remains private.
-Firmware packages are hosted on kd8zmm.com; GitHub contains source only.
-See **[BUILD.md](BUILD.md)** for Classic's pinned upstream source, dependencies,
-compiler requirements, build commands and reproducibility checks.
-
-## Support development
-
-Donations help cover development and testing expenses.
-
+Donations help pay for development and testing:
 [GitHub Sponsors](https://github.com/sponsors/tylerwatt12?metadata_project=open25-dm32) ·
-[Ko-fi](https://ko-fi.com/kd8zmm)
+[Ko-fi](https://ko-fi.com/kd8zmm).
 
-Report problems through [GitHub Issues](https://github.com/tylerwatt12/Open25-DM32/issues).
-Include your edition, build, radio model and steps to reproduce the problem.
-Keep backups, keys, calibration, private identifiers and private traffic out
-of public reports.
+Report bugs through [GitHub Issues](https://github.com/tylerwatt12/Open25-DM32/issues).
+Include your edition, version, radio model and steps to repeat the problem.
+Keep backups, keys and private radio data out of public reports.
