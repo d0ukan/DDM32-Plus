@@ -10,7 +10,7 @@
 /* A frequency that DOTA or the cross-band may transmit on: NULL, else why not, as the toast says it ("Not an amateur
  * band", "Repeater frequency", ...): the band plan's refusals (xband_check_hz: outside 144-146 / 430-440 MHz, PMR446,
  * the repeater segments, the satellite segments, APRS 144.800) and the repeater list's frequencies (CONFIG_REPEATERS).
- * Built with CONFIG_XBAND or CONFIG_DOTA */
+ * Built with CONFIG_XBAND, CONFIG_DOTA or CONFIG_SSTV_TX */
 const char *ui_xband_refusal(uint32_t hz);
 /* ui_app_key, first: while a session runs the screen is locked (true: the key was taken: Back stops, others refused) */
 bool ui_xband_lock(const input_event_t *ev);

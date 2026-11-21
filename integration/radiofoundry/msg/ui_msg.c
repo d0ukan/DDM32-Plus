@@ -254,8 +254,11 @@ bool ui_msg_tick(uint8_t scr, uint16_t arg)
 #endif
 	radio_msg_want(kind);
 	bool again = false;
+#if CONFIG_SSTV_TX
+	again = ui_sstvtx_tick(scr);	/* DDM32 Plus SSTV send: its progress; leaving the page stops it */
+#endif
 #if CONFIG_SSTV
-	again = kind == RADIO_MSG_SSTV && ui_sstv_tick();	/* a row or a status change of the SSTV screen */
+	again = (kind == RADIO_MSG_SSTV && ui_sstv_tick()) || again;	/* a row or a status change of SSTV */
 #endif
 #if CONFIG_TONE_FIND || CONFIG_SELCALL
 	again = again || ((kind == RADIO_MSG_TONEF || kind == RADIO_MSG_SELCALL) && ui_fmdec_tick());

@@ -312,6 +312,9 @@ __pycache__/
 !/tests/plus/test_audio_mux.c
 !/integration/radiofoundry/sstv/*
 !/tests/plus/test_sstv.c
+!/tests/plus/test_sstvtx.c
+!/tests/plus/test_ui_sstvtx.c
+!/tests/plus/test_sstvtx_radio.inc
 !/integration/radiofoundry/iddb/*
 !/tools/iddb.py
 !/tests/plus/test_iddb.c
@@ -675,6 +678,9 @@ __pycache__/
 !/integration/radiofoundry/spectrum/radio_alls.inc
 !/tests/plus/test_allsearch.c
 !/tests/plus/test_allsearch_sm.inc
+# SSTV send: the test picture (tools/plus_sstvtx.py, integration/radiofoundry/sstv/ is allowed above)
+!/tools/plus_sstvtx.py
+!/tools/test_sstvtx.py
 # the release version the plus build carries (About, splash): tools/build_radiofoundry.py
 !/VERSION
 # satellites' ISS notifications and auto track: every pass, the radio core's hold (tools/plus_satauto.py)

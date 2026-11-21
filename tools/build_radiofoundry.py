@@ -730,6 +730,7 @@ def main():
         "CONFIG_SEARCH_SURE="+("y" if args.plus else "n"),	# DDM32 Plus surer searches (searchfix, tools/plus_scan.py)
         "CONFIG_AIR_PROV="+("y" if args.plus else "n"),	# DDM32 Plus airfields by province (round 16, tools/plus_airprov.py)
         "CONFIG_SPECTRUM_COLOR="+("y" if args.plus else "n"),	# DDM32 Plus spectrum in colour (round 16, tools/plus_airprov.py)
+        "CONFIG_SSTV_TX="+("y" if args.plus else "n"),	# DDM32 Plus SSTV send (docs/plus.md, tools/plus_sstvtx.py)
         f"OPT=-Os -ffile-prefix-map={DEST}=/radiofoundry -fdebug-prefix-map={DEST}=/radiofoundry "
         f"-DRFOUNDRY_SOURCE_EPOCH={git(UP, 'show', '-s', '--format=%ct', 'HEAD')}"]
     if args.classic:
@@ -796,6 +797,7 @@ def main():
                 from tools import plus_dota
                 extra+=plus_dota.STACK_EDGES	# DDM32 Plus DOTA: the session's io calls, the storage job
                 extra+=__import__("tools.plus_xband",fromlist=["x"]).STACK_EDGES	# DDM32 Plus cross-band: its voice wrappers and io
+                extra+=__import__("tools.plus_sstvtx",fromlist=["x"]).STACK_EDGES	# DDM32 Plus SSTV send: the tone path's generator
             edges.write_text((UP / "tools/stack_check_edges.txt").read_text()+extra)
             stack_args=[f"STACK_CHECK_ARGS=--edges {edges}"]
         with stack_log.open("w") as f:

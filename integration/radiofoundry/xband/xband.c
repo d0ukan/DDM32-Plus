@@ -3,7 +3,7 @@
  * core/radio/xband.c. The UI writes the request and reads the view (as DOTA's dota.c does: plain copies, the radio
  * task owns everything else); the radio task runs the rest. */
 #include "config.h"
-#if CONFIG_XBAND || CONFIG_DOTA	/* the band plan: DOTA's frequency check is this one too (ui_xband_refusal) */
+#if CONFIG_XBAND || CONFIG_DOTA || CONFIG_SSTV_TX	/* the band plan: DOTA and SSTV send check with it too */
 #include <string.h>
 #include "radio/xband.h"
 

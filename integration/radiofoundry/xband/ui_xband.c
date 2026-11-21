@@ -7,7 +7,7 @@
  * the picker reads a zone and a channel into the tool screens' shared buffer (ui_scratch.h). Installed as
  * core/ui/ui_xband.c. */
 #include "config.h"
-#if CONFIG_XBAND || CONFIG_DOTA	/* the band plan's refusals: DOTA's frequency check too (ui_xband_refusal) */
+#if CONFIG_XBAND || CONFIG_DOTA || CONFIG_SSTV_TX	/* the band plan: DOTA and SSTV send check with it too (ui_xband_refusal) */
 #include <string.h>
 #include "ui_nav.h"
 #include "ui_screens.h"

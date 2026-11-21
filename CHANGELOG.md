@@ -11,6 +11,10 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   follows the pass's downlink with Doppler (ISS 145.800 voice / SSTV or 145.825 APRS), receive only, shows "ISS
   tracking, max 47°", and 30 s after LOS (or on any key or PTT) returns exactly to the previous channel or VFO. No
   banner while transmitting (it comes after). Stored in spare settings bits; nothing new in RAM but 24 bytes.
+- SSTV send (owner's request): Tools > SSTV > OK sends a built-in test picture: the DDM32 Plus logo, your callsign (the
+  radio name) and colour bars, in Robot 36 (37 s, default), Martin M1 or PD120, on the FM simplex channel in use after
+  an explicit OK, only on amateur frequencies (no repeater, satellite, APRS or PMR446 frequency) and with every TX
+  check PTT has. Back or PTT stops it at once. Receive it with a phone app such as Robot36 or another DM-32 with SSTV.
 - P25, DMR and All digital search catch a real signal surely (the owner's beta.7 report: a DMR radio in the same room
   on 436.275 was not found and the stepping was slow). A strong carrier is now probed on its strongest step (or the
   middle of an overloaded plateau, or the half step of a 6.25 kHz channel) instead of one neighbour after the other;
