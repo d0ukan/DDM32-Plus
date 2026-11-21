@@ -872,6 +872,47 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   screen listens. +248 B static RAM (the screen's row and text buffers, the info), the decoder (1,100 B) and a
   three-row ring from the heap while the screen listens (1,472 B); +7.6 KB flash; UI and radio task stacks' deepest
   paths unchanged. Radio rows SV1-SV7.
+- [built] SSTV send (`CONFIG_SSTV_TX`, `tools/plus_sstvtx.py`; owner's request 2026-11-22): Tools > SSTV > **OK**
+  opens "SSTV send": one built-in test picture, a clean card (320 x 240) in dark blue with the DDM32 Plus mark (the
+  splash's, 2x), the wordmark split as the logo shows it ("DDM32" white, a small "+" at its top right and "Plus" under
+  it in the accent orange: the splash art's own pixels, `art_data.c`), an accent rule, **the radio's callsign** large
+  (the radio name's callsign as CW ID / APRS take it, `radio_cwid_callsign`; a 5 x 7 face up to 8x) and eight colour
+  bars. The page shows it at half size, the mode with its length (Left / Right: **Robot 36** 37 s, the default;
+  Martin M1 1:56; PD120 2:08), the TX frequency with the callsign. **OK sends**, nothing else does (never by itself).
+  Checks on the page: a callsign as the radio name ("Set your callsign (the radio name) in qdmr."), an FM channel,
+  simplex (RX = TX: no repeater), the band plan DOTA and the cross-band use (`ui_xband_refusal`: 144-146 / 430-440 MHz
+  only, not a repeater segment or a repeater of the list, the satellite segments 145.8-146.0 / 435-438, APRS 144.800
+  or PMR446), the time-out timer longer than the picture. The radio core checks again (`radio_sstvtx.inc`: every
+  check a PTT press gets, `radio_sm_tx_check`: TX inhibit, receive only, band, battery, busy channel lockout; FM,
+  simplex, the callsign, the time-out; nothing else on the air: PTT, APRS, DOTA, cross-band, CW, hotspot, SFR) and
+  keys the channel's TX frequency with its bandwidth, CTCSS / DCS and power, as PTT would. While it sends: a progress
+  bar and "Sending n/240", the TX LED and timer as for PTT; **Back stops it at once** (unkeyed, the page stays: "Sending
+  stopped"), so do **PTT** (that press keys no voice), any request that moves the radio (a channel, zone or VFO change,
+  a scan; the page's own keys do nothing meanwhile), leaving the page another way, the time-out timer (it still counts
+  and cuts) and a critical battery. At the end: "Picture sent".
+  Audio: the APRS / DOTA tone path (`hal_afsk.h` gains `tx_pcm`: `hrc_afsk.c` plays 8 kHz PCM through the HR_C7000's
+  prompt FIFO into the FM modulator with the microphone muted, its timer 4 tops the FIFO up every 2 ms in 32-sample
+  chunks; `tx_pcm` hands it a generator instead of the Bell 202 modulator, at the AFSK level 50: about 3 kHz peak
+  deviation at 25 kHz). The generator (`integration/radiofoundry/sstv/sstv_tx.c`, from the published timings: JL
+  Barber, Dayton 2000) makes each sample when the FIFO asks: a 32-bit phase accumulator and a quarter sine (a
+  frequency change keeps the phase), time kept in nanoseconds inside the tone or pixel being sent (every mode's pixel
+  is a whole number of ns: Robot 36 275 us, Martin M1 457.6 us, PD120 190 us), so nothing drifts: each element ends
+  within one sample of its exact time, the whole within one sample of the nominal length; the card's pixel is worked
+  out when the scan reaches it (no picture buffer). Sent: 250 ms of silence (the receiver's squelch), the VIS (1900 Hz
+  300 ms, 1200 Hz 10 ms, 1900 Hz 300 ms, start bit, 7 bits LSB first and even parity at 1100 / 1300 Hz, stop bit, 30
+  ms each), the lines (Robot 36: sync 1200 Hz 9 ms, porch 1500 Hz 3 ms, Y 88 ms, separator 4.5 ms at 1500 / 2300 Hz on
+  even / odd lines, porch 1900 Hz 1.5 ms, R-Y / B-Y 44 ms; Martin M1: sync 4.862 ms, G B R 146.432 ms each with 0.572
+  ms gaps; PD120: sync 20 ms, porch 2.08 ms, Y, R-Y, B-Y (two lines averaged), Y, 121.6 ms each), 300 ms of 1500 Hz.
+  Video 1500 (black) .. 2300 Hz (white), YCrCb as BT.601 full range. Host tests (`tools/test_sstvtx.py`):
+  tests/plus/test_sstvtx.c (the audio in 32-sample chunks decoded again by our SSTV receiver, sstv.c: the VIS gives
+  the mode, every line arrives, mean error against the card 3-8 of 255, every callsign glyph cell and colour bar
+  right, also through an FM receiver's de-emphasis; the length within a sample of the nominal, no phase jump, the
+  VIS's tones and bit times), tests/plus/test_ui_sstvtx.c (the page in English and Turkish: modes, every refusal,
+  sending, Back, sent, the radio core's refusals, leaving the page; layout; no PTT transmission),
+  tests/plus/test_sstvtx_radio.inc (the real radio core: keyed on the channel, the very samples of the picture played
+  whole, unkeyed once; each refusal keys nothing; Back, PTT, a channel step and the time-out stop it at once). +40 B
+  static RAM (1,624 B free), 48 B of heap while sending, +6.3 KB flash; every task's deepest stack path unchanged (UI
+  184 B, radio 728 B free; the generator runs on the tone path's interrupt, a few frames deep). Radio rows ST1-ST8.
 - [built] DMR ID database (`CONFIG_ID_DB`, `prepare_id_db`; parallel job): a DMR caller no codeplug contact names
   shows as "CALLSIGN Name" ("TA1ABC Ahmet") instead of the bare ID, offline, from a table in **program flash**
   compiled into the image (nothing is written to the data flash or anywhere else). The radio task's `find_name`

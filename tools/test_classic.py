@@ -793,6 +793,10 @@ def main():
     run([*argv_xb,'-DCONFIG_XBAND=1','-I'+str(ROOT/'tests/classic'),'-Wl,--wrap=beep_play',
          str(APP/'core/radio/xband.c')],cwd=host)
     run([OUT/'test_radio_xband'],cwd=host)
+    # DDM32 Plus SSTV send in the radio core: the same suites with it built in, then the test picture keyed,
+    # played whole and stopped every way (tools/test_sstvtx.py, tests/plus/test_sstvtx_radio.inc)
+    import test_sstvtx
+    test_sstvtx.radio(argv_cw,cwrad,fixture,ROOT,APP,OUT,host)
     command=run(['make','-Bn','uiFlowTest','SANITIZE=1'],cwd=host,capture_output=True,text=True).stdout
     argv=shlex.split(next(line for line in command.splitlines() if ' -o uiFlowTest ' in line))
     argv[argv.index('uiFlowTest.c')]=str(ROOT/'tests/classic/test_ui.c')
@@ -916,6 +920,8 @@ def main():
     # DDM32 Plus round 14 xband: last calls of every mode and letter (tools/test_xband.py)
     import test_xband
     test_xband.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus SSTV send: the picture's audio decoded again, the page (tools/test_sstvtx.py)
+    test_sstvtx.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus DMR receive audio diagnostics: the PCM driver's counters and prefill, the page (tools/test_dmraudio.py)
     import test_dmraudio
     test_dmraudio.main(ROOT,APP,OUT,flags,host)

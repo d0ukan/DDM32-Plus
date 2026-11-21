@@ -5529,6 +5529,38 @@ msgid "Mode not decoded: VIS"
 msgstr "Mod çözülmedi: VIS"
 
 #: core/ui/ui_sstv.c
+msgid "OK send  Back"
+msgstr "OK gönder  Geri"
+
+#: core/ui/ui_sstvtx.c
+msgid "SSTV send"
+msgstr "SSTV gönder"
+
+#: core/ui/ui_sstvtx.c
+msgid "OK send  <> mode"
+msgstr "OK gönder  <> mod"
+
+#: core/ui/ui_sstvtx.c
+msgid "Back stops"
+msgstr "Geri durdurur"
+
+#: core/ui/ui_sstvtx.c
+msgid "Picture sent"
+msgstr "Resim gönderildi"
+
+#: core/ui/ui_sstvtx.c
+msgid "Sending stopped"
+msgstr "Gönderim durduruldu"
+
+#: core/ui/ui_sstvtx.c
+msgid "Test picture: OK sends"
+msgstr "Test resmi: OK gönderir"
+
+#: core/ui/ui_sstvtx.c
+msgid "TX time-out shorter than the picture"
+msgstr "TX zaman aşımı resimden kısa"
+
+#: core/ui/ui_sstv.c
 msgid "Waiting for the next picture"
 msgstr "Sonraki resim bekleniyor"
 

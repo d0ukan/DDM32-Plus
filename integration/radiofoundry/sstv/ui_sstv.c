@@ -7,7 +7,8 @@
  * The picture is kept nowhere but the frame buffer: this screen clears the display only when it is entered or when
  * something else drew it (ui_strip_draws moved: another screen, the hotspot view), and otherwise draws over its own
  * previous frame: the strip, the new rows, the status lines and the hint. A banner is clipped to the space below the
- * picture. A picture stays until the next one starts (or the screen is left). */
+ * picture. A picture stays until the next one starts (or the screen is left). With CONFIG_SSTV_TX (DDM32 Plus SSTV
+ * send) OK opens the send page (ui_sstvtx.c). */
 #include "config.h"
 #if CONFIG_SSTV
 #include "ui_nav.h"
@@ -112,7 +113,11 @@ static void sstv_draw(void)
 	gfx_fill(0, bottom, w, L->hint_y - bottom, ui_col.bg);
 	gfx_text(f, 0, y, first_line(), ui_col.fg);
 	gfx_text(f, 0, y + f->h + 1, second_line(), ui_col.dim);
+#if CONFIG_SSTV_TX
+	ui_draw_bottom(&ui_st, TR("OK send  Back"));
+#else
 	ui_draw_bottom(&ui_st, TR("Back"));
+#endif
 	gfx_clip(0, bottom, w, gfx_height() - bottom);	/* a banner leaves the picture alone */
 	ui_draw_banner(&ui_st);
 	gfx_clip_off();
@@ -129,7 +134,22 @@ bool ui_sstv_tick(void)
 	return true;
 }
 
+#if CONFIG_SSTV_TX
+/* OK: the send page (DDM32 Plus SSTV send) */
+static bool sstv_key(const input_event_t *ev)
+{
+	if (ev->action == ACT_SELECT && ev->gesture == GESTURE_PRESS) {
+		ui_push(SCR_SSTV_TX, 0);
+		return true;
+	}
+	return false;
+}
+#endif
+
 const ui_scr_def_t ui_sstv_screen = {
 	.name = "sstv", .flags = SF_FIELD, .draw = sstv_draw, .enter = sstv_enter,
+#if CONFIG_SSTV_TX
+	.key = sstv_key,
+#endif
 };
 #endif
