@@ -4777,6 +4777,42 @@ msgid "OK arm  ^v<> change"
 msgstr "OK kur  ^v<> değiştir"
 
 #: core/ui/ui_sat.c
+msgid "Every pass"
+msgstr "Her geçiş"
+
+#: core/ui/ui_sat.c
+msgid "Auto track"
+msgstr "Oto. izleme"
+
+#: core/ui/ui_sat.c
+msgid "Kept across power cycles"
+msgstr "Kapat-açta kalır"
+
+#: core/ui/ui_sat.c
+msgid "Tracks ISS 145.825, RX"
+msgstr "ISS 145.825 izlenir, RX"
+
+#: core/ui/ui_sat.c
+msgid "Tracks ISS 145.800, RX"
+msgstr "ISS 145.800 izlenir, RX"
+
+#: core/ui/ui_sat.c
+msgid "Tracks the downlink, RX"
+msgstr "İniş izlenir, yalnız RX"
+
+#: core/ui/ui_sat.c
+msgid "Armed for every pass"
+msgstr "Her geçiş için kuruldu"
+
+#: core/ui/ui_sat.c
+msgid " tracking, max "
+msgstr " izleniyor, maks "
+
+#: core/ui/ui_sat.c
+msgid "Auto track off: radio back"
+msgstr "Oto. izleme kapalı: telsiz geri"
+
+#: core/ui/ui_sat.c
 msgid "Waiting for the GPS time"
 msgstr "GPS saati bekleniyor"
 

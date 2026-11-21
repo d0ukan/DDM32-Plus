@@ -198,6 +198,7 @@ def prepare(transform, install):
     __import__((__package__ + "." if __package__ else "") + "plus_polish", fromlist=["x"]).prepare_polish(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_searchlog", fromlist=["x"]).prepare_searchlog(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_alldigital", fromlist=["x"]).prepare_alldigital(transform, install)
+    __import__((__package__ + "." if __package__ else "") + "plus_satauto", fromlist=["x"]).prepare_sat_auto(transform, install)
 
 
 def prepare_large_scale(transform):

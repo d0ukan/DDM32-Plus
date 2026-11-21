@@ -462,6 +462,15 @@ def main():
          '-Wl,-dead_strip' if sys.platform=='darwin' else '-Wl,--gc-sections',
          '-o',OUT/'test_fmid_set'],cwd=ROOT)
     run([OUT/'test_fmid_set'],cwd=ROOT)
+    # DDM32 Plus satellites' Every pass and Auto track in cp_flags / rs_flags spare bits, through the UI storage service
+    run(['clang',*flags,'-ffunction-sections','-fdata-sections','-DCONFIG_FM_ID=1','-DCONFIG_SATELLITES=1',
+         '-DCONFIG_ZONE_EDIT=0','-DCONFIG_CONTACT_EDIT=0','-DCONFIG_KEY_ASSIGN=0',
+         ROOT/'tests/plus/test_sat_set.c',APP/'core/ui/ui_svc_storage.c',
+         *CODEPLUG,APP/'core/settings/settings.c',
+         APP/'core/storage/storage.c',host/'sim/sim_flash.c',
+         '-Wl,-dead_strip' if sys.platform=='darwin' else '-Wl,--gc-sections',
+         '-o',OUT/'test_sat_set'],cwd=ROOT)
+    run([OUT/'test_sat_set'],cwd=ROOT)
     # DM32 Plus multi-watch: Watch channels and the ring's pane 1 letter in settings_t.dual_state's spare bits
     run(['clang',*flags,'-ffunction-sections','-fdata-sections','-DCONFIG_MULTI_WATCH=1',
          '-DCONFIG_ZONE_EDIT=0','-DCONFIG_CONTACT_EDIT=0','-DCONFIG_KEY_ASSIGN=0',
@@ -719,6 +728,17 @@ def main():
          str(APP/'core/radio/spectrum.c'),str(APP/'core/radio/fox.c'),str(APP/'core/radio/cw_beacon.c'),
          str(APP/'core/radio/p25search.c'),str(APP/'core/radio/vfox.c')],cwd=host)
     run([OUT/'test_radio_vfox'],cwd=host)
+    # DDM32 Plus satellites' auto track, the radio core's hold (tests/plus/test_sathold_radio.inc): upstream's and
+    # Classic's radio suites again with CONFIG_SATELLITES built in, then the hold from a channel and the VFO, refused
+    # while busy, TX refused while held, and the radio core's settings save keeping the auto track bits
+    sathold=OUT/'radioCoreSathold.c'
+    sathold.write_text('#include "native_modem/native_lab.h"\nextern const nt_ops classic_ops;\n#include "radio/sat.h"\n'+
+                       fixture+'\n#define main classic_radio_main\n#include "'+str(ROOT/'tests/classic/test_radio.inc')+
+                       '"\n#undef main\n#include "'+str(ROOT/'tests/plus/test_sathold_radio.inc')+'"\n')
+    argv_sh=[str(sathold) if a==str(vfox) else a for a in argv]
+    argv_sh[argv_sh.index('-o')+1]=str(OUT/'test_radio_sathold')
+    run([*argv_sh,'-DCONFIG_SATELLITES=1'],cwd=host)
+    run([OUT/'test_radio_sathold'],cwd=host)
     # DM32 Plus priority channel and temporary skip (prepare_scanx): the radio core's priority stops and looks, nuisance
     # delete and Clear skips, after every suite above (multi-watch's included) runs again with it built in
     scanx=OUT/'radioCoreScanx.c'

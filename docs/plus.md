@@ -1033,6 +1033,67 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     the view's alarm 12 B, the request and the event 14 B, the banner text 40 B, the page 5 B, alignment); stacks unchanged
     (radio 824 B free, UI 368 B free; from `sat_service` 1,788 B deep, `alarm_job` 1,676 B, `ui_sat_alarm` 300 B
     under `ui_app_tick`, the screen's draw 1,028 B). Radio rows PA1-PA7.
+- [built] Satellites: ISS notifications and auto track (part of `CONFIG_SATELLITES`; `tools/plus_satauto.py`
+  `prepare_sat_auto`, `integration/radiofoundry/sat/` sat_svc.c, ui_sat.c, radio_sathold.inc; owner's request "ISS
+  automatic tracking, automatic frequency and an ISS notification pop-up"; branch issauto). Built on the pass alarm and
+  the Doppler tracking above; one alarm at a time, as before.
+  - **The pass alarm page** has two more rows: **Every pass** (Off / On; "Her geçiş") and **Auto track** (Off / On /
+    APRS; "Oto. izleme"). Every pass is for the ISS or Any satellite (what the settings can keep): turning it On with
+    another satellite in For picks the ISS, moving For to another satellite turns it Off. OK arms ("Armed for every
+    pass") or turns it off as before; a change while armed arms it again. With Every pass the alarm is not off after
+    the rise: the radio task looks for the next qualifying pass at once (the existing search: the pass under way is
+    skipped) and announces every pass the same way (two beeps and "ISS in 5 min, max 47°" N minutes before, a beep and
+    "ISS AOS now, max 47°" at the rise). The page's line reads "Kept across power cycles" instead of "Off after a power
+    cycle"; with Auto track on, the line under it says what it listens to ("Tracks ISS 145.800, RX", "Tracks ISS
+    145.825, RX", or "Tracks the downlink, RX" for another satellite or Any).
+  - **Stored** (the settings store has room: spare bits, no new field, the record's size and layout upstream's):
+    Every pass with its lead and lowest elevation in `settings_t.cp_flags` bits 1-6 (`SETTINGS_CP_SAT_NOTE`: bits 1-2
+    for whom, 0 off, 1 ISS, 2 any; bits 3-6 an index of the 3 x 5 lead / elevation choices, 0 = 5 min, 0°; next to
+    "Use anyway" bit 0, which app.c changes through a mask, and FM caller ID bit 7), Auto track in `settings_t.rs_flags`
+    bits 6-7 (`SETTINGS_RS_SAT_AUTO`: 0 off, 1 the downlink, 2 the ISS's APRS); the radio core's own rs_flags write
+    (`save_settings` in radio_sm.c) now keeps those two bits. An older record and a factory reset read 0 = off; Classic
+    firmware ignores the bits (its own rs_flags write clears auto track). Through the UI storage service
+    (`UI_SET_SAT_NOTE`, `UI_SET_SAT_AUTO`). At power on the first UI tick (`ui_sat_alarm`) arms the stored alarm again;
+    it finds its pass once the GPS has the time and a position (needs the GPS on, as the alarm always did).
+  - **Auto track** (needs an armed alarm, one pass or every pass: no silent mode; the notifications are the alarm's):
+    at the rise, when the UI says the radio is free (each UI tick `sat_ui_idle`: Home or the Satellites screen open,
+    radio idle, no scan or watch, no hotspot, nothing transmitting) and nothing is tracked, the radio task asks the
+    radio core to hold the user's state (`radio_req_sat_hold`, new request `RREQ_SAT_HOLD`, taken before upstream's
+    "anything the user does stops X" checks so it stops nothing). The radio core refuses unless it is free too (no
+    PTT, monitor, call, scan or watch, DMR / P25 / All digital search, P25 or DMR trunk following, DOTA, cross-band,
+    APRS sending, CW beacon, hotspot, air watch, a ring letter's C..F VFO in use); taken, it notes the position and
+    the VFOs where a power off notes them (`persist`), then notes nothing more (`persist` returns at once) and refuses
+    TX (`TXDENY_RX_ONLY`: auto track is receive only, whatever the screen). Only once the hold is taken (one to three
+    seconds) does the VFO move: the existing tracking on the satellite's downlink alone, simplex, FM wide, no tones
+    (ISS: 145.800 voice / SSTV, or 145.825 with APRS; another satellite its downlink), Doppler corrected in the same
+    steps and hysteresis; the banner "ISS tracking, max 47°" (no second tone). It ends 30 s after the set, on any key
+    (`ui_sat_auto_key`, first in `ui_app_key`: the key is used for that, toast "Auto track off: radio back"), on PTT
+    (refused, the end once released), the screen's OK, a change of the VFO from elsewhere, or the elements failing; the
+    hold's end puts the VFO in use and the position back as the radio's start takes them (`radio_sm_init`'s way: the
+    channel, or the VFO with its frequencies, mode, width, tones, talk target). A power off during it comes back as
+    before it (nothing was noted). Not started in a later second of the same pass (only at the rise); a refused hold
+    moves nothing.
+  - **No pop-up while transmitting**: `ui_sat_alarm` takes no event while the radio transmits (or PTT is refused); the
+    banner and tone come after the release, the minutes left counted again then (the event keeps the rise).
+  - Host tests (in `make test`): `tests/plus/test_sat_svc.c` adds every pass (three consecutive ISS passes at 10° or
+    more, each warning and rise within a second of the one-second scan, armed again at once for the next), auto
+    track from a channel on 145.800 and on 145.825 (the hold first, the set-up a second later: FM, wide, no tones,
+    simplex; the VFO within the hold plus a second's drift of the true Doppler all pass, TX = RX; "tracking" after the
+    rise's event; 30 s after the set the hold released and the channel back, the alarm armed for the next pass), a
+    key ending it at once and PTT ending it on release (the split VFO / channel back, nothing more that pass), and no
+    start off Home or busy, with PTT across the rise, with the radio core refusing (asked, let go, nothing moved) or a
+    pass already tracked by hand; `tests/plus/test_sathold_radio.inc` (`test_radio_sathold`: upstream's and Classic's
+    radio suites with it built in, then the hold from a channel and from a split VFO with a tone, nothing noted, TX
+    refused and PTT denied, a reboot meanwhile, refused with PTT, monitor, a call or a scan, and the radio core's
+    settings save keeping the auto track bits); `tests/plus/test_sat_set.c` (the two settings through the UI storage
+    service and settings store across power cycles, next to "Use anyway", FM caller ID and the radio core's rs_flags
+    bits, defaults off); `tests/plus/test_ui_sat.c` adds the page's rows, Every pass stored / changed / off, the ISS
+    picked, auto track stored, the stored alarm armed at power on, idle only on Home, the banner held back during TX,
+    the tracking banner, a key and PTT ending an auto track, and the layout check on the page with both rows on.
+  - FLASH +2,624 B (848,544 -> 851,168), RAM +24 B (209,792 -> 209,816: the hold flag, the UI's idle word, the cancel,
+    the auto state, the alarm's options request, the page's two values and the power-on flag, alignment; the alarm's
+    options and the auto track's wait and top sit in what was padding); stacks unchanged (radio 728 B free, UI 184 B
+    free, the deepest paths not these). Radio rows PA8-PA15.
 
 - [built] P25 Phase 1 trunk following (`CONFIG_P25_TRUNK`, `prepare_p25_trunk`; parallel job; receive only):
   Tools > P25 trunk (tool 24, before Battery) follows a trunked system from the **selected channel**: a P25 channel

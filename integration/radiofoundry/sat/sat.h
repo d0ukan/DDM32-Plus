@@ -3,7 +3,9 @@
  * FM satellite in the table (tle.txt and sat_freq.txt beside this file, compiled in by tools/sat_tle.py) over the
  * GPS position, with the live look angles, range and Doppler of the one in focus, and OK tunes the VFO to it: RX the
  * downlink and TX the uplink, both corrected for Doppler as the pass goes. The PTT stays the user's. The pass alarm
- * sounds before a pass on any screen (sat_alarm_set, ui_sat_alarm).
+ * sounds before a pass on any screen (sat_alarm_set, ui_sat_alarm); with "Every pass" it is armed again after each rise
+ * and kept across power cycles (the UI stores it), and "Auto track" follows the pass's downlink by itself from the rise
+ * to the set (receive only), then puts the radio back where it was (radio_req_sat_hold).
  *
  * The math (sat.c: time, observer, look angles, Doppler, the pass search) is pure; the service (sat_svc.c) runs in
  * the radio task, at most a few SGP4 propagations a radio poll and only while the screen looks, a pass is tracked
@@ -23,6 +25,8 @@
  * # on the ISS while it is above the horizon sends one position beacon there (aprs_iss_send, Doppler corrected) */
 #define SAT_ISS_CATNUM	25544u
 #define SAT_ISS_APRS_HZ	145825000u
+/* The ISS's FM voice and SSTV downlink, what auto track listens to on the ISS (unless APRS is chosen) */
+#define SAT_ISS_VOICE_HZ	145800000u
 
 /* One satellite: its element set and its FM transponder (sat_data.c, generated) */
 typedef struct {
@@ -104,13 +108,25 @@ bool sat_search_step(sat_search_t *s, const sgp4_t *p, const sat_info_t *info, c
 enum { SAT_CLOCK_NONE, SAT_CLOCK_NO_POS, SAT_CLOCK_OK };
 enum { SAT_TRK_OFF, SAT_TRK_ON, SAT_TRK_LOS, SAT_TRK_LEFT };	/* SAT_TRK_LEFT: the VFO was changed by hand */
 
-/* The pass alarm (RAM only: off after a power cycle). Armed for one satellite's next pass or for the next pass of any
- * satellite, either with a lowest top elevation; it sounds lead_min minutes before the rise (SAT_ALARM_SOON) and at
- * the rise (SAT_ALARM_AOS), then it is off. The radio task finds the pass once (SGP4, a propagation a poll, or the
- * screen's own search result when it has one), then only compares the time, once a second, until it is due. */
+/* The pass alarm. Armed for one satellite's next pass or for the next pass of any satellite, either with a lowest top
+ * elevation; it sounds lead_min minutes before the rise (SAT_ALARM_SOON) and at the rise (SAT_ALARM_AOS), then it is
+ * off, or with SAT_OPT_EVERY looks for the next pass at once (the UI keeps that one in the settings and arms it again
+ * at power on). The radio task finds the pass once (SGP4, a propagation a poll, or the screen's own search result
+ * when it has one), then only compares the time, once a second, until it is due.
+ *
+ * Auto track (opts SAT_OPT_AUTO): at the rise, when the UI says the radio is free (sat_ui_idle: Home or this screen,
+ * no call, scan, TX) and the radio core agrees to hold the user's state (radio_req_sat_hold: noted as a power off
+ * notes it, refused during a scan, search, trunk following, DOTA, cross-band, hotspot, PTT, a call), the VFO follows
+ * the satellite's downlink with Doppler (the ISS: 145.800 voice / SSTV, or 145.825 APRS), receive only (the radio
+ * core refuses TX while it holds), and SAT_ALARM_TRACK says so. A key or PTT (sat_auto_cancel), the set, a hand
+ * change or the elements failing end it, and the hold's end puts the radio back exactly where it was. */
 #define SAT_ALARM_ANY	0xFEu	/* sat_alarm_set target: any satellite (SAT_NONE: off) */
 enum { SAT_AL_OFF, SAT_AL_FINDING, SAT_AL_ARMED, SAT_AL_NONE };	/* SAT_AL_NONE: no such pass in SAT_SEARCH_S */
-enum { SAT_ALARM_SOON = 1, SAT_ALARM_AOS };
+enum { SAT_ALARM_SOON = 1, SAT_ALARM_AOS, SAT_ALARM_TRACK };	/* TRACK: auto track has the radio */
+#define SAT_OPT_EVERY		0x01u	/* sat_alarm_t.opts: armed again for the next pass after each rise */
+#define SAT_OPT_AUTO		0x06u	/* ... auto track at the rise: SAT_AUTO_* << SAT_OPT_AUTO_SHIFT */
+#define SAT_OPT_AUTO_SHIFT	1
+enum { SAT_AUTO_OFF, SAT_AUTO_DOWN, SAT_AUTO_APRS };	/* the downlink (the ISS: 145.800), or the ISS's APRS 145.825 */
 typedef struct {
 	uint8_t target;		/* a satellite, SAT_ALARM_ANY, or SAT_NONE (off) */
 	uint8_t lead_min;	/* minutes before the rise */
@@ -119,13 +135,14 @@ typedef struct {
 	uint8_t sat;		/* SAT_AL_ARMED: the pass's satellite ... */
 	int8_t max_el;		/* ... its top elevation ... */
 	bool soon;		/* ... the warning given */
+	uint8_t opts;		/* SAT_OPT_* (in what was padding) */
 	int32_t aos;		/* ... and its rise, seconds since 2000 */
 } sat_alarm_t;
 typedef struct {
 	uint8_t kind;		/* SAT_ALARM_SOON or SAT_ALARM_AOS */
 	uint8_t sat;
 	int8_t max_el;
-	int32_t in_s;		/* seconds to the rise (SOON) */
+	int32_t in_s;		/* seconds to the rise (SOON), when taken (a banner held back during TX says the time left) */
 } sat_alarm_event_t;
 
 typedef struct {
@@ -150,13 +167,21 @@ void sat_view(sat_view_t *out);
 void sat_seen(uint8_t focus);		/* the screen looks (from its draw), the satellite in focus */
 void sat_track(uint8_t idx);		/* follow this satellite's pass in the VFO; SAT_NONE stops */
 void sat_arm(bool on);			/* the arming tone instead of the CTCSS on the uplink */
-/* Arm the pass alarm (target SAT_NONE: off), replacing one armed before */
-void sat_alarm_set(uint8_t target, uint8_t lead_min, uint8_t min_el);
+/* Arm the pass alarm (target SAT_NONE: off) with SAT_OPT_* opts, replacing one armed before */
+void sat_alarm_set(uint8_t target, uint8_t lead_min, uint8_t min_el, uint8_t opts);
 /* Every UI tick, whatever screen is open: true once for each alarm due, *out what it is about */
 bool sat_alarm_take(sat_alarm_event_t *out);
+/* Every UI tick: whether an auto track may take the radio now (Home or the Satellites screen, idle, no TX) */
+void sat_ui_idle(bool idle);
+/* An auto track runs (or is starting): a key ends it (sat_auto_cancel; PTT too, seen by the radio task) */
+bool sat_auto_on(void);
+void sat_auto_cancel(void);
 /* ui_sat.c, from ui_app_tick: an alarm due sounds its tone and returns its text ("ISS in 5 min, max 47°", a static
- * buffer) for the banner; NULL when none */
+ * buffer) for the banner; NULL when none (none while transmitting: it waits). The first call arms the stored "Every
+ * pass" alarm */
 const char *ui_sat_alarm(void);
+/* ui_sat.c also has ui_sat_auto_key (declared where ui_app_key calls it, hal_input.h's type): a key while an auto
+ * track runs ends it, the radio back where it was (true: the key is used for that) */
 
 /* Radio task, every radio poll: the VFO as it is now (to see a change by hand); light: the native receiver owns the
  * radio (a P25 channel), one propagation a poll at most */

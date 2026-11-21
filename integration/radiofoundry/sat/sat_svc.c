@@ -14,7 +14,15 @@
  *
  * The pass alarm (sat_alarm_set): with the screen closed only the clock (once a second) and the alarm's own pass
  * search run (one propagation a poll, until the pass is found; the screen's result is taken when it has one), then a
- * comparison of the time once a second until the alarm is due; no SGP4 then. */
+ * comparison of the time once a second until the alarm is due; no SGP4 then. "Every pass" looks for the next pass at
+ * the rise.
+ *
+ * Auto track (SAT_OPT_AUTO): at the rise, if the UI said the radio is free (sat_ui_idle) and nothing is tracked, the
+ * radio core is asked to hold the user's state (radio_req_sat_hold: noted as at a power off, TX refused while held);
+ * only once it does (radio_sat_held, within AUTO_WAIT_S) does the VFO move: the tracking above on the downlink alone
+ * (the ISS: 145.800 voice / SSTV or 145.825 APRS), simplex, no tones. A key (sat_auto_cancel), PTT (the release
+ * awaited), the set (30 s after), a hand change or the elements failing end it: the hold's end puts the radio back as
+ * it was. */
 #include "config.h"
 #if CONFIG_SATELLITES
 #include <string.h>
@@ -35,6 +43,7 @@
 #define MOVED_E7	2000000	/* 0.2 degree (about 20 km): the passes are searched again */
 #define JUMP_S		60	/* the GPS time against the running clock: a bigger jump searches again */
 #define ALARM_GAP_S	5	/* the pass after one is looked for from this long after its set (found to 2 s) */
+#define AUTO_WAIT_S	3	/* auto track: the radio core's hold awaited this many seconds at most */
 
 /* The radio task writes, the UI copies; both in a critical section */
 static sat_view_t view = { .live = SAT_NONE, .track = SAT_NONE, .alarm = { .target = SAT_NONE } };
@@ -44,11 +53,15 @@ static volatile uint8_t want_focus = SAT_NONE;
 static volatile uint8_t want_track;
 static volatile bool want_track_new, want_arm;
 /* The alarm asked for (UI) and the last one due (radio task); critical sections */
-static uint8_t want_al_target, want_al_lead, want_al_el;
+static uint8_t want_al_target, want_al_lead, want_al_el, want_al_opts;
 static volatile bool want_al_new;
-static sat_alarm_event_t al_ev;
+static sat_alarm_event_t al_ev;	/* in_s holds the rise itself until taken */
 static volatile uint8_t al_ev_seq;
 static uint8_t al_ev_taken;	/* UI task */
+/* Auto track: the UI's word (each tick), a key's cancel, and the state the UI asks about */
+static volatile bool ui_idle, want_cancel;
+enum { AUTO_NONE, AUTO_WAIT, AUTO_ON };	/* auto_st bits 0-1; bits 2-3 SAT_AUTO_DOWN / _APRS */
+static volatile uint8_t auto_st;
 
 /* Radio task only */
 static struct {
@@ -56,10 +69,13 @@ static struct {
 	uint32_t anchor_ms, clock_ms, live_ms;
 	uint32_t gps_hms, gps_date;
 	bool clock_ok, pos_ok, searching;
+	bool cancel;		/* auto track: PTT was pressed, it ends once released */
 	int32_t lat, lon, alt;	/* where the observer was set up */
 	int32_t pass_lat, pass_lon;	/* where the passes were searched from */
 	sat_obs_t obs;
 	uint8_t search_sat;
+	uint8_t auto_wait;	/* auto track: seconds left for the radio core's hold */
+	int8_t auto_el;		/* ... the pass's top (the banner) */
 	sat_search_t search;
 	/* tracking */
 	uint8_t track;
@@ -106,9 +122,10 @@ void sat_arm(bool on)
 	want_arm = on;
 }
 
-void sat_alarm_set(uint8_t target, uint8_t lead_min, uint8_t min_el)
+void sat_alarm_set(uint8_t target, uint8_t lead_min, uint8_t min_el, uint8_t opts)
 {
 	taskENTER_CRITICAL();
+	want_al_opts = opts;
 	want_al_target = target;
 	want_al_lead = lead_min;
 	want_al_el = min_el;
@@ -122,9 +139,25 @@ bool sat_alarm_take(sat_alarm_event_t *out)
 		return false;
 	taskENTER_CRITICAL();
 	*out = al_ev;
+	out->in_s -= view.now;		/* the time left now (a banner held back during TX) */
 	al_ev_taken = al_ev_seq;
 	taskEXIT_CRITICAL();
 	return true;
+}
+
+void sat_ui_idle(bool idle)
+{
+	ui_idle = idle;
+}
+
+bool sat_auto_on(void)
+{
+	return (auto_st & 3u) != AUTO_NONE;
+}
+
+void sat_auto_cancel(void)
+{
+	want_cancel = true;
 }
 
 static void research_all(void)
@@ -319,23 +352,38 @@ static __attribute__((noinline)) void alarm_job(int32_t now)
 	alarm_from((uint8_t)(al.k + 1u), now);
 }
 
-static void alarm_fire(uint8_t kind, int32_t now)
+/* An event for the UI (sat_alarm_take); aos: the rise (made the time left when taken) */
+static void ev_post(uint8_t kind, uint8_t sat, int8_t max_el, int32_t aos)
 {
 	taskENTER_CRITICAL();
 	al_ev.kind = kind;
-	al_ev.sat = view.alarm.sat;
-	al_ev.max_el = view.alarm.max_el;
-	al_ev.in_s = view.alarm.aos - now;
+	al_ev.sat = sat;
+	al_ev.max_el = max_el;
+	al_ev.in_s = aos;
 	al_ev_seq++;
+	taskEXIT_CRITICAL();
+}
+
+static void auto_begin(bool transmitting);
+
+static void alarm_fire(uint8_t kind, bool transmitting)
+{
+	ev_post(kind, view.alarm.sat, view.alarm.max_el, view.alarm.aos);
 	if (kind == SAT_ALARM_SOON) {
-		view.alarm.soon = true;
+		view.alarm.soon = true;		/* (one byte: the UI reads it whole) */
+		return;
+	}
+	auto_begin(transmitting);		/* before the pass is forgotten */
+	al.searching = false;
+	taskENTER_CRITICAL();
+	if (view.alarm.opts & SAT_OPT_EVERY) {
+		view.alarm.state = SAT_AL_FINDING;	/* the next pass, from the next poll */
+		al.restart = true;
 	} else {
 		view.alarm.target = SAT_NONE;	/* the rise: done */
 		view.alarm.state = SAT_AL_OFF;
 	}
 	taskEXIT_CRITICAL();
-	if (kind == SAT_ALARM_AOS)
-		al.searching = false;
 }
 
 /* The UI's request: taken at once (the screen shows it), the pass looked for once there is a clock */
@@ -345,6 +393,7 @@ static void alarm_request(void)
 	uint8_t target = want_al_target;
 	view.alarm.lead_min = want_al_lead;
 	view.alarm.min_el = want_al_el;
+	view.alarm.opts = want_al_opts;
 	want_al_new = false;
 	if (target != SAT_ALARM_ANY && target >= sat_count)
 		target = SAT_NONE;
@@ -356,16 +405,16 @@ static void alarm_request(void)
 }
 
 /* Once a second: integer comparisons only */
-static void alarm_check(int32_t now)
+static void alarm_check(int32_t now, bool transmitting)
 {
 	const sat_alarm_t *a = &view.alarm;
 	if (a->state == SAT_AL_ARMED) {
 		if (now >= a->aos + 60)
 			al.restart = true;		/* the clock jumped past it: the next one */
 		else if (now >= a->aos)
-			alarm_fire(SAT_ALARM_AOS, now);
+			alarm_fire(SAT_ALARM_AOS, transmitting);
 		else if (!a->soon && now >= a->aos - (int32_t)a->lead_min * 60)
-			alarm_fire(SAT_ALARM_SOON, now);
+			alarm_fire(SAT_ALARM_SOON, transmitting);
 	} else if (a->state == SAT_AL_NONE && now - al.from_s >= SAT_SEARCH_S / 2) {
 		al.restart = true;			/* none in the span looked at: again half way */
 	}
@@ -382,10 +431,49 @@ static void track_end(uint8_t why)
 	taskEXIT_CRITICAL();
 }
 
+static uint8_t auto_phase(void)
+{
+	return (uint8_t)(auto_st & 3u);
+}
+
+/* Auto track over: the radio core puts the user's state back (also when its hold was never taken: a no-op there) */
+static void auto_end(uint8_t why)
+{
+	radio_req_sat_hold(false);
+	auto_st = AUTO_NONE;
+	want_cancel = false;
+	e.cancel = false;
+	track_end(why);
+}
+
+/* At the alarm's rise (alarm_fire): auto track, when it is wanted and the UI says the radio is free; the radio core
+ * is asked to hold the user's state, and nothing moves until it has (live block, AUTO_WAIT) */
+static void auto_begin(bool transmitting)
+{
+	uint8_t mode = (uint8_t)((view.alarm.opts & SAT_OPT_AUTO) >> SAT_OPT_AUTO_SHIFT);
+	if (mode == SAT_AUTO_OFF || !ui_idle || transmitting || e.track != SAT_NONE || want_track_new ||
+	    view.alarm.sat >= sat_count || al.best.state != SAT_PASS_OK)
+		return;
+	e.track = view.alarm.sat;
+	e.track_los = al.best.los;
+	e.auto_el = view.alarm.max_el;
+	e.auto_wait = AUTO_WAIT_S + 1;
+	e.cancel = false;
+	e.setup = true;
+	e.arm = false;
+	want_cancel = false;
+	auto_st = (uint8_t)(AUTO_WAIT | mode << 2);
+	radio_req_sat_hold(true);
+}
+
 static void track_request(int32_t now)
 {
 	uint8_t i = want_track;
 	want_track_new = false;
+	if (auto_phase() != AUTO_NONE) {
+		auto_end(SAT_TRK_OFF);	/* the screen's OK during an auto track: it ends, the radio back */
+		return;
+	}
 	if (i >= sat_count) {
 		if (e.track != SAT_NONE)
 			track_end(SAT_TRK_OFF);
@@ -412,6 +500,14 @@ static subtone_t uplink_tone(const sat_info_t *s, bool arm)
 	return t;
 }
 
+/* What the tracking listens to: the downlink; on an auto track of the ISS its voice / SSTV or its APRS frequency */
+static uint32_t down_hz(const sat_info_t *s)
+{
+	if (auto_phase() != AUTO_NONE && s->catnum == SAT_ISS_CATNUM)
+		return (auto_st >> 2) == SAT_AUTO_APRS ? SAT_ISS_APRS_HZ : SAT_ISS_VOICE_HZ;
+	return s->down_hz;
+}
+
 /* RX (which moves a split's TX along: so TX after it) only when it changes, or again (force) */
 static void retune(uint32_t rx, uint32_t tx, bool force)
 {
@@ -427,26 +523,39 @@ static void retune(uint32_t rx, uint32_t tx, bool force)
 static void track_service(int32_t now, const sat_look_t *l, bool vfo, uint32_t rx_hz, uint32_t tx_hz, bool transmitting)
 {
 	const sat_info_t *s = &sat_table[e.track];
-	if (transmitting)
+	bool autot = auto_phase() != AUTO_NONE;
+	if (transmitting) {
+		e.cancel = autot;	/* PTT on an auto track (refused): it ends once released */
 		return;		/* the VFO can't move now: at the next second */
+	}
+	if (autot && (e.cancel || want_cancel)) {
+		auto_end(SAT_TRK_OFF);	/* a key or PTT: the radio back where it was */
+		return;
+	}
 	if (now > e.track_los + TRACK_AFTER_S) {
+		if (autot) {
+			auto_end(SAT_TRK_LOS);	/* over: the radio back where it was */
+			return;
+		}
 		/* Over: the VFO back on the nominal downlink and uplink, if it is still where the tracking put it */
 		if (!e.setup && !e.grace && vfo && rx_hz == e.rx_set && tx_hz == e.tx_set)
 			retune(s->down_hz, s->up_hz, false);
 		track_end(SAT_TRK_LOS);
 		return;
 	}
-	int32_t drx = sat_doppler_rx(s->down_hz, l->rate_kms), dtx = sat_doppler_tx(s->up_hz, l->rate_kms);
+	uint32_t down = down_hz(s);
+	int32_t drx = sat_doppler_rx(down, l->rate_kms), dtx = sat_doppler_tx(s->up_hz, l->rate_kms);
 	if (e.setup) {
-		/* Into the VFO (RX first: it opens it), FM, wide, the uplink tone and no receive tone, then the split */
+		/* Into the VFO (RX first: it opens it), FM, wide, the uplink tone and no receive tone, then the split (an
+		 * auto track: simplex on the downlink, no tones; the radio core refuses TX while it holds) */
 		static const subtone_t none = { TONE_NONE, 0 };
-		uint32_t rx = sat_tune_hz(s->down_hz, drx), tx = sat_tune_hz(s->up_hz, dtx);
+		uint32_t rx = sat_tune_hz(down, drx), tx = autot ? rx : sat_tune_hz(s->up_hz, dtx);
 		e.setup = false;
 		e.grace = 3;
 		radio_req_vfo_set(rx);
 		radio_req_mode(RADIO_MODE_FM);
 		radio_req_bandwidth(RADIO_BW_25K);
-		radio_req_tone(RADIO_TONE_TX, uplink_tone(s, false));
+		radio_req_tone(RADIO_TONE_TX, autot ? none : uplink_tone(s, false));
 		radio_req_tone(RADIO_TONE_RX, none);
 		radio_req_vfo_tx(tx);
 		e.rx_prev = e.tx_prev = 0;
@@ -457,16 +566,20 @@ static void track_service(int32_t now, const sat_look_t *l, bool vfo, uint32_t r
 	} else if (!vfo || rx_hz != e.rx_set || tx_hz != e.tx_set) {
 		if (vfo && rx_hz == e.rx_prev && tx_hz == e.tx_prev) {
 			retune(e.rx_set, e.tx_set, true);	/* the last retune didn't land (refused for a moment): again */
+		} else if (autot) {
+			auto_end(SAT_TRK_LEFT);	/* changed from elsewhere: the radio back where it was */
+			return;
 		} else {
 			track_end(SAT_TRK_LEFT);	/* changed by hand: the VFO is the user's again */
 			return;
 		}
 	} else {
-		uint32_t rx = sat_follow_hz(s->down_hz, drx, e.rx_set), tx = sat_follow_hz(s->up_hz, dtx, e.tx_set);
+		uint32_t rx = sat_follow_hz(down, drx, e.rx_set);
+		uint32_t tx = autot ? rx : sat_follow_hz(s->up_hz, dtx, e.tx_set);
 		if (rx != e.rx_set || tx != e.tx_set)
 			retune(rx, tx, false);
 	}
-	bool arm = want_arm && s->arm10 != 0;
+	bool arm = want_arm && s->arm10 != 0 && !autot;
 	if (arm != e.arm) {
 		e.arm = arm;
 		radio_req_tone(RADIO_TONE_TX, uplink_tone(s, arm));
@@ -478,14 +591,49 @@ static void track_service(int32_t now, const sat_look_t *l, bool vfo, uint32_t r
 	taskEXIT_CRITICAL();
 }
 
+/* Auto track waiting for the radio core's hold: false while it waits (or gave up) */
+static bool auto_wait(void)
+{
+	if (auto_phase() != AUTO_WAIT)
+		return true;
+	if (e.auto_wait > AUTO_WAIT_S) {
+		e.auto_wait--;		/* the rise's own second: its event goes first, the hold is looked at next */
+		return false;
+	}
+	if (radio_sat_held()) {
+		auto_st = (uint8_t)((auto_st & ~3u) | AUTO_ON);
+		taskENTER_CRITICAL();
+		view.track = e.track;
+		view.track_state = SAT_TRK_ON;
+		view.arm = false;
+		taskEXIT_CRITICAL();
+		if (!want_cancel)
+			ev_post(SAT_ALARM_TRACK, e.track, e.auto_el, 0);
+		return true;
+	}
+	if (--e.auto_wait == 0 || want_cancel) {
+		radio_req_sat_hold(false);	/* refused (busy) or too late: nothing was moved */
+		auto_st = AUTO_NONE;
+		want_cancel = false;
+		e.track = SAT_NONE;
+	}
+	return false;
+}
+
 void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, bool transmitting, bool light, uint32_t now_ms)
 {
 	bool looking = seen_any && now_ms - seen_ms < SEEN_MS;
 	bool busy = looking || e.track != SAT_NONE || want_track_new;	/* the screen or the tracking */
 	if (want_al_new)
 		alarm_request();
-	if (!busy && view.alarm.target == SAT_NONE)
+	if (want_cancel && auto_phase() == AUTO_ON && !transmitting) {
+		auto_end(SAT_TRK_OFF);	/* a key: the radio back where it was, at once */
+		busy = looking || want_track_new;
+	}
+	if (!busy && view.alarm.target == SAT_NONE) {
+		want_cancel = false;	/* nothing to cancel */
 		return;
+	}
 	if (now_ms - e.clock_ms >= (busy ? CLOCK_MS : LIVE_MS)) {
 		e.clock_ms = now_ms;
 		clock_update(now_ms);
@@ -510,9 +658,11 @@ void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, bool transmitting, bo
 				p->state = SAT_PASS_UNKNOWN;
 		}
 		taskEXIT_CRITICAL();
-		alarm_check(now);
-		if (!busy)
+		alarm_check(now, transmitting);
+		if (!busy && e.track == SAT_NONE)
 			return;		/* the alarm alone: no SGP4 */
+		if (e.track != SAT_NONE && !auto_wait())
+			return;		/* auto track: the radio core's hold not there yet */
 		uint8_t i = e.track != SAT_NONE ? e.track : want_focus;
 		sat_look_t l;
 		bool ok = i < sat_count && live_look(i, now_exact(now_ms), &l);
@@ -529,6 +679,8 @@ void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, bool transmitting, bo
 		if (e.track != SAT_NONE) {
 			if (ok)
 				track_service(now, &l, vfo, rx_hz, tx_hz, transmitting);
+			else if (auto_phase() != AUTO_NONE)
+				auto_end(SAT_TRK_OFF);
 			else
 				track_end(SAT_TRK_OFF);
 		}

@@ -677,3 +677,8 @@ __pycache__/
 !/tests/plus/test_allsearch_sm.inc
 # the release version the plus build carries (About, splash): tools/build_radiofoundry.py
 !/VERSION
+# satellites' ISS notifications and auto track: every pass, the radio core's hold (tools/plus_satauto.py)
+!/tools/plus_satauto.py
+!/integration/radiofoundry/sat/radio_sathold.inc
+!/tests/plus/test_sathold_radio.inc
+!/tests/plus/test_sat_set.c

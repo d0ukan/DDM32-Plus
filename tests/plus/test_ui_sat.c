@@ -19,8 +19,11 @@ static int32_t t0;			/* UTC (seconds since 2000) when the screen first asks */
 static uint32_t base_ms;		/* the sim time then (0: not yet) */
 static uint8_t focus_seen;
 static int track_calls, alarm_calls;
-static uint8_t al_lead, al_el;
+static uint8_t al_lead, al_el, al_opts;
+static bool fake_auto, fake_idle;	/* an auto track runs; the UI's last word on idle */
+static int cancels;
 static uint32_t soon_ms, aos_ms;	/* sim times the armed alarm is due */
+static uint32_t track_ms;		/* sim time an auto track's "tracking" event is due (0: none) */
 static int beeps_soon, beeps_aos;
 static uint8_t iss, so50, ao91, po101;
 
@@ -54,9 +57,10 @@ void sat_track(uint8_t idx)
 
 void sat_arm(bool on) { fv.arm = on; }
 
-void sat_alarm_set(uint8_t target, uint8_t lead, uint8_t min_el_deg)
+void sat_alarm_set(uint8_t target, uint8_t lead, uint8_t min_el_deg, uint8_t opts)
 {
 	alarm_calls++;
+	fv.alarm.opts = al_opts = opts;
 	fv.alarm.target = target;
 	fv.alarm.lead_min = al_lead = lead;
 	fv.alarm.min_el = al_el = min_el_deg;
@@ -78,6 +82,11 @@ bool sat_alarm_take(sat_alarm_event_t *out)
 		*out = (sat_alarm_event_t){ SAT_ALARM_SOON, fv.alarm.sat, fv.alarm.max_el, (int32_t)fv.alarm.lead_min * 60 };
 		return true;
 	}
+	if (track_ms && now >= track_ms) {
+		track_ms = 0;
+		*out = (sat_alarm_event_t){ SAT_ALARM_TRACK, iss, 47, 0 };
+		return true;
+	}
 	if (aos_ms && now >= aos_ms) {
 		aos_ms = 0;
 		*out = (sat_alarm_event_t){ SAT_ALARM_AOS, fv.alarm.sat, fv.alarm.max_el, 0 };
@@ -87,6 +96,10 @@ bool sat_alarm_take(sat_alarm_event_t *out)
 	}
 	return false;
 }
+
+void sat_ui_idle(bool idle) { fake_idle = idle; }
+bool sat_auto_on(void) { return fake_auto; }
+void sat_auto_cancel(void) { cancels++; fake_auto = false; }
 
 uint8_t aprs_iss_send(uint32_t hz) { return APRS_OK; }
 
@@ -124,7 +137,7 @@ static void fake_reset(bool clock)
 	focus_seen = SAT_NONE;
 	base_ms = 0;
 	track_calls = alarm_calls = 0;
-	soon_ms = aos_ms = 0;
+	soon_ms = aos_ms = track_ms = 0;
 	beeps_soon = beeps_aos = 0;
 	/* ui_sat.c's own state, as after power-on */
 	sel = 0;
@@ -132,6 +145,14 @@ static void fake_reset(bool clock)
 	alarm_page = false;
 	a_row = a_for = a_el = 0;
 	a_lead = 1;
+	a_every = false;
+	a_auto = 0;
+	note_loaded = false;
+	al_opts = 0;
+	fake_auto = fake_idle = false;
+	cancels = 0;
+	ui_svc_setting_set(UI_SET_SAT_NOTE, 0);
+	ui_svc_setting_set(UI_SET_SAT_AUTO, 0);
 }
 
 #define SATS "ok 6 down down down down down down down down ok "	/* Tools > Satellites */
@@ -145,6 +166,99 @@ typedef struct {
 	int lead, el;		/* with alarm: what it was armed with */
 	int soon, aos;		/* -1: not checked; else the tones asked for */
 } sat_flow_t;
+
+/* One flow of the checks below, from a fresh fake (prep: what to set after it) */
+static void auto_flow(const char *name, const char *setup, const char *script, const char *expect, int budget)
+{
+	flow_t f = { name, setup, script, expect, budget, false };
+	run_flow(&f, sim_geom_find("240x320i10x5"), SIM_MAP_M, "Plus DM32");
+}
+
+/* Every pass, auto track, the stored alarm at power on, the banner held back during TX, a key ending an auto track */
+static int auto_checks(void)
+{
+	int bad = 0;
+#define AUTO_CHECK(c, name) do { if (!(c)) { printf("FAIL %s: %s\n", name, #c); bad++; } } while (0)
+	const char *n;
+	/* The page's new rows */
+	fake_reset(true);
+	auto_flow("Sat alarm page: Every pass and Auto track rows", PAGE, "",
+		  "shows=Every_pass shows=Auto_track shows=Off_after_a_power_cycle", 0);
+	/* Every pass on the ISS (0 opens the page on the soonest, the ISS): armed with it, stored */
+	fake_reset(true);
+	auto_flow(n = "Sat every pass on the ISS", SATS, "0 down down down right ok",
+		  "toast=Armed_for_every_pass shows=Kept_across_power_cycles", 6);
+	AUTO_CHECK(fv.alarm.target == iss && al_opts == SAT_OPT_EVERY && al_lead == 5 && al_el == 0, n);
+	AUTO_CHECK(ui_svc_setting_get(UI_SET_SAT_NOTE) == 1, n);
+	/* Changed while armed (10 min, 20 deg): armed again and stored again */
+	fake_reset(true);
+	auto_flow(n = "Sat every pass changed while armed", SATS, "0 down down down right ok up up right down right right",
+		  "shows=10_min", 12);
+	AUTO_CHECK(al_lead == 10 && al_el == 20 && (al_opts & SAT_OPT_EVERY), n);
+	AUTO_CHECK(ui_svc_setting_get(UI_SET_SAT_NOTE) == (1 | (1 * 5 + 2) << 2), n);
+	/* Off: stored off */
+	fake_reset(true);
+	auto_flow(n = "Sat every pass off", SATS, "0 down down down right ok ok", "toast=Pass_alarm_off", 7);
+	AUTO_CHECK(fv.alarm.target == SAT_NONE && ui_svc_setting_get(UI_SET_SAT_NOTE) == 0, n);
+	/* Every pass with SO-50 in For: the ISS instead; SO-50 picked again turns Every pass off */
+	fake_reset(true);
+	auto_flow("Sat every pass picks the ISS", PAGE, "down down down right", "shows=ISS shows=On", 4);
+	fake_reset(true);
+	auto_flow(n = "Sat a satellite of its own: Every pass off", PAGE, "down down down right up up up right",
+		  "shows=SO-50 hides=Kept_across", 8);
+	AUTO_CHECK(!a_every, n);
+	/* Auto track APRS (Left from Off), stored; armed with it */
+	fake_reset(true);
+	auto_flow(n = "Sat auto track APRS", PAGE, "up left ok", "shows=APRS shows=Tracks_the_downlink,_RX", 3);
+	AUTO_CHECK(ui_svc_setting_get(UI_SET_SAT_AUTO) == SAT_AUTO_APRS, n);
+	AUTO_CHECK(al_opts == (SAT_AUTO_APRS << SAT_OPT_AUTO_SHIFT) && fv.alarm.target == so50, n);
+	fake_reset(true);
+	auto_flow(n = "Sat auto track APRS on the ISS", SATS, "0 up left", "shows=Tracks_ISS_145.825,_RX", 3);
+	fake_reset(true);
+	auto_flow(n = "Sat auto track on the ISS", SATS, "0 up right", "shows=Tracks_ISS_145.800,_RX", 3);
+	AUTO_CHECK(ui_svc_setting_get(UI_SET_SAT_AUTO) == SAT_AUTO_DOWN, n);
+	/* Stored Every pass (any satellite, 10 min, 30 deg) and auto track: armed at power on, on Home */
+	fake_reset(true);
+	ui_svc_setting_set(UI_SET_SAT_NOTE, 2 | (1 * 5 + 3) << 2);
+	ui_svc_setting_set(UI_SET_SAT_AUTO, SAT_AUTO_DOWN);
+	auto_flow(n = "Sat every pass armed at power on", "", "wait:500", "screen=home", 0);
+	AUTO_CHECK(alarm_calls == 1 && fv.alarm.target == SAT_ALARM_ANY && al_lead == 10 && al_el == 30, n);
+	AUTO_CHECK(al_opts == (SAT_OPT_EVERY | SAT_AUTO_DOWN << SAT_OPT_AUTO_SHIFT), n);
+	AUTO_CHECK(fake_idle, n);	/* Home, idle: an auto track may start */
+	/* Off Home (a menu): not idle */
+	fake_reset(true);
+	auto_flow(n = "Sat not idle in a menu", "", "ok wait:300", "", 1);
+	AUTO_CHECK(!fake_idle, n);
+	/* The warning while transmitting: held back (no tone, no banner) until the end */
+	fake_reset(true);
+	auto_flow(n = "Sat alarm during TX: held back", PAGE "ok long:back", "pttdown wait:1500", "screen=home", 1);
+	AUTO_CHECK(beeps_soon == 0 && soon_ms != 0 && !fake_idle, n);
+	fake_reset(true);
+	auto_flow(n = "Sat alarm after TX: shown", PAGE "ok long:back", "pttdown wait:1500 pttup wait:300",
+		  "screen=home banner=SO-50_in_5_min,_max_23" GLYPH_DEGREE, 1);
+	AUTO_CHECK(beeps_soon == 1, n);
+	/* Auto track started: "ISS tracking, max 47°", no second tone */
+	fake_reset(true);
+	track_ms = 1;
+	auto_flow(n = "Sat auto track banner", "", "wait:200", "screen=home banner=ISS_tracking,_max_47" GLYPH_DEGREE, 0);
+	AUTO_CHECK(beeps_soon == 0 && beeps_aos == 0, n);
+	/* A key while an auto track runs ends it, used for that (Home stays; no menu opened) */
+	fake_reset(true);
+	fake_auto = true;
+	auto_flow(n = "Sat a key ends an auto track", "", "ok", "screen=home toast=Auto_track_off:_radio_back", 1);
+	AUTO_CHECK(cancels == 1 && !fake_auto, n);
+	/* PTT too (it goes on to the radio, which refuses TX while it holds) */
+	fake_reset(true);
+	fake_auto = true;
+	auto_flow(n = "Sat PTT ends an auto track", "", "ptt:300", "screen=home", 1);
+	AUTO_CHECK(cancels == 1, n);
+	/* Without an auto track a key is the screen's as before */
+	fake_reset(true);
+	auto_flow(n = "Sat a key without an auto track", "", "ok", "hides=Auto_track_off", 1);
+	AUTO_CHECK(cancels == 0, n);
+#undef AUTO_CHECK
+	return bad;
+}
 
 int main(int argc, char **argv)
 {
@@ -247,9 +361,10 @@ int main(int argc, char **argv)
 		}
 		sat_fails += fails != before;
 	}
-	/* The layout check on the list (tracking, alarm armed) and on the page */
+	fails += auto_checks();
+	/* The layout check on the list (tracking, alarm armed) and on the page (Every pass, auto track APRS) */
 	static const char *const layouts[] = { SATS "ok wait:2500", PAGE "ok wait:2500", PAGE "left left ok wait:2500",
-					       SATS "down down down" };
+					       SATS "down down down", PAGE "down down down right up left ok wait:2500" };
 	for (unsigned i = 0; i < sizeof layouts / sizeof layouts[0]; i++) {
 		char err[300], issues[SIM_LAYOUT_MAX][160];
 		fake_reset(true);

@@ -8,12 +8,15 @@
  * Doppler, path ARISS; aprs_iss_send). The radio task does the math (sat_svc.c); this screen only draws its view.
  *
  * The pass alarm page: Up / Down a row, Left / Right its value (For: a satellite or any; Before AOS: 2, 5, 10 min;
- * Min. elevation: 0 .. 45 degrees; a change while armed arms it again), OK arms it or turns it off, Back the list.
- * When it is due (ui_sat_alarm, every UI tick on any screen): a tone and a banner. */
+ * Min. elevation: 0 .. 45 degrees; Every pass: armed again after each rise and kept across power cycles, for the ISS
+ * or any satellite; Auto track: Off, On (the downlink; the ISS 145.800) or APRS (the ISS 145.825), receive only, from
+ * the rise to the set; a change while armed arms it again), OK arms it or turns it off, Back the list. When it is due
+ * (ui_sat_alarm, every UI tick on any screen): a tone and a banner; a key ends an auto track (ui_sat_auto_key). */
 #include "config.h"
 #if CONFIG_SATELLITES
 #include <stdlib.h>
 #include "ui_nav.h"
+#include "ui_svc.h"
 #include "ui_screens.h"
 #include "fmt.h"
 #include "i18n.h"
@@ -27,12 +30,15 @@
 
 static uint8_t sel;
 static int16_t tz_min = 180;
-/* The pass alarm page: open, its row, what it shows (the alarm's own values once armed) */
-static bool alarm_page;
-static uint8_t a_row, a_for, a_lead = 1, a_el;
+/* The pass alarm page: open, its row, what it shows (the alarm's own values once armed); Every pass and Auto track
+ * (kept in the settings: UI_SET_SAT_NOTE / UI_SET_SAT_AUTO), and whether the stored alarm was armed at power on */
+static bool alarm_page, a_every, note_loaded;
+static uint8_t a_row, a_for, a_lead = 1, a_el, a_auto;
 static const uint8_t lead_min[] = { 2, 5, 10 };
 static const uint8_t min_el[] = { 0, 10, 20, 30, 45 };
-#define A_ROWS	3
+#define A_ROWS	5
+/* UI_SET_SAT_NOTE: bits 0-1 for whom (0 off, 1 the ISS, 2 any), bits 2-5 the lead and elevation, 0 = 5 min, 0 deg */
+enum { NOTE_OFF, NOTE_ISS, NOTE_ANY };
 
 static int32_t sort_key(const sat_view_t *v, uint8_t i)
 {
@@ -304,26 +310,88 @@ static bool armed(const sat_view_t *v)
 	return v->alarm.target != SAT_NONE;
 }
 
+static uint8_t iss_index(void)
+{
+	for (uint8_t i = 0; i < sat_count; i++)
+		if (is_iss(i))
+			return i;
+	return SAT_NONE;
+}
+
+/* Every pass is for the ISS or any satellite (what the settings can keep) */
+static bool every_ok(uint8_t target)
+{
+	return target == SAT_ALARM_ANY || is_iss(target);
+}
+
+/* The page's lead and elevation as the stored index (0 = 5 min, 0 deg) and back */
+static uint8_t plan_code(void)
+{
+	return (uint8_t)(((a_lead + 2u) % 3u) * 5u + a_el);
+}
+
+static void plan_take(uint8_t code)
+{
+	if (code > 14u)
+		code = 0;
+	a_lead = (uint8_t)((code / 5u + 1u) % 3u);
+	a_el = (uint8_t)(code % 5u);
+}
+
+/* What the settings keep for Every pass: off unless it is on (and armed) */
+static void note_store(bool on)
+{
+	uint8_t who = !on || !every_ok(a_for) ? NOTE_OFF : a_for == SAT_ALARM_ANY ? NOTE_ANY : NOTE_ISS;
+	int32_t v = who == NOTE_OFF ? 0 : (int32_t)(who | plan_code() << 2);
+	if (ui_svc_setting_get(UI_SET_SAT_NOTE) != v)
+		ui_svc_setting_set(UI_SET_SAT_NOTE, v);
+}
+
+static uint8_t alarm_opts(void)
+{
+	return (uint8_t)((a_every ? SAT_OPT_EVERY : 0u) | (uint8_t)(a_auto << SAT_OPT_AUTO_SHIFT));
+}
+
+/* At power on (the first UI tick): the stored Every pass alarm armed again, the page showing it */
+static void note_load(void)
+{
+	int32_t v = ui_svc_setting_get(UI_SET_SAT_NOTE), au = ui_svc_setting_get(UI_SET_SAT_AUTO);
+	note_loaded = true;
+	a_auto = au == SAT_AUTO_DOWN || au == SAT_AUTO_APRS ? (uint8_t)au : SAT_AUTO_OFF;
+	uint8_t who = (uint8_t)(v & 3), iss = iss_index();
+	if (who == NOTE_OFF || who > NOTE_ANY || (who == NOTE_ISS && iss == SAT_NONE))
+		return;
+	a_for = who == NOTE_ANY ? (uint8_t)SAT_ALARM_ANY : iss;
+	plan_take((uint8_t)((v >> 2) & 15));
+	a_every = true;
+	sat_alarm_set(a_for, lead_min[a_lead], min_el[a_el], alarm_opts());
+}
+
 static void alarm_open(const sat_view_t *v)
 {
 	alarm_page = true;
 	a_row = 0;
-	a_for = sel;
 	if (armed(v)) {
 		/* what is armed */
 		a_for = v->alarm.target;
+		a_every = (v->alarm.opts & SAT_OPT_EVERY) != 0;
 		for (uint8_t k = 0; k < sizeof lead_min; k++)
 			if (lead_min[k] == v->alarm.lead_min)
 				a_lead = k;
 		for (uint8_t k = 0; k < sizeof min_el; k++)
 			if (min_el[k] == v->alarm.min_el)
 				a_el = k;
+	} else {
+		a_for = sel;
+		a_every = false;
 	}
 }
 
+/* Armed (again) with the page's values; Every pass kept in the settings, anything else clears what they keep */
 static void alarm_arm(void)
 {
-	sat_alarm_set(a_for, lead_min[a_lead], min_el[a_el]);
+	sat_alarm_set(a_for, lead_min[a_lead], min_el[a_el], alarm_opts());
+	note_store(a_every);
 }
 
 static void __attribute__((noinline)) alarm_draw(int y, const sat_view_t *v)
@@ -331,8 +399,9 @@ static void __attribute__((noinline)) alarm_draw(int y, const sat_view_t *v)
 	char buf[40];
 	sbuf_t b;
 	const font_t *s = ui_layout.small, *m = ui_layout.medium;
-	int w = gfx_width(), rh = m->h + 6;
-	static const char *const labels[A_ROWS] = { TRN("For"), TRN("Before AOS"), TRN("Min. elevation") };
+	int w = gfx_width(), rh = m->h + 4;
+	static const char *const labels[A_ROWS] = { TRN("For"), TRN("Before AOS"), TRN("Min. elevation"),
+						    TRN("Every pass"), TRN("Auto track") };
 	for (uint8_t r = 0; r < A_ROWS; r++) {
 		bool focus = r == a_row;
 		if (focus)
@@ -346,13 +415,17 @@ static void __attribute__((noinline)) alarm_draw(int y, const sat_view_t *v)
 		} else if (r == 1) {
 			sb_u32(&b, lead_min[a_lead], 1);
 			sb_str(&b, TR(" min"));
-		} else {
+		} else if (r == 2) {
 			sb_deg(&b, min_el[a_el]);
+		} else if (r == 3) {
+			sb_str(&b, a_every ? TR("On") : TR("Off"));
+		} else {
+			sb_str(&b, a_auto == SAT_AUTO_APRS ? "APRS" : a_auto == SAT_AUTO_DOWN ? TR("On") : TR("Off"));
 		}
 		gfx_text(m, w - gfx_text_width(m, buf) - 2, ty, buf, fg);
 		y += rh;
 	}
-	y += 4;
+	y += 3;
 	const sat_alarm_t *a = &v->alarm;
 	sb_init(&b, buf, sizeof buf);
 	color_t c = ui_col.dim;
@@ -368,7 +441,7 @@ static void __attribute__((noinline)) alarm_draw(int y, const sat_view_t *v)
 		sb_chr(&b, ' ');
 		sb_deg(&b, a->max_el);
 		gfx_text(m, 0, y, buf, ui_col.rx);
-		y += m->h + 2;
+		y += m->h + 1;
 		sb_init(&b, buf, sizeof buf);
 		sb_str(&b, a->soon ? TR("Tone again at AOS") : TR("Tone at "));
 		if (!a->soon)
@@ -378,11 +451,16 @@ static void __attribute__((noinline)) alarm_draw(int y, const sat_view_t *v)
 		sb_alarm(&b, v);
 	}
 	gfx_text(s, 0, y, buf, c);
-	y += s->h + 2;
-	gfx_text(s, 0, y, TR("Off after a power cycle"), ui_col.dim);
-	if (v->cost_us) {
+	y += s->h + 1;
+	/* Kept across power cycles with Every pass (the settings), else RAM only; auto track: what it listens to */
+	gfx_text(s, 0, y, a_every ? TR("Kept across power cycles") : TR("Off after a power cycle"), ui_col.dim);
+	y += s->h + 1;
+	if (a_auto != SAT_AUTO_OFF) {
+		/* the ISS: its voice / SSTV or APRS frequency; another satellite (or any): its downlink */
+		gfx_text(s, 0, y, !is_iss(a_for) ? TR("Tracks the downlink, RX") : a_auto == SAT_AUTO_APRS ?
+			 TR("Tracks ISS 145.825, RX") : TR("Tracks ISS 145.800, RX"), ui_col.dim);
+	} else if (v->cost_us) {
 		/* the slowest propagation measured on this radio (the list's clock line has no room for it) */
-		y += s->h + 2;
 		sb_init(&b, buf, sizeof buf);
 		sb_str(&b, TR("SGP4 at most "));
 		sb_u32(&b, (v->cost_us + 50u) / 1000u, 1);
@@ -390,6 +468,32 @@ static void __attribute__((noinline)) alarm_draw(int y, const sat_view_t *v)
 		sb_u32(&b, (v->cost_us + 50u) / 100u % 10u, 1);
 		sb_str(&b, " ms");
 		gfx_text(s, 0, y, buf, ui_col.dim);
+	}
+}
+
+/* Left / Right on a row */
+static void alarm_change(bool up)
+{
+	if (a_row == 0) {
+		/* the satellites, then any; Every pass only for the ISS or any */
+		uint8_t n = (uint8_t)(sat_count + 1u), at = a_for < sat_count ? a_for : sat_count;
+		at = (uint8_t)((at + (up ? 1u : n - 1u)) % n);
+		a_for = at < sat_count ? at : (uint8_t)SAT_ALARM_ANY;
+		if (!every_ok(a_for))
+			a_every = false;
+	} else if (a_row == 1) {
+		a_lead = (uint8_t)((a_lead + (up ? 1u : sizeof lead_min - 1u)) % sizeof lead_min);
+	} else if (a_row == 2) {
+		a_el = (uint8_t)((a_el + (up ? 1u : sizeof min_el - 1u)) % sizeof min_el);
+	} else if (a_row == 3) {
+		a_every = !a_every;
+		if (a_every && !every_ok(a_for)) {
+			uint8_t iss = iss_index();
+			a_for = iss != SAT_NONE ? iss : (uint8_t)SAT_ALARM_ANY;	/* Every pass: the ISS (or any) */
+		}
+	} else {
+		a_auto = (uint8_t)((a_auto + (up ? 1u : 2u)) % 3u);
+		ui_svc_setting_set(UI_SET_SAT_AUTO, a_auto);
 	}
 }
 
@@ -407,17 +511,7 @@ static bool alarm_key(const input_event_t *ev, const sat_view_t *v)
 		return true;
 	}
 	if ((press && (ev->action == ACT_NAV_LEFT || ev->action == ACT_NAV_RIGHT)) || ev->action == ACT_ENC_STEP) {
-		bool up = ev->action == ACT_ENC_STEP ? ev->value > 0 : ev->action == ACT_NAV_RIGHT;
-		if (a_row == 0) {
-			/* the satellites, then any */
-			uint8_t n = (uint8_t)(sat_count + 1u), at = a_for < sat_count ? a_for : sat_count;
-			at = (uint8_t)((at + (up ? 1u : n - 1u)) % n);
-			a_for = at < sat_count ? at : (uint8_t)SAT_ALARM_ANY;
-		} else if (a_row == 1) {
-			a_lead = (uint8_t)((a_lead + (up ? 1u : sizeof lead_min - 1u)) % sizeof lead_min);
-		} else {
-			a_el = (uint8_t)((a_el + (up ? 1u : sizeof min_el - 1u)) % sizeof min_el);
-		}
+		alarm_change(ev->action == ACT_ENC_STEP ? ev->value > 0 : ev->action == ACT_NAV_RIGHT);
 		if (armed(v))
 			alarm_arm();	/* a change while armed: armed again with it */
 		ui_dirty();
@@ -425,11 +519,12 @@ static bool alarm_key(const input_event_t *ev, const sat_view_t *v)
 	}
 	if (ev->action == ACT_SELECT && ev->gesture == GESTURE_PRESS) {
 		if (armed(v)) {
-			sat_alarm_set(SAT_NONE, 0, 0);
+			sat_alarm_set(SAT_NONE, 0, 0, 0);
+			note_store(false);
 			ui_toast(TR("Pass alarm off"));
 		} else {
 			alarm_arm();
-			ui_toast(TR("Pass alarm armed"));
+			ui_toast(a_every ? TR("Armed for every pass") : TR("Pass alarm armed"));
 		}
 		ui_dirty();
 		return true;
@@ -437,12 +532,20 @@ static bool alarm_key(const input_event_t *ev, const sat_view_t *v)
 	return false;
 }
 
-/* Every UI tick (ui_app.c), on any screen: an alarm due sounds its tone here and gives its text for the banner */
+/* Every UI tick (ui_app.c), on any screen: the stored alarm armed at the first; whether an auto track may take the
+ * radio now (Home or this screen, nothing on air, no scan); an alarm due sounds its tone here and gives its text for
+ * the banner, none while transmitting (it waits for the end, then says the time left) */
 const char *ui_sat_alarm(void)
 {
 	static char text[40];
 	sat_alarm_event_t ev;
-	if (!sat_alarm_take(&ev) || ev.sat >= sat_count)
+	if (!note_loaded)
+		note_load();
+	const radio_view_t *rv = ui_view();
+	bool tx = rv->state == RS_TX || rv->state == RS_TX_DENIED;
+	sat_ui_idle(rv->state == RS_IDLE && rv->scan == 0 && !rv->hotspot &&
+		    (ui_depth() == 0 || ui_frame()->scr == SCR_SATELLITES));
+	if (tx || !sat_alarm_take(&ev) || ev.sat >= sat_count)
 		return NULL;
 	sbuf_t b;
 	sb_init(&b, text, sizeof text);
@@ -451,12 +554,31 @@ const char *ui_sat_alarm(void)
 		sb_str(&b, TR(" in "));
 		sb_u32(&b, (uint32_t)(ev.in_s < 60 ? 1 : (ev.in_s + 30) / 60), 1);
 		sb_str(&b, TR(" min, max "));
+	} else if (ev.kind == SAT_ALARM_TRACK) {
+		sb_str(&b, TR(" tracking, max "));	/* the rise's tone sounded a second ago */
 	} else {
 		sb_str(&b, TR(" AOS now, max "));
 	}
 	sb_deg(&b, ev.max_el);
-	radio_req_beep(ev.kind == SAT_ALARM_SOON ? BEEP_TOT_WARN : BEEP_SCAN_HOLD);
+	if (ev.kind != SAT_ALARM_TRACK)
+		radio_req_beep(ev.kind == SAT_ALARM_SOON ? BEEP_TOT_WARN : BEEP_SCAN_HOLD);
 	return text;
+}
+
+/* From ui_app_key before anything else: while an auto track runs, a key press (or PTT / monitor down, which go on
+ * to the radio: it refuses TX meanwhile) ends it, the radio back where it was; the key is used for that */
+bool ui_sat_auto_key(const input_event_t *ev)
+{
+	if (!sat_auto_on())
+		return false;
+	bool pass = ev->action == ACT_PTT || ev->action == ACT_MONITOR;
+	if (pass ? ev->gesture != GESTURE_DOWN :
+	    ev->gesture != GESTURE_PRESS && ev->gesture != GESTURE_LONG && ev->action != ACT_ENC_STEP)
+		return !pass;		/* the rest of a key that ended it (its release, repeats) */
+	sat_auto_cancel();
+	ui_toast(TR("Auto track off: radio back"));
+	ui_dirty();
+	return !pass;
 }
 
 /* --- The screen --- */
