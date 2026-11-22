@@ -1166,6 +1166,15 @@ def prepare_rfports_cc_any(transform):
     view parts of #583 (digital monitor's any_cc / both_ts, rx_cc / rx_ts). Ours in addition: the dynamic threshold
     goes back on when the engine halts (FM, the native P25 / YSF receiver: the chip as Classic leaves it)."""
     transform('drivers/modem/hrc7000/hrc7000_dmr.c', [
+        ('static void chip_rx_restart(hrc7000_dmr_t *e)\n{\n',
+         ON + 'static void set_cc(hrc7000_dmr_t *e, uint8_t cc);\n#endif\n'
+         'static void chip_rx_restart(hrc7000_dmr_t *e)\n{\n'),
+        ('\tclear_requests(e);\t// the restart discards what they would report; a stale one keeps its source dead\n#endif\n',
+         '\tclear_requests(e);\t// the restart discards what they would report; a stale one keeps its source dead\n'
+         '\t// RadioFoundry d1a7ae4: the receive code and cc_opt / b12 as the filter says, as upstream\'s restart does. A filter\n'
+         '\t// set while transmitting (set_cc_filter waits for TXS_IDLE) takes effect at the restart that ends the TX\n'
+         '\tif (e->tx_state == TXS_IDLE && !BS_ACTIVE(e)) {\n'
+         '\t\tset_cc(e, e->cc_filter >= 0 ? (uint8_t)e->cc_filter : e->cc_cur);\n\t}\n#endif\n'),
         ('#define CC_HOLD_TICKS\t\t167u\t// ... held 5 s after the last burst\n',
          '#define CC_HOLD_TICKS\t\t167u\t// ... held 5 s after the last burst\n' + ON +
          '// RadioFoundry d1a7ae4 (#583): no filter is LOCAL_CC cc_opt 1 (the two scan figures above go unused)\n'
@@ -1203,7 +1212,10 @@ def prepare_rfports_cc_any(transform):
          '\t\te->st.cc_scan_steps++;\n\t}\n#endif\n}\n'),
         ('\te->running = false;\n\tif (was_tx) {\n\t\tev_simple(e, DMR_EV_TX_DONE, e->tx_ts, tick_arg(e));\n\t}\n\tunlock(e);\n',
          '\te->running = false;\n' + ON +
-         '\t// DDM32 Plus: out of DMR the chip keeps the dynamic sync threshold Classic writes at init (cc_opt 1 cleared it)\n'
+         '\t// DDM32 Plus: out of DMR the chip is left as Classic leaves it: LOCAL_CC cc_opt 0, then the dynamic sync threshold\n'
+         '\t// (set_cc\'s order: never cc_opt 1 with b12 set). The native P25 / YSF receiver saves and restores RF_MODE but\n'
+         '\t// never touches LOCAL_CC\n'
+         '\tw(e, C7_LOCAL_CC, e->cc_cur);\n'
          '\tif (!(r(e, C7_RF_MODE) & RF_MODE_SYNC_AUTO)) {\n\t\tw(e, C7_RF_MODE, r(e, C7_RF_MODE) | RF_MODE_SYNC_AUTO);\n\t}\n'
          '#endif\n'
          '\tif (was_tx) {\n\t\tev_simple(e, DMR_EV_TX_DONE, e->tx_ts, tick_arg(e));\n\t}\n\tunlock(e);\n'),
@@ -1232,7 +1244,8 @@ def prepare_rfports_cc_any(transform):
         ('\tCHECK(REG(C7_LOCAL_CC) == 7);\n\tcount_kind(0xFF, NULL);\n}\n',
          '\tCHECK(REG(C7_LOCAL_CC) == 7);\n\tcount_kind(0xFF, NULL);\n}\n#endif\n'),
         ('\ttest_cc_scan();\n',
-         ON + '\ttest_cc_any();\n#else\n\ttest_cc_scan();\n#endif\n\ttest_search_probe_cc1();\n'),
+         ON + '\ttest_cc_any();\n\ttest_native_after_search();\n\ttest_cc_filter_after_tx();\n#else\n\ttest_cc_scan();\n'
+         '#endif\n\ttest_search_probe_cc1();\n'),
     ])
 
 
@@ -1275,7 +1288,43 @@ static void test_cc_any(void)
 	hrc7000_dmr_set_cc_filter(&eng, -1);
 	CHECK(!(REG(C7_RF_MODE) & SYNC_AUTO));
 	hrc7000_dmr_halt(&eng);
-	CHECK(REG(C7_RF_MODE) == 0x03269860u);
+	CHECK(REG(C7_RF_MODE) == 0x03269860u && REG(C7_LOCAL_CC) == 7u);	// cc_opt 0 too (never cc_opt 1 with b12)
+	count_kind(0xFF, NULL);
+}
+
+// The native P25 / YSF entry after a DMR search (dm32_native.inc: set_mode(DMR) runs the engine, hrc_dmr_leave halts
+// it; the native receiver saves / restores RF_MODE, never LOCAL_CC): the chip as Classic leaves it, cc_opt 0 and b12 set
+static void test_native_after_search(void)
+{
+	setup();
+	REG(C7_RF_MODE) = 0x03269860u;
+	hrc7000_dmr_run(&eng);			// the search's stack: no filter
+	hrc7000_dmr_set_cc_filter(&eng, -1);
+	CHECK((REG(C7_LOCAL_CC) & LOCAL_CC_ANY) && !(REG(C7_RF_MODE) & SYNC_AUTO));
+	hrc7000_dmr_halt(&eng);			// hrc_dmr_leave
+	CHECK(!(REG(C7_LOCAL_CC) & LOCAL_CC_ANY) && REG(C7_RF_MODE) == 0x03269860u);
+	hrc7000_dmr_run(&eng);			// back to DMR, still no filter: cc_opt 1 again
+	CHECK((REG(C7_LOCAL_CC) & LOCAL_CC_ANY) && !(REG(C7_RF_MODE) & SYNC_AUTO));
+	count_kind(0xFF, NULL);
+}
+
+// A change from no filter to one while transmitting (set_cc_filter waits for TXS_IDLE): the filter, cc_opt 0 and the
+// dynamic threshold come with the restart that ends the transmission
+static void test_cc_filter_after_tx(void)
+{
+	setup();
+	REG(C7_RF_MODE) = 0x03269860u;
+	hrc7000_dmr_run(&eng);
+	hrc7000_dmr_set_cc_filter(&eng, -1);
+	CHECK(hrc7000_dmr_tx_begin(&eng, DMR_TIMING_OWN, 1, DMR_ACCESS_IMPOLITE));
+	hrc7000_dmr_set_cc_filter(&eng, 7);
+	CHECK(REG(C7_LOCAL_CC) & LOCAL_CC_ANY);	// not while keyed
+	hrc7000_dmr_tx_abort(&eng);
+	for (int i = 0; i < 6 && hrc7000_dmr_is_transmitting(&eng); i++) {
+		tick(true);
+	}
+	CHECK(!hrc7000_dmr_is_transmitting(&eng));
+	CHECK(REG(C7_LOCAL_CC) == 7u && REG(C7_RF_MODE) == 0x03269860u);
 	count_kind(0xFF, NULL);
 }
 #endif
@@ -1284,9 +1333,14 @@ static void test_cc_any(void)
 // (radio_sm.c dmr_configure while dmrs_on: any_cc), so the modem has no filter (cc_filter -1). The chip modelled as
 // RadioFoundry describes it (modem-hrc7000.md "Any color code", d1a7ae4): it deframes, and gives the receive slot
 // interrupts, only for a code LOCAL_CC lets through (its own with cc_opt 0, every code with cc_opt 1). Before the
-// probe the sweep went past a strong carrier's skirt: slot timing with nothing usable deframed (the 12.5 kHz step
-// below the channel), which moved the pin's scan off CC1. Then the probe's retune and 1.1 s (DMRS_PROBE_LONG_MS) of a
-// CC1 direct mode sender, one burst every other slot. The pin hears nothing of it; with the RF fixes every burst
+// probe: slot timing with nothing usable deframed, standing for what the sweep met around a strong carrier (its skirt
+// steps; the scan's step timer is not reset by the sweep's retunes, so the 270 ms here add up over several 75-100 ms
+// steps), which moved the pin's scan off CC1. Then the probe's retune and 1.1 s (DMRS_PROBE_LONG_MS) of a CC1 direct
+// mode sender, one burst every other slot. The pin hears nothing of it; with the RF fixes every burst.
+// Honestly: a regression test of the hypothesis (a code scan stuck off the sender's code; with the port cc_opt 1
+// survives the probe's rx_restart) on a chip model taken from upstream's description, not a reproduction of the
+// radio's failure: that the scan stood on a wrong code during the owner's probes is not measured (docs/plus.md, the
+// read-only live sample)
 static bool chip_passes(uint8_t cc)
 {
 	uint32_t l = REG(C7_LOCAL_CC);
@@ -1300,7 +1354,7 @@ static void test_search_probe_cc1(void)
 	hrc7000_dmr_run(&eng);		// a DMR channel on CC1 before (cc_cur 1), then the search's stack: no filter
 	hrc7000_dmr_set_cc_filter(&eng, 1);
 	hrc7000_dmr_set_cc_filter(&eng, -1);
-	for (int i = 0; i < 9; i++) {	// the skirt: timing, unusable slots only
+	for (int i = 0; i < 9; i++) {	// timing, unusable slots only (the skirt steps, added up)
 		tick(false);
 		deframe((rti(0, 0, 1, 0, 0, 0) & ~3u) | 1u);
 	}
