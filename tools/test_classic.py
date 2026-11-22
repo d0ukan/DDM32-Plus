@@ -897,6 +897,16 @@ def main():
          '-DCONFIG_P25_TXNAC=1','-DCONFIG_LANG_TR=1','-I'+str(host),
          str(APP/'core/dpmr/dpmr.c'),str(APP/'core/radio/vfox.c')],cwd=host)
     run([OUT/'test_ui_mwdetail'],cwd=host)
+    # DDM32 Plus the heard call's talk group on the multi-watch rows and dual watch's panes (tests/plus/test_ui_mwheard.c,
+    # tools/plus_mwfix.py seventh round): a DMR call on a letter in a pane and outside, private, 4 and 6 letters, a P25 VFO
+    # letter (the P25 worker's caller stubbed), normal and Large text, with the layout checks
+    argv_mh=[str(ROOT/'tests/plus/test_ui_mwheard.c') if a==str(ROOT/'tests/plus/test_ui_vfox.c') else a for a in argv]
+    argv_mh[argv_mh.index('-o')+1]=str(OUT/'test_ui_mwheard')
+    run([*argv_mh,'-DCONFIG_P25_ANY=1','-DCONFIG_DEV_TX=1','-DCONFIG_YSF=1','-DCONFIG_NXDN=1','-DCONFIG_DPMR=1',
+         '-DCONFIG_NAC_DEC=1','-DCONFIG_DMR_ANY=1','-DCONFIG_MULTI_WATCH=1','-DCONFIG_VFO_MODES=1','-DCONFIG_P25_NATIVE=1',
+         '-DCONFIG_P25_TXNAC=1','-DCONFIG_CALL_LOG=1','-DCONFIG_P25_CALLER=1','-DCONFIG_P25_EXTRAS=1','-DCONFIG_LANG_TR=1','-I'+str(host),
+         str(APP/'core/dpmr/dpmr.c'),str(APP/'core/radio/vfox.c')],cwd=host)
+    run([OUT/'test_ui_mwheard'],cwd=host)
     # DM32 Plus separate RX / TX NAC: the editor's and VFO settings' rows (tests/plus/test_ui_p25nac.c)
     p25nac.ui(argv,ROOT/'tests/plus/test_ui_vfox.c',['-DCONFIG_P25_ANY=1','-DCONFIG_DEV_TX=1','-DCONFIG_YSF=1',
         '-DCONFIG_NXDN=1','-DCONFIG_DPMR=1','-DCONFIG_NAC_DEC=1','-DCONFIG_DMR_ANY=1','-DCONFIG_MULTI_WATCH=1',

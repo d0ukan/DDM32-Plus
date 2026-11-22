@@ -28,6 +28,12 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   the other timeslot.
 - Searches: a strong signal that raises several channels around it is probed on a real channel, never 6.25 kHz off,
   and a signal standing out of a raised band is probed instead of being taken as the noise floor.
+- Dual / triple / quad ... watch: Home now shows the talk group of the call being heard on a watch letter (owner report on
+  beta.7: it showed nothing, the single channel did). The text that fills in after a call starts was never refreshed on
+  the letters in the two panes; DMR callers keep the group in their short form ("TG 91", private "Pvt 3101234");
+  one-line rows (6 letters, Large text) draw it left of the RX pill; NXDN and dPMR letters name their caller instead of
+  "FM signal". The group shown is the heard call's, not the channel's setting (RX group list Any, NAC Any). Docs:
+  docs/plus.md "Multi-watch: the heard talk group"; radio test rows MW27-MW29.
 
 ## v1.0.0-beta.7 (candidate, not released yet)
 

@@ -546,6 +546,70 @@ static bool __attribute__((noinline)) mw_tick(ui_dual_t *d, const radio_view_t *
 
 // ---- Home (ui_screens.c draws it: ui_draw_home_dual) ----
 
+// DDM32 Plus (docs/plus.md "Multi-watch: the heard talk group"): the talk group of the call heard on the letter the radio
+// is tuned to, in a row's short form: "TG 101" (DMR, P25, NXDN), "Pvt 2345" (a private call: its source), a YSF
+// callsign, "ENC" (NXDN encrypted). From the receiver's own report, not the channel's settings (RX group list Any,
+// NAC Any: the call may be another group). Empty while none is known yet
+static void mw_heard_short(const radio_view_t *v, uint8_t mode, char *out, size_t len)
+{
+	sbuf_t b;
+	uint32_t id = 0;
+	bool group = true;
+	out[0] = '\0';
+	sb_init(&b, out, len);
+	if (mode == RADIO_MODE_DMR) {
+#if CONFIG_DMR
+		group = v->dmr.call.group;
+		id = group ? v->dmr.call.dst : v->dmr.call.src;
+#endif
+	}
+#if CONFIG_YSF
+	else if (codeplug_mode_ysf(mode)) {
+		static char ysf_src[11], ysf_dst[11];	// static: the UI task's stack is tight
+		p25_lab_ysf_caller(ysf_src, ysf_dst);
+		sb_str(&b, ysf_src);
+		return;
+	}
+#endif
+#if CONFIG_P25_CALLER
+	else if (codeplug_mode_p25(mode)) {
+		uint16_t tg = 0;
+		uint32_t src = 0;
+		p25_lab_p25_caller(&tg, &src);
+		id = tg;
+#if CONFIG_P25_EXTRAS
+		if (p25_lab_p25_kind(NULL) & P25_LAB_PRIVATE) {
+			group = false;
+			id = src;
+		}
+#endif
+	}
+#endif
+#if CONFIG_NXDN
+	else if (codeplug_mode_nxdn(mode)) {
+		static radio_nxdn_caller_t nc;	// static: the UI task's stack is tight
+		radio_nxdn_caller(&nc);
+		if (nc.active && nc.encrypted) {
+			sb_str(&b, "ENC");
+			return;
+		}
+		group = nc.group;
+		id = nc.active ? (group ? nc.destination : nc.source) : 0;
+	}
+#endif
+	(void)v;
+	if (id == 0)
+		return;
+	if (group) {
+		sb_str(&b, "TG ");
+		sb_u32(&b, id, 1);
+	} else {	// the caller's ID gives way last to the bare word
+		sb_str(&b, TEXT_ALT_OPEN "Pvt ");
+		sb_u32(&b, id, 1);
+		sb_str(&b, TEXT_ALT_NEXT "Pvt" TEXT_ALT_CLOSE);
+	}
+}
+
 uint8_t ui_dual_ring(void) { return mw_ring() ? mw_cnt : 0; }
 
 void ui_dual_ring_row(uint8_t k, const radio_view_t *v, ui_mw_row_t *out)
@@ -584,6 +648,8 @@ void ui_dual_ring_row(uint8_t k, const radio_view_t *v, ui_mw_row_t *out)
 	out->busy = !out->rx && (v->dual_busy & MW_BIT(k)) != 0;
 	out->heard_ms = mw_heard[k];
 	out->caller = out->rx ? d->caller : NULL;
+	if (out->rx && v->state == RS_RX)
+		mw_heard_short(v, out->mode, out->heard, sizeof out->heard);
 }
 
 // The ring's period with nothing heard, and what a P25 channel with a signal but no voice adds (0: no P25 letter)
