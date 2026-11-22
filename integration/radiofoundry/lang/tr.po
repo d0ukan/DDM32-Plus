@@ -6561,7 +6561,3 @@ msgstr "{Altılı izleme|Altılı}"
 #: core/ui/ui_mwatch.inc
 msgid " on"
 msgstr " açık"
-
-#: core/ui/ui_mwatch.inc
-msgid "Emergency: select a DMR letter"
-msgstr "Acil durum: DMR harfi seçin"

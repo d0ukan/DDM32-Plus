@@ -159,9 +159,7 @@ def prepare_mwfix(transform, install):
          '// DDM32 Plus: the watch named by its letters (in the ring, else Settings > Watch channels): form 0 "Triple watch",\n'
          '// 1 the strip\'s "TRIPLE", 2 the Quick tile\'s "Triple watch" | "Triple"; translated\n'
          'const char *ui_watch_name(uint8_t form);\n'
-         'const char *ui_watch_on_text(void);\t// "Triple watch on" (2: "Dual watch on")\n'
-         '// The emergency key while it runs: the watch ends on the selected letter when that is DMR (true), else a toast\n'
-         'bool ui_dual_emergency_ok(void);\n'),
+         'const char *ui_watch_on_text(void);\t// "Triple watch on" (2: "Dual watch on")\n'),
     ])
     transform('core/ui/ui_screens.c', [
         ('SCX_WORD(TR("DUAL"))', 'SCX_WORD(UI_WATCH_WORD)', 2),
@@ -223,20 +221,54 @@ def prepare_mwfix(transform, install):
          '#endif\n'
          '\tif (scan_on(&sm->scan) && !sm->ptt && sm->view.state != RS_TX && sm->view.state != RS_TX_DENIED && !sm->hotspot) {\n'),
     ])
-    # S2: the DMR emergency (the alarm, the hot mic, its target) works on the channel the radio is on, which in the ring
-    # is whichever letter it is on now: the emergency key ends the watch on the selected letter when that is DMR, else
-    # it is refused with a toast (ui_mwatch.inc ui_dual_emergency_ok; without multi-watch the weak one lets it through)
-    transform('core/ui/ui_svc_emergency.c', [
-        ('\tif (dmr_emergency_start()) {\n\t\treturn true;\n\t}\n',
+    # ---- Third review round (branch mwfix3) ----
+    # S1 / S2: the DMR emergency (its alarm, hot mic and talk target are the channel the radio is on: in the ring the
+    # letter it happens to be on) from the user's key, the lone worker or SOS: the radio core ends the watch on the
+    # selected letter when it is DMR, else on the first DMR letter A..F, before the emergency module takes the start
+    # (the same tick: no ordering with the request queue); with no DMR letter the watch goes on and the emergency fails
+    # as on any FM channel. M2: one test for "the receiver is on this letter" (dual_ref_here), shared with
+    # radio_sm_dual_keeps (radio_mwatch.inc)
+    transform('core/ui/ui_dual.c', [
+        ('__attribute__((noinline)) bool ui_dual_tick(const radio_view_t *v, uint32_t now)\n',
+         '#if CONFIG_MULTI_WATCH\nstatic void mw_adopt(ui_dual_t *d, uint8_t k);\t// ui_mwatch.inc\n#endif\n'
+         '__attribute__((noinline)) bool ui_dual_tick(const radio_view_t *v, uint32_t now)\n'),
+        ('\tif (stop_asked && v->scan != 3 /* SCAN_DUAL */) {\n\t\tstop(false);\n',
+         '\tif (stop_asked && v->scan != 3 /* SCAN_DUAL */) {\n'
          '#if CONFIG_MULTI_WATCH\n'
-         '\tif (!ui_dual_emergency_ok()) {\n\t\treturn false;\t// DDM32 Plus: not on a letter it can\'t be for\n\t}\n'
+         '\t\tif (sel_asked)\n'
+         '\t\t\tmw_adopt(d, v->dual_sel);\t// DDM32 Plus: the radio chose the letter (an emergency): the toast names it\n'
          '#endif\n'
-         '\tif (dmr_emergency_start()) {\n\t\treturn true;\n\t}\n'),
-        ('bool ui_svc_emergency(bool on)\n{\n',
-         '#if CONFIG_MULTI_WATCH\n'
-         '// DDM32 Plus: dual / multi-watch\'s say (ui_mwatch.inc); this one where the UI has no watch (tests, other builds)\n'
-         '__attribute__((weak)) bool ui_dual_emergency_ok(void)\n{\n\treturn true;\n}\n'
-         '#endif\n'
-         'bool ui_svc_emergency(bool on)\n{\n'),
+         '\t\tstop(false);\n'),
     ])
-
+    transform('core/dmr/dmr_emergency.h', [
+        ('bool dmr_emergency_start(void);\nvoid dmr_emergency_cancel(void);\n',
+         'bool dmr_emergency_start(void);\n'
+         '// DDM32 Plus: a start asked for, not taken yet (the next dmr_emergency_tick takes it)\n'
+         'bool dmr_emergency_start_pending(void);\n'
+         'void dmr_emergency_cancel(void);\n'),
+    ])
+    transform('core/dmr/dmr_emergency.c', [
+        ('\tif (ok) {\n\t\tmbox.start = true;\n\t\tmbox.cancel = false;\n\t}\n\tunlock();\n\treturn ok;\n}\n',
+         '\tif (ok) {\n\t\tmbox.start = true;\n\t\tmbox.cancel = false;\n\t}\n\tunlock();\n\treturn ok;\n}\n\n'
+         'bool dmr_emergency_start_pending(void)\n{\n\tlock();\n\tbool p = mbox.start;\n\tunlock();\n\treturn p;\n}\n'),
+    ])
+    transform('core/radio/radio_sm.c', [
+        ('static bool dual_here(const radio_sm_t *sm, uint8_t i)\n{\n\tconst radio_dual_ref_t *r = &sm->dual[i];\n',
+         '// DDM32 Plus: the receiver is on the channel (or VFO) r names; dual_here and radio_sm_dual_keeps share it\n'
+         'static bool dual_ref_here(const radio_sm_t *sm, const radio_dual_ref_t *r)\n{\n'),
+        ('\t\t\t!sm->view.vfo && r->zone == sm->view.zone_index && r->pos == sm->view.zone_pos;\n}\n',
+         '\t\t\t!sm->view.vfo && r->zone == sm->view.zone_index && r->pos == sm->view.zone_pos;\n}\n\n'
+         'static bool dual_here(const radio_sm_t *sm, uint8_t i)\n{\n\treturn dual_ref_here(sm, &sm->dual[i]);\n}\n'),
+        ('static void emergency_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n',
+         '#if CONFIG_MULTI_WATCH\nstatic bool dual_running(const radio_sm_t *sm);\n'
+         'static void mw_emergency(radio_sm_t *sm, uint32_t now_ms);\t// radio_mwatch.inc\n#endif\n'
+         'static void emergency_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n'
+         '#if CONFIG_MULTI_WATCH\n'
+         '\tif (dual_running(sm) && dmr_emergency_start_pending()) {\n'
+         '\t\tif (sm->ptt || sm->view.state == RS_TX) {\n'
+         '\t\t\treturn;\t// DDM32 Plus: PTT first (the start waits), then on a DMR letter, not the transmitting one\n'
+         '\t\t}\n'
+         '\t\tmw_emergency(sm, now_ms);\t// DDM32 Plus: on a DMR letter of the watch, before the start is taken\n'
+         '\t}\n'
+         '#endif\n'),
+    ])
