@@ -100,6 +100,8 @@ static void formatter(void)
 	c.p25_tg = 12;
 	expect_detail("YSF", &c, UI_DETAIL_WIDE, 0, false, "DG-ID 12");
 	expect_detail("YSF", &c, UI_DETAIL_TIGHT, 0, false, "DG12");
+	expect_detail("YSF", &c, UI_DETAIL_TALK_ONLY, 0, false, "");	/* no YSF transmitter: its DG-ID is what it hears */
+	expect_detail("YSF", &c, UI_DETAIL_REST, 0, false, "DG-ID 12");
 	c.p25_tg = 0;
 	expect_detail("YSF Any", &c, UI_DETAIL_WIDE, 0, false, "DG-ID Any");
 	c.mode = RADIO_MODE_NXDN;
@@ -109,8 +111,8 @@ static void formatter(void)
 	c.mode = RADIO_MODE_DPMR;
 	c.p25_tg = 8;	/* colour code 7, stored + 1 */
 	expect_detail("dPMR", &c, UI_DETAIL_WIDE, 0, false, "CC 7");
-	expect_detail("dPMR", &c, UI_DETAIL_TALK_ONLY, 0, false, "CC 7");
-	expect_detail("dPMR", &c, UI_DETAIL_REST, 0, false, "");
+	expect_detail("dPMR", &c, UI_DETAIL_TALK_ONLY, 0, false, "");	/* receive only: not a talk target */
+	expect_detail("dPMR", &c, UI_DETAIL_REST, 0, false, "CC 7");
 	memset(&c, 0, sizeof c);
 	c.mode = RADIO_MODE_DMR;
 	c.color_code = 1;
@@ -178,7 +180,12 @@ static void start(const char *n)
 static void ring4(void)
 {
 	start("ring of 4: DMR and FM details");
-	run("mwatch:4 quick 7 wait:2500");
+	run("mwatch:4 quick 7 wait:300");
+	if (!turkish)	/* the watch named by its letters (Turkish: Dörtlü izleme, its letters outside the capture) */
+		run("expect:toast=Quad_watch_on");
+	run("wait:2200");
+	if (!turkish && !large)
+		run("expect:shows=QUAD");
 	run("expect:mwn=4");
 	if (!large)
 		run("expect:shows=CC1_TS1 expect:shows=3100 expect:shows=T100.0");
@@ -188,7 +195,10 @@ static void ring4(void)
 static void ring6(void)
 {
 	start("ring of 6");
-	run("mwatch:6 quick 7 wait:2500");
+	run("mwatch:6 quick 7 wait:300");
+	if (!turkish)
+		run("expect:toast=6x_watch_on");
+	run("wait:2200");
 	run("expect:mwn=6");
 	layout();
 }
@@ -212,13 +222,28 @@ static void pair_p25(void)
 	run("mwatch:2 quick 7 wait:500 abkey vfokey quick 4 4 ctx down down down ok 9 9 ok down ok 1 1 1 0 ok back back "
 	    "wait:2500");
 	run("expect:vmode=P25 expect:mwn=0");
+	if (!turkish && !large)
+		run("expect:shows=DUAL");
 	if (!large)
 		run("expect:shows=TG_99 expect:hides=VFO_FM");
 	layout();
 }
 
+/* The verifier's S1: no new selection while transmitting (the radio drops it then, so the PTT pill would move away
+ * from where PTT goes): refused with a toast, the pill stays; after the transmission it moves */
+static void sel_during_tx(void)
+{
+	start("selection during TX");
+	run("mwatch:4 quick 7 wait:2500 pttdown wait:200 abkey wait:200");
+	run("expect:mwsel=A");
+	if (!turkish)
+		run("expect:toast=Not_while_transmitting");
+	run("pttup wait:1500 abkey wait:300 expect:mwsel=B");
+	layout();
+}
+
 typedef void (*case_fn)(void);
-static const case_fn all[] = { ring4, ring6, ring_p25, pair_p25 };
+static const case_fn all[] = { ring4, ring6, ring_p25, pair_p25, sel_during_tx };
 
 int main(void)
 {

@@ -1486,7 +1486,7 @@ msgstr "B bulunduğun kanal: başka seç"
 
 #: core/ui/ui_dual.c
 msgid "Dual watch on"
-msgstr "Dual watch açık"
+msgstr "Çift izleme açık"
 
 #: core/ui/ui_dual.c
 msgid "Watch off: on "
@@ -3882,7 +3882,7 @@ msgstr "Alınan Bölge/Kanal"
 
 #: core/ui/ui_menus.c
 msgid "Dual watch"
-msgstr "Dual watch"
+msgstr "Çift izleme"
 
 #: core/ui/ui_menus.c
 msgid "Network"
@@ -5326,7 +5326,7 @@ msgstr "{Monitor|MON}"
 
 #: core/ui/ui_screens.c
 msgid "{Dual watch|Dual}"
-msgstr "{Dual watch|Dual}"
+msgstr "{Çift izleme|Çift}"
 
 #: core/ui/ui_screens.c
 msgid "Width"
@@ -6414,3 +6414,57 @@ msgstr ">99 sa"
 #: core/ui/ui_battgraph.c
 msgid " h "
 msgstr " sa "
+
+# --- branch mwfix: the watch named by its letters (tools/plus_mwfix.py, ui_mwatch.inc) ---
+
+#: core/ui/ui_mwatch.inc
+msgid "Triple watch"
+msgstr "Üçlü izleme"
+
+#: core/ui/ui_mwatch.inc
+msgid "Quad watch"
+msgstr "Dörtlü izleme"
+
+#: core/ui/ui_mwatch.inc
+msgid "5x watch"
+msgstr "Beşli izleme"
+
+#: core/ui/ui_mwatch.inc
+msgid "6x watch"
+msgstr "Altılı izleme"
+
+#: core/ui/ui_mwatch.inc
+msgid "TRIPLE"
+msgstr "ÜÇLÜ"
+
+#: core/ui/ui_mwatch.inc
+msgid "QUAD"
+msgstr "DÖRTLÜ"
+
+#: core/ui/ui_mwatch.inc
+msgid "5X"
+msgstr "BEŞLİ"
+
+#: core/ui/ui_mwatch.inc
+msgid "6X"
+msgstr "ALTILI"
+
+#: core/ui/ui_mwatch.inc
+msgid "{Triple watch|Triple}"
+msgstr "{Üçlü izleme|Üçlü}"
+
+#: core/ui/ui_mwatch.inc
+msgid "{Quad watch|Quad}"
+msgstr "{Dörtlü izleme|Dörtlü}"
+
+#: core/ui/ui_mwatch.inc
+msgid "{5x watch|5x}"
+msgstr "{Beşli izleme|Beşli}"
+
+#: core/ui/ui_mwatch.inc
+msgid "{6x watch|6x}"
+msgstr "{Altılı izleme|Altılı}"
+
+#: core/ui/ui_mwatch.inc
+msgid " on"
+msgstr " açık"

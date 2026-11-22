@@ -3652,7 +3652,7 @@ Large text):
 | Where | Before | Now |
 |---|---|---|
 | Single channel, the chips row of a P25 / YSF / NXDN / dPMR channel | FM's "No tone 12.5k High SQ3" | `NAC $293/659 TG 42` (the owner's B: `NAC Any>$293/659 TG 1`), `DG-ID 12`, `RAN 5`, `CC 7`, then the power and squelch where they fit; tight `NAC$293/659 TG42`. FM (tones) and DMR (CC, TS, talk group) rows had theirs already; the VFO has them on its own row (round 15) |
-| Dual watch panes (2 letters), a P25 / YSF / NXDN / dPMR pane | row 2 the frequency, row 3 "No tone 12.5k"; a P25 VFO pane said "VFO FM" | as a DMR pane: row 2 what PTT talks to (`TG 42`, `DG-ID 12`, `RAN 5`, `CC 7`), row 3 the frequency and the NAC (`145.5000 MHz  NAC Any>$293/659`) |
+| Dual watch panes (2 letters), a P25 / YSF / NXDN / dPMR pane | row 2 the frequency, row 3 "No tone 12.5k"; a P25 VFO pane said "VFO FM" | P25 as a DMR pane: row 2 what PTT talks to (`TG 42`), row 3 the frequency and the NAC (`145.5000 MHz  NAC Any>$293/659`); YSF / NXDN / dPMR (receive only) the frequency on row 2 and `DG-ID 12`, `RAN 5`, `CC 7` on row 3 |
 | Multi-watch rows (3..6), line 2 | `P25 145.5000` | `P25 145.5000 NAC Any>$293/659 TG 1`, tight `...NACAny>$293/659 TG1`; then the frequency and the tight details (`467.375 CC1 TS1 TG3100`), the mode and the tight details (the selected row, beside its PTT pill: `DMR CC1 TS1 TG3100`), the tight details alone, last the mode and frequency as before. FM `T88.5 R100.0` / `T88.5` / `No tone`; DMR `CC1 TS1 TG 91` (Any `CC* TS*`, a private talk target `ID 1234`); YSF `DG-ID 12`, NXDN `RAN 5`, dPMR `CC 7`. A VFO letter's row follows its VFO as it is now (before, the mode it had when it became a VFO) |
 | Large text | | unchanged: one line per letter / pane, the name only |
 
@@ -3664,11 +3664,28 @@ dual watch with a P25 VFO pane; English and Turkish, normal and Large text, the 
 `test_ui_mwatch.c` unchanged; the single channel's chips row is covered by the formatter only (the simulator has no
 P25 channel to put on Home). Radio rows HD1-HD4.
 
+**Review round** (an independent check of the two commits above found these; fixed on the same branch):
+
+| # | Found | Fix |
+|---|---|---|
+| B1 | **A refused PTT became an unstoppable P25 transmission**: the radio core keys by itself (the 1750 Hz burst, the DMR emergency hot mic, VOX, cross-band: `ptt_down`) and on a P25 letter refuses it (TXDENY_MODE) but sets `sm->ptt`; the native side took `sm->ptt` as its PTT (`scan_allows`, the take's `live_tx_pending`), keyed P25 on the selected letter and, the release never reaching it, held it until the time-out (never with the time-out off) | `native_lab.c` `native_ptt`: set and cleared only by its own PTT branch; only it lets the native receiver take a letter for PTT, arms a transmission or passes `eligible`; a native transmission ends as soon as `native_ptt` or `sm->ptt` goes; while the radio core holds PTT itself the native side leaves the view (its TX denied) alone |
+| S1 | The PTT pill and the radio's selected letter could disagree: during TX the radio drops a selection (RREQ_DUAL / RREQ_MWATCH) but the UI moved the pill anyway (the keys, talk back) | `apply()` refuses a new selection while TX / TX denied ("Not while transmitting", the pill stays); `mw_tick` asks the radio again for the pill's letter after a transmission if they still differ (once a second at most); talk back waits through TX denied too |
+| S2 | The 1750 Hz burst checked the mode of the letter the ring was on, then `dual_talk` keyed the selected one: 1750 Hz on a DMR (or P25) carrier | `tone_burst` tunes the selected letter first (`dual_to_selected`), then checks it is FM |
+| S2b | SSTV send keyed the letter the ring was on; DOTA and cross-band ended the watch there; DOTA's "Current channel" frequency was the ring's letter | SSTV tunes the selected letter first; DOTA and cross-band end the watch on the selected letter; DOTA's "Current channel" source has no frequency while a watch runs (another source must be picked) |
+| S3 | Listening only: P25 frames without voice for us within 2.5 s (a late entry still waiting for its link control) were given back with the **8 s** cooldown, so most of a call of ours could be skipped | frames without voice: taken again after 2 s (the zone scan's retry); the whole cooldown only when it happens again within 10 s (another talk group's conversation). Host model, ring of 3 / 6, the call starting while the receiver is elsewhere: late entry heard after 250 / 450 ms; frames 1.5 s before voice: 1.5 s; frames 3 s without voice then voice: 4.8 / 5.0 s (before: over 10 s, failing) |
+| M2 | A DMR row showed only the channel's contact; YSF / NXDN / dPMR values were shown as talk targets although this build can't transmit them | a DMR letter in a pane shows the talk target PTT uses there now (a target for now, Call back: dual watch's snapshot); YSF DG-ID, NXDN RAN, dPMR CC are shown as what the channel receives (pane row 3, not row 2's "PTT talks to") |
+| M3 | With 2 letters, talk back moves the PTT pill and now P25 really goes out there | a short beep with the "Talk back on B" toast (the pill moves with it); the setting's default unchanged (off), the owner decides |
+
+**Named by its letters** (owner 2026-11-22): the watch is Dual / Triple / Quad / 5x / 6x watch (Turkish Çift / Üçlü / Dörtlü / Beşli / Altılı izleme) by the ring's letters (else Settings > Watch channels): the status strip's word (DUAL, TRIPLE, QUAD, 5X, 6X; ÇİFT, ÜÇLÜ, DÖRTLÜ, BEŞLİ, ALTILI, where it fits), Quick settings tile 7 ("Quad watch" / "Quad"), Tools' row, the # screen's title, the toast when it starts ("Quad watch on" / "Dörtlü izleme açık"); its end says "Watch off: on C" as before. The settings rows keep their names ("Dual watch delay" and "talk back", "Watch channels", the key function "Dual/multi-watch"). The Turkish "Dual watch" entries are now "Çift izleme".
+
+Host tests added: the burst and the hot mic from every letter of the owner's A / B / C and every ring position, and with a P25 call holding B, the time-out off (no native transmission, the burst only on an FM letter, nothing left on the air; the hot-mic cases fail with the code before); a selection asked during TX (radio side), the UI's refusal and the pill moving after it (`test_ui_mwdetail.c`); RS_RX left at the give back; the listen-only cases above (the 3 s case fails with the 8 s cooldown); the zone scan's frames-without-voice rule (`tests/classic/test_scan.inc`: 2 s, then 8 s); the names (EN toasts and strip words; the layout checks in EN and TR, normal and Large text).
+
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
-radio task 728 B free, UI 184 B, as before: the radio task's deepest path is still the P25 search's give back):
+radio task 728 B free (720 after the review round), UI 184 B: the radio task's deepest path is still the P25 search's give back):
 
 | | FLASH B | RAM B (free) |
 |---|---:|---:|
 | `ddm25` dc6376d | 857,584 | 209,856 (1,600) |
 | the TX target fix | 858,176 (+592) | 209,856 (1,600; the one new flag sits in padding) |
 | Home's details | 859,524 (+1,348) | 209,888 (1,568; +32 B, the 1,500 B floor kept) |
+| review round and the names | 860,584 (+1,060) | 209,904 (1,552; +16 B: the # screen's title) |

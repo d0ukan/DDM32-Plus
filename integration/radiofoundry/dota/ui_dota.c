@@ -113,8 +113,8 @@ static uint32_t src_hz(uint8_t s)
 	const channel_t *c = &ui_view()->ch;
 	if (s == FS_DEFAULT)
 		return DOTA_DEFAULT_HZ;
-	if (s == FS_CHANNEL)
-		return c->rx_hz == c->tx_hz && !c->rx_only && ui_xband_refusal(c->rx_hz) == NULL ? c->rx_hz : 0;
+	if (s == FS_CHANNEL)	/* not in dual / multi-watch: the view's channel is the letter the ring is on now */
+		return ui_view()->scan != 3 /* SCAN_DUAL */ && c->rx_hz == c->tx_hz && !c->rx_only && ui_xband_refusal(c->rx_hz) == NULL ? c->rx_hz : 0;
 	return s == FS_LAST ? last_hz : rq.hz;
 }
 

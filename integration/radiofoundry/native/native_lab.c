@@ -47,6 +47,10 @@ static bool live_enabled, live_rx_pending, live_tx_pending, live_restore_pending
 #if CONFIG_P25_CHANNELS
 static int live_owner(void);
 static bool channel_selected, channel_handoff;
+/* DDM32 Plus: PTT pressed for the native transmitter (its own PTT branch below), not any sm->ptt: the radio core also
+ * sets sm->ptt for its own keying (a tone burst, the emergency hot mic, VOX, cross-band) and refuses it on a P25
+ * letter; that must never key P25 here, and a native transmission ends as soon as this or sm->ptt goes */
+static bool native_ptt;
 static uint8_t channel_denial;
 static uint32_t channel_tx_ms;
 static void channel_view(radio_sm_t *sm)
@@ -61,6 +65,7 @@ static void channel_view(radio_sm_t *sm)
     uint32_t p25=p25_lab_p25_caller(NULL,NULL);
     if(p25!=p25_seen) { p25_seen=p25;sm->serial++; }
 #endif
+    if(sm->ptt && !native_ptt && !live_owner()) return;  /* the radio core's own keying (or its refusal) shows */
     radio_state_t state=channel_denial && sm->ptt ? RS_TX_DENIED :
         live_owner() && (test.state==NT_ARMED || test.state==NT_TX || test.state==NT_DRAIN) ? RS_TX :
         p25_lab_channel_receiving() ? RS_RX : RS_IDLE;
@@ -130,7 +135,7 @@ static bool scan_allows(radio_sm_t *sm)
 #if CONFIG_DUAL_WATCH
     /* DDM32 Plus: PTT on the selected letter of dual watch / the ring: the native transmitter takes it whatever the
      * ring does there (a quiet stop, the settle after a give back, a cooldown), as on a single channel */
-    if(sm->ptt && sm->scan.kind==SCAN_DUAL && !radio_sm_dual_away(sm,false,0)) return true;
+    if(native_ptt && sm->scan.kind==SCAN_DUAL && !radio_sm_dual_away(sm,false,0)) return true;
 #endif
     /* Just given back: the radio retunes the FM path and the scan reads the channel again before a retake,
      * so a carrier that is still there (the call goes on) is taken again and one that is gone lets it move on */
@@ -176,7 +181,13 @@ static void scan_give_back(radio_sm_t *sm)
             cool=again?SCAN_P25_COOLDOWN_MS:SCAN_P25_RETRY_MS;
             cause=&scan_n.quiet;
         } else if(now-scan_taken_ms<SCAN_P25_NO_VOICE_MS) return;
-        else cool=SCAN_P25_COOLDOWN_MS;
+        else if(scan_sync_ms && !(scan_key(sm)==scan_skip_pos &&
+                (int32_t)(now-scan_skip_until)<(int32_t)SCAN_P25_AGAIN_MS)) {
+            /* DDM32 Plus: P25 frames but no voice for us yet (a late entry still waiting for its link control, or
+             * another talk group): taken again after the short pause, so a call of ours isn't skipped for 8 s; the
+             * whole cooldown when it happens again */
+            cool=SCAN_P25_RETRY_MS;
+        } else cool=SCAN_P25_COOLDOWN_MS;
         if(sm->ptt || live_owner()) return;
         (*cause)++;
         if(cause==&scan_n.quiet) scan_quiet=true;
@@ -417,7 +428,7 @@ static bool __attribute__((noinline)) trunk_service(radio_sm_t *sm)
     if(voice_owner || test.owned || p25_lab_busy())return false;    /* the worker is still letting go */
     trunk_owned=trunk_release=trunk_moving=false;
     channel_selected=channel_handoff=false;
-    live_restore_pending=false;channel_denial=0;sm->ptt=false;
+    live_restore_pending=false;channel_denial=0;sm->ptt=native_ptt=false;
     p25_lab_set_trunk(0);
     return true;    /* the channel again */
 }
@@ -529,8 +540,8 @@ static void channel_service(radio_sm_t *sm)
         if(!p25_lab_set_channel(ch->p25_nac,codeplug_p25_tx_nac(ch),ch->p25_tg,ch->p25_id,ch->p25_squelch==1))return;
         channel_selected=live_enabled=live_rx_pending=true;
         /* DDM32 Plus: PTT already held (pressed before the take, e.g. on a letter of the ring): it keys now */
-        live_tx_pending=sm->ptt && !channel_denial;
-        if(!sm->ptt)channel_denial=0;
+        live_tx_pending=native_ptt && !channel_denial;
+        if(!native_ptt)channel_denial=0;
 #if CONFIG_P25_ANY
         selected_rx_note(ch);
 #endif
@@ -539,7 +550,10 @@ static void channel_service(radio_sm_t *sm)
         scan_voice_ms=scan_sync_ms=0;scan_n.takes+=scan_owned;
 #endif
     }
+    if(native_ptt && !sm->ptt) native_ptt=false;   /* the radio core let go of PTT (power off, a request) */
+    if(!native_ptt) live_tx_pending=false;
     if(channel_selected){
+        if(live_owner() && !native_ptt) p25_lab_live_up();    /* no PTT for it: the transmission ends */
         if(live_owner() && test.owned && sm->view.tot_s &&
            (uint32_t)(hal_millis()-channel_tx_ms)>=sm->view.tot_s*1000u) {
             channel_denial=TXDENY_TIMEOUT;
@@ -567,7 +581,7 @@ void native_lab_init(void) {
 #if CONFIG_DEV_TX
     live_enabled=live_rx_pending=live_tx_pending=live_restore_pending=false;
 #if CONFIG_P25_CHANNELS
-    channel_selected=channel_handoff=false;channel_denial=0;channel_tx_ms=0;
+    channel_selected=channel_handoff=native_ptt=false;channel_denial=0;channel_tx_ms=0;
 #if CONFIG_P25_SCAN
     scan_owned=scan_release=scan_quiet=scan_carrier=scan_after_tx=false;scan_stop_seen=0;
     scan_taken_ms=scan_skip_until=scan_settle_until=scan_voice_ms=scan_sync_ms=0;scan_skip_pos=0;
@@ -636,7 +650,7 @@ static int eligible(const radio_sm_t *sm)
     if(channel_selected) {
         if(!board.native_modem || updater() || sm->hotspot || v->power_off || !battery_ok())return 0;
         if(test.config.mode==NT_TRANSMIT)
-            return sm->ptt && radio_sm_tx_check(sm)==TXDENY_NONE && v->ch.tx_hz==test.config.frequency_hz;
+            return native_ptt && sm->ptt && radio_sm_tx_check(sm)==TXDENY_NONE && v->ch.tx_hz==test.config.frequency_hz;
         return channel_rx_hz(sm)==test.config.frequency_hz;
     }
 #endif
@@ -676,7 +690,7 @@ static void live_next(radio_sm_t *sm)
         native_lab_voice_release(sid);
 #if CONFIG_P25_CHANNELS
         /* DDM32 Plus: a P25 transmission refused while PTT is held shows as refused (until release), not as nothing */
-        if(channel_selected && sm->ptt && !channel_denial) channel_denial=TXDENY_BUSY;
+        if(channel_selected && native_ptt && !channel_denial) channel_denial=TXDENY_BUSY;
 #endif
     }
     if (!tx && rx &&
@@ -812,7 +826,7 @@ int native_lab_request(radio_sm_t *sm, const radio_req_t *r)
     /* PTT never keys while following a trunked system (receive only): denied as on an RX-only channel, the
      * following goes on */
     if(r->type==RREQ_PTT && (p25tk_on() || trunk_owned)) {
-        sm->ptt=r->arg!=0;
+        sm->ptt=native_ptt=r->arg!=0;
         channel_denial=sm->ptt?TXDENY_RX_ONLY:0;
         if(channel_selected)channel_view(sm);
         return 1;
@@ -862,10 +876,10 @@ int native_lab_request(radio_sm_t *sm, const radio_req_t *r)
         /* DDM32 Plus: PTT noted before the channel is looked at, so a letter of the ring is taken for it (scan_allows)
          * and a take that comes later keys at once */
         bool down=r->arg && !sm->ptt;
-        if(down) { channel_denial=radio_sm_tx_check(sm);sm->ptt=true; }
+        if(down) { channel_denial=radio_sm_tx_check(sm);sm->ptt=native_ptt=true; }
         if(!channel_selected && codeplug_mode_p25(sm->view.ch.mode)) channel_service(sm);
         if(!r->arg) {
-            sm->ptt=false;live_tx_pending=false;channel_denial=0;
+            sm->ptt=native_ptt=false;live_tx_pending=false;channel_denial=0;
             p25_lab_live_up();
             if(live_owner() && test.state==NT_ARMED)nt_stop(&test,test.session,NT_USER_STOP);
 #if CONFIG_P25_SCAN
@@ -889,8 +903,8 @@ int native_lab_request(radio_sm_t *sm, const radio_req_t *r)
     }
     if(channel_selected || channel_handoff) {
         if(r->type==RREQ_POWER_OFF) {
-            sm->ptt=false;channel_denial=0;p25_lab_live_up();
-        } else if(sm->ptt || live_owner())return 1;
+            sm->ptt=native_ptt=false;channel_denial=0;p25_lab_live_up();
+        } else if(native_ptt || live_owner())return 1;
         return channel_let_go(sm);
     }
 #endif

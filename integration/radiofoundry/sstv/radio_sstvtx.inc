@@ -43,6 +43,12 @@ static void sstvtx_start(radio_sm_t *sm, uint8_t mode, uint32_t now_ms)
 	char call[RADIO_CWID_CALL_MAX + 1];
 	if (sstvtx_phase != SSTVTX_IDLE)
 		return;
+#if CONFIG_DUAL_WATCH
+	/* Dual / multi-watch: the selected letter (the one with PTT), never the letter the ring is on (docs/plus.md
+	 * "The TX target"); the watch ends there when it keys, as before */
+	if (dual_running(sm) && !sm->ptt && sm->view.state != RS_TX && !sm->hotspot)
+		dual_to_selected(sm, now_ms);
+#endif
 	bool busy = sm->hotspot || sm->ptt || sm->view.state == RS_TX || sm->view.state == RS_TX_DENIED || dota_on() ||
 		    xband_on();
 #if CONFIG_APRS

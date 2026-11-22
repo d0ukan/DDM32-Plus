@@ -7,9 +7,9 @@
 //   P25      NAC $293/659 TG 42        NAC$293/659 TG42       TG 42                      NAC $293/659
 //            (RX NAC Any with a TX NAC of its own: NAC Any>$293/659)
 //   DMR      CC1 TS1 TG 91             CC1 TS1 TG91           TG 91 (private: ID 1234)   CC1 TS1  (Any: CC* TS*)
-//   YSF      DG-ID 12                  DG12                   DG-ID 12
-//   NXDN     RAN 5                     RAN5                   RAN 5
-//   dPMR     CC 7                      CC7                    CC 7
+//   YSF      DG-ID 12                  DG12                                              DG-ID 12 (receive only)
+//   NXDN     RAN 5                     RAN5                                              RAN 5
+//   dPMR     CC 7                      CC7                                               CC 7
 //   FM       T88.5 R100.0              T88.5                                             T88.5 R100.0 (No tone)
 
 // Channel ch packed for a row: a, b, c as ui_sb_detail reads them (DMR: the caller adds the talk target to b, c)
@@ -96,9 +96,10 @@ void ui_sb_detail(sbuf_t *b, const ui_detail_t *d, uint8_t form)
 		if (talk)
 			sb_chr(b, ' ');
 	}
-	if (!talk)
+	// The P25 talk group (what PTT talks to); the YSF DG-ID, the NXDN RAN, the dPMR colour code (stored + 1) are what
+	// they receive (no transmitter for them in this build: never shown as a talk target); 0 is Any
+	if (!(p25 || (CONFIG_YSF_TX && codeplug_mode_ysf(m)) ? talk : rest))
 		return;
-	// The P25 talk group, the YSF DG-ID, the NXDN RAN, the dPMR colour code (stored + 1); 0 is Any
 	sb_str(b, p25 ? "TG" : codeplug_mode_ysf(m) ? (tight ? "DG" : "DG-ID") : codeplug_mode_nxdn(m) ? "RAN" : "CC");
 	sb_str(b, gap);
 	if (d->b == 0)

@@ -16,6 +16,10 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   Any>$293/659 TG 1"), YSF DG-ID, NXDN RAN, dPMR colour code on the single channel's chips row; dual watch panes of
   those modes name the talk group and NAC as DMR panes do (a P25 VFO pane no longer says "VFO FM"); the multi-watch
   rows add the NAC and TG, DMR colour code / timeslot / talk group, or the FM tones, in the form that fits.
+- The watch is named by its letters: Dual, Triple, Quad, 5x, 6x watch (Çift, Üçlü, Dörtlü, Beşli, Altılı izleme) on
+  the status bar, Quick settings, Tools, the # screen and its toast. In dual / multi-watch the 1750 Hz burst, the
+  emergency hot mic, VOX and SSTV send act on the letter with PTT and never key P25 by themselves; a new letter can't
+  be selected while transmitting; a P25 call of ours is no longer skipped for 8 s when its voice comes late.
 - Satellites: ISS notifications and auto track. The pass alarm page gains "Every pass" (the ISS or any satellite:
   every qualifying pass announced with the beeps and banner before and at AOS, armed again by itself and kept across
   power cycles) and "Auto track" (Off / On / APRS): at AOS, when the radio is idle on Home or the Satellites screen, it
