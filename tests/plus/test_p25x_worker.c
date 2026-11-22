@@ -312,6 +312,27 @@ int main(void)
     CHECK(played_frames==18u && muted_frames==18u);
     report("protected LC in an LDU1: that superframe muted (as before)",before);
 
+    /* A receive starts without the last call's talkgroup (multi-watch: the old one showed on another letter before the
+     * new call's first link control): over noise only, nothing is known, the kind is gone too */
+    before=failures;
+    lc_group(lc1,0x00,202,77285);
+    build_call(0x293,202,lc1,lc1);
+    execute(0x293,0,0);
+    lines();
+    CHECK(p25_lab_p25_caller(NULL,NULL)!=0);
+    memset(stream,0,sizeof stream);stream_bits=0;add_noise(600);make_records();
+    clock_ms=depth=turn=0;callback=NULL;maximum_ms=rec_count*30u+3000u;
+    CHECK(p25_lab_set_channel(0x293,0x293,0,0,1));
+    CHECK(p25_lab_channel_rx(433500000u));
+    if(!setjmp(finished))worker_fn(NULL);
+    {
+        uint16_t tg=1;uint32_t src=1;
+        p25_lab_p25_caller(&tg,&src);
+        CHECK(tg==0 && src==0 && p25_lab_p25_kind(&target)==0 && target==0);
+        CHECK(p25_lab_p25_caller_line(home,sizeof home,false)==0 && p25_lab_p25_caller_line(pane,sizeof pane,true)==0);
+    }
+    report("a new receive over noise: the last call's talkgroup, source and kind are gone",before);
+
     printf("P25 extras worker: %u failures\n",failures);
     return failures?1:0;
 }

@@ -4194,6 +4194,44 @@ radio task 728 B free (720 after the review round, 716 after the second), UI 184
 | third review (on `ddm25` ab6afc3: 865,552 / 208,568) | 865,808 (+256) | 208,568 (2,888; +0 B) |
 | fourth review (same base) | 865,884 (+332 on the base, +76 this round) | 208,568 (2,888; +0 B) |
 | fifth review (on `ddm25` 151a533: 867,420 / 208,576) | 867,536 (+116) | 208,576 (2,880; +0 B) |
+## Multi-watch: the heard talk group (branch `mwtg`)
+
+Owner report 2026-11-22 on the beta.7 candidate: in dual / triple / quad ... watch Home does not say which talk group a
+call is on (the single channel's caller line does). The rows' second line already showed a caller, so the cause was
+in how that text got there, not in the drawing alone:
+
+| # | Cause | Fix |
+|---|---|---|
+| 1 | The watch's caller text (`d->caller`, what a ring row draws) was copied from the receiving pane only when the receiving pane changed, i.e. at the start of the call, when the receiver has not named the caller yet ("DMR call", "P25 call", or the talk group of the call before). It was never refreshed while the call went on. A letter outside the panes (C..F) had its own refresh, so it worked there: the owner's A / B were the broken ones | `ui_dual.c` tick (`tools/plus_mwfix.py` seventh round): the watch's caller follows the heard pane's text every tick |
+| 2 | DMR callers: the shorter alternate dropped the talk group first ("Joe Smith TG 91" then "Joe Smith"), so a row or pane too narrow for both showed the name only | `caller_text`: "Joe Smith TG 91" then "TG 91"; a private call "Joe Smith to you" then "Pvt 3101234" (the caller's ID) |
+| 3 | NXDN and dPMR letters said "FM signal" while receiving | `native_caller`: NXDN "NXDN 1234 > TG 101" then "TG 101" (private: "Pvt 1234", encrypted "NXDN ENC 1234"), dPMR the single channel's own caller line |
+
+What each view shows now (the HEARD call, the receiver's own report, not the channel's settings: RX group list Any or
+NAC Any can hear another group; the channel's details come back when the call has ended):
+
+| View | While a call comes in |
+|---|---|
+| Multi-watch rows (3..6 letters), two lines per row | line 2, green: the caller as before (DMR `K1ABC Joe TG 91`, or `TG 91` when narrow; private `... to you` or `Pvt 3101234`; P25 `TG 101 ID 77285 NAC $293/659`, tight `TG101 ID77285`; YSF `YSF TA1ABC > ALL`; NXDN `NXDN 1234 > TG 101`). With no caller text, the short group alone |
+| Multi-watch rows, one line per row (6 letters on a small display, Large text) | the short group `TG 101` / `Pvt 2345` (a private call `Pvt 2345`, `Pvt` alone where the ID does not fit; YSF: the callsign, NXDN encrypted: `ENC`) in green left of the RX / PTT pill; the name gives way to it (`ui_mwatch_draw.inc`) |
+| Dual watch panes (2 letters) | row 2 of the pane, as before, now with the DMR group kept in the short form and with NXDN / dPMR callers |
+| Dual watch, Large text | unchanged: the letters and names only (no second line) |
+
+The heard group is the one the receiver last named (`p25_lab_p25_caller`, `radio_nxdn_caller`, the DMR call). A P25
+receive now starts with the last call's talk group, source and kind cleared (`receive_run`, p25_lab.c; before, they were
+never cleared, so a new call on another letter showed the old TG until its first link control): until that arrives a
+row says "P25 call" and no TG. Checked by `tests/plus/test_p25x_worker.c` (a receive over noise after a call). A zero
+ID is never drawn ("TG 0", "Pvt 0"); "Pvt" / NXDN / dPMR texts are translated ("Ozel"). After the call: the row's "Heard
+7s ago" and the channel details, as before; the single channel's own hang time is not repeated on a row.
+The native P25 receive path (`native_lab.c`) needed no change: it fills `p25_lab_p25_caller` as for the single channel;
+the watch view only read it too late.
+
+RAM about +72 B static (the row's 20 B, the NXDN / YSF scratch its short form reads; 2,840 to 2,768 B free); FLASH 96.55 %, RAM free 2,768 B
+(floor 1,500). Host tests: `tests/plus/test_ui_mwheard.c` (a DMR call on A in a pane whose group arrives after the start
+(fails with the code before), on C outside the panes, private, 6 letters, dual watch, a P25 VFO letter with a heard
+group other than the channel's; normal and Large text, the simulator's layout checks). Not host-tested: NXDN / dPMR / YSF
+letters through the UI (the formatter code compiles in the same test build), the real P25 worker's timing. Radio rows
+MW27-MW29 in [plus-radio-test.md](plus-radio-test.md).
+
 ## Upstream RadioFoundry fixes (`CONFIG_RF_FIXES`, branch `rfports`)
 
 Our RadioFoundry pin is `dfbaf20c`; upstream (MIT, The RadioFoundry Authors) is 194 commits ahead

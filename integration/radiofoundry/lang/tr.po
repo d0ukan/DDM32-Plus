@@ -6590,3 +6590,11 @@ msgstr " açık"
 #: core/ui/ui_sstvtx.c core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
 msgid "Stop the scan or watch first"
 msgstr "Önce taramayı veya izlemeyi durdurun"
+
+#: core/ui/ui_dual.c core/ui/ui_mwatch.inc
+msgid "Pvt "
+msgstr "Özel "
+
+#: core/ui/ui_mwatch.inc
+msgid "Pvt"
+msgstr "Özel"

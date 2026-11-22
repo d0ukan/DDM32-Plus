@@ -1117,6 +1117,16 @@ static int receive_run(void)
     session=gaps=unsupported=0;native_state=native_reason=0;pcm_crc=sample_checks?0xffffffffu:0;
     memset(&phy,0,sizeof phy);p25_audio_fifo_reset(&fifo);
     p25_voice_init(&voice,nac,group,sink,NULL);voice.micros=sample_checks?hal_micros:NULL;
+#if CONFIG_P25_CALLER
+    /* DDM32 Plus multi-watch: a receive starts without the last call's talkgroup, source and kind (they were never
+     * cleared: before its first link control a new call on another letter showed the old one's talkgroup) */
+    taskENTER_CRITICAL();
+    p25_tg=0;p25_src=0;p25_nac=P25_NAC_ANY;
+#if CONFIG_P25_EXTRAS
+    p25_target=0;p25_kind=0;
+#endif
+    taskEXIT_CRITICAL();
+#endif
 #if CONFIG_DEV_TX && CONFIG_P25_CHANNELS && CONFIG_P25_TRUNK
     /* The control receiver takes the receive's NAC filter (P25_NAC_ANY is the library's any NAC); no trellis
      * budget of its own: each block's CRC decides */

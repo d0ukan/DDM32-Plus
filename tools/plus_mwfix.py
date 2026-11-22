@@ -299,3 +299,74 @@ def prepare_mwfix(transform, install):
          '\t}\n'
          '\tsearch_ms = 0;\n'),
     ])
+
+    # ---- Seventh round (branch mwtg, owner 2026-11-22 on beta.7): in dual / triple / quad ... watch Home did not show
+    # which talk group a call was on (the single channel's caller line does). docs/plus.md "Multi-watch: the heard talk
+    # group". Three causes: (1) the tick copied a pane's caller text into the watch's (d->caller, what a ring row draws)
+    # only when the receiving pane changed, i.e. at the call's start, when the receiver has not named the caller yet
+    # ("DMR call", "P25 call", or the talk group of the call before): never refreshed; (2) the DMR caller's shorter
+    # alternate dropped the talk group first ("Joe Smith TG 91" | "Joe Smith"); (3) NXDN / dPMR letters said "FM signal".
+    # A row also gets the heard group in a short form of its own for the one-line rows (ui_mwatch.inc mw_heard_short) ----
+    transform('core/ui/ui_screens.h', [
+        ('\tconst char *caller;\t\t// while a call comes in on it\n#if UI_DETAIL\n',
+         '\tconst char *caller;\t\t// while a call comes in on it\n'
+         '\tchar heard[20];\t\t\t// DDM32 Plus: the heard call\'s talk group while it comes in: "TG 101", "Pvt 2345" (empty: unknown)\n'
+         '#if UI_DETAIL\n'),
+    ])
+    transform('core/ui/ui_dual.c', [
+        ('#include "codeplug/codeplug.h"\n',
+         '#include "codeplug/codeplug.h"\n'
+         '#if CONFIG_NXDN\n#include "radio/radio_nxdn.h"\n#endif\n#if CONFIG_DPMR\n#include "radio/radio_dpmr.h"\n#endif\n'),
+        # (2) the talk group stays in the shortest alternate: "Joe Smith TG 91" | "TG 91"; a private call "Joe Smith to you" |
+        # "Pvt 2345" (the caller's ID)
+        ('\tfor (int alt = 0; alt < 2; alt++) {\n\t\tif (name[0])\n',
+         '\tfor (int alt = 0; alt < 2; alt++) {\n'
+         '\t\tif (alt == 1) {\t// DDM32 Plus: the talk group gives way last\n'
+         '\t\t\tuint32_t id = group ? dst : src;\n'
+         '\t\t\tif (id == 0) {\t// never "TG 0" / "Pvt 0"\n'
+         '\t\t\t\tsb_str(&b, name[0] ? name : TR("DMR call"));\n\t\t\t\tbreak;\n\t\t\t}\n'
+         '\t\t\tsb_str(&b, group ? "TG " : TR("Pvt "));\n'
+         '\t\t\tsb_u32(&b, id, 1);\n'
+         '\t\t\tbreak;\n\t\t}\n'
+         '\t\tif (name[0])\n'),
+        # (3) NXDN and dPMR letters name their caller too
+        ('static bool native_caller(const radio_view_t *v, uint8_t i)\n{\n',
+         'static bool native_caller(const radio_view_t *v, uint8_t i)\n{\n'
+         '#if CONFIG_NXDN\n'
+         '\tif (codeplug_mode_nxdn(v->ch.mode) && (i == MW_ANY_PANE || tuned_pane(v) == i)) {\n'
+         '\t\tstatic radio_nxdn_caller_t nc;\t// static: the UI task\'s stack is tight\n'
+         '\t\tsbuf_t nb;\n'
+         '\t\tradio_nxdn_caller(&nc);\n'
+         '\t\tsb_init(&nb, caller_buf, sizeof caller_buf);\n'
+         '\t\tif (!nc.active || (nc.source == 0 && !nc.encrypted)) {\n'
+         '\t\t\tsb_str(&nb, "NXDN ");\n\t\t\tsb_str(&nb, TR("call"));\n'
+         '\t\t} else if (nc.encrypted) {\n'
+         '\t\t\tsb_str(&nb, "NXDN ENC");\n'
+         '\t\t\tif (nc.source != 0) {\n\t\t\t\tsb_chr(&nb, \' \');\n\t\t\t\tsb_u32(&nb, nc.source, 1);\n\t\t\t}\n'
+         '\t\t} else {\n'
+         '\t\t\tsb_str(&nb, TEXT_ALT_OPEN "NXDN ");\n\t\t\tsb_u32(&nb, nc.source, 1);\n'
+         '\t\t\tif (nc.destination != 0) {\t// never "TG 0"\n'
+         '\t\t\t\tsb_str(&nb, nc.group ? " > TG " : " > ");\n\t\t\t\tsb_u32(&nb, nc.destination, 1);\n\t\t\t}\n'
+         '\t\t\tsb_str(&nb, TEXT_ALT_NEXT);\n'
+         '\t\t\tif (nc.group && nc.destination != 0) {\n'
+         '\t\t\t\tsb_str(&nb, "TG ");\n\t\t\t\tsb_u32(&nb, nc.destination, 1);\n'
+         '\t\t\t} else {\n'
+         '\t\t\t\tif (!nc.group)\n\t\t\t\t\tsb_str(&nb, TR("Pvt "));\n'
+         '\t\t\t\tsb_u32(&nb, nc.source, 1);\n\t\t\t}\n'
+         '\t\t\tsb_str(&nb, TEXT_ALT_CLOSE);\n'
+         '\t\t}\n\t\treturn true;\n\t}\n'
+         '#endif\n'
+         '#if CONFIG_DPMR\n'
+         '\tif (codeplug_mode_dpmr(v->ch.mode) && (i == MW_ANY_PANE || tuned_pane(v) == i)) {\n'
+         '\t\tif (radio_dpmr_caller_line(caller_buf, sizeof caller_buf) == 0) {\n'
+         '\t\t\tsbuf_t pb;\n\t\t\tsb_init(&pb, caller_buf, sizeof caller_buf);\n'
+         '\t\t\tsb_str(&pb, "dPMR ");\n\t\t\tsb_str(&pb, TR("call"));\n\t\t}\n'
+         '\t\treturn true;\n\t}\n'
+         '#endif\n'),
+        # (1) the watch's caller follows the heard pane's text as it fills in (not only when the pane changes)
+        ('\tif (heard != d->rx) {\n\t\td->rx = heard;\n\t\tif (heard != UI_DUAL_NONE)\n\t\t\tstrcpy(d->caller, d->pane[heard].caller);\n\t\tdirty = true;\n\t}\n',
+         '\tif (heard != d->rx) {\n\t\td->rx = heard;\n\t\tdirty = true;\n\t}\n'
+         '\tif (heard != UI_DUAL_NONE && strcmp(d->caller, d->pane[heard].caller) != 0) {\n'
+         '\t\tstrcpy(d->caller, d->pane[heard].caller);\t// DDM32 Plus: the group / ID the receiver names after the start\n'
+         '\t\tdirty = true;\n\t}\n'),
+    ])

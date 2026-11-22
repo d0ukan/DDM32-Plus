@@ -700,6 +700,7 @@ __pycache__/
 # dual watch / multi-watch TX target fix (tools/plus_mwfix.py)
 !/tools/plus_mwfix.py
 !/tests/plus/test_ui_mwdetail.c
+!/tests/plus/test_ui_mwheard.c
 # Upstream RadioFoundry fixes (tools/plus_rfports.py, CONFIG_RF_FIXES)
 !/tools/plus_rfports.py
 !/tools/test_rfports.py

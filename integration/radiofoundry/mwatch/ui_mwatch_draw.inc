@@ -86,6 +86,10 @@ static void __attribute__((noinline)) mw_draw_row(const radio_view_t *v, const u
 			 tx ? ui_col.tx : rx ? ui_col.rx : ui_col.fg);
 		x_end -= sm->w / 2;
 	}
+	// DDM32 Plus (docs/plus.md "Multi-watch: the heard talk group"): one line, a call coming in: the heard call's talk
+	// group ("TG 101", "Pvt 2345") left of the pill, in the green of the call; the name gives way to it
+	if (!two && rx && r->heard[0] != '\0')
+		x_end = dual_right(sm, x_end, y1, l1, x0 + 3 * sm->w, r->heard, ui_col.rx) - sm->w / 2;
 	// One line: the right side says how long ago (or Busy) where the pill isn't
 	if (!two && word == NULL && (r->busy || r->heard_ms)) {
 		sb_init(&b, buf, sizeof mw_buf);
@@ -129,6 +133,11 @@ static void __attribute__((noinline)) mw_draw_row(const radio_view_t *v, const u
 			sb_str(&b, TEXT_ALT_CLOSE);
 		}
 		x_end = dual_right(sm, w, y2, sm->h, x0 + 8 * sm->w, buf, r->busy ? ui_col.rx : agec) - sm->w / 2;
+	}
+	if (rx && r->heard[0] != '\0' && (r->caller == NULL || r->caller[0] == '\0')) {
+		gfx_text_fit(sm, r->heard, x_end - x0, fit, sizeof mw_fit);
+		gfx_text(sm, x0, y2, fit, ui_col.rx);
+		return;
 	}
 	if (rx && r->caller != NULL && r->caller[0] != '\0') {
 		gfx_text_fit(sm, r->caller, x_end - x0, fit, sizeof mw_fit);
