@@ -457,7 +457,7 @@ static void test_vfox_find_rx_only(void)
  * talk; PMR446 refused; 145.500 simplex keys; 438.650 simplex (a repeater output) refused, with TX 431.050 (the
  * repeater's input) allowed; a codeplug channel outside the bands is the user's (not affected). A find's receive only
  * ends when a split is set (RREQ_VFO_TX) */
-static void vx_plan(uint32_t hz, uint8_t m, uint8_t want)
+static inline void vx_plan(uint32_t hz, uint8_t m, uint8_t want)
 {
     vx_request(RREQ_VFO_SET, (int32_t)hz);
     vx_apply(hz, m, 0x293, 99, 3101234);
