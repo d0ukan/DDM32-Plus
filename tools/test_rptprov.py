@@ -110,26 +110,29 @@ def province_tests(ROOT):
         print('repeaters by province: no research-data list here (the synthetic cases above only)')
 
 
-def ui_tests(ROOT, APP, OUT, host):
+def ui_tests(ROOT, APP, OUT, host, test='test_ui_rptprov', extra=()):
     tp = ROOT / 'tests/plus'
     command = run(['make', '-Bn', 'uiFlowTest', 'SANITIZE=1'], cwd=host, capture_output=True, text=True).stdout
     argv = shlex.split(next(line for line in command.splitlines() if ' -o uiFlowTest ' in line))
-    argv[argv.index('uiFlowTest.c')] = str(tp / 'test_ui_rptprov.c')
+    argv[argv.index('uiFlowTest.c')] = str(tp / (test + '.c'))
     argv[argv.index('sim/ui_sim.c')] = str(tp / 'ui_sim_mapnav.c')
-    argv[argv.index('-o') + 1] = str(OUT / 'test_ui_rptprov')
+    argv[argv.index('-o') + 1] = str(OUT / test)
     run([*argv, '-I' + str(host), '-I' + str(tp), '-DCONFIG_P25_CHANNELS=1', '-DCONFIG_MAP=1', '-DCONFIG_NAV=1',
          '-DCONFIG_REPEATERS=1', '-DCONFIG_AUTO_RPT=1', '-DCONFIG_MAP_TRACK=1', '-DCONFIG_APRS_MSG=1',
-         '-DCONFIG_RPT_PROV=1',
+         '-DCONFIG_RPT_PROV=1', *extra,
          *(str(APP / 'core/ui' / f) for f in ('ui_map.c', 'map.c', 'turkey_map_data.c', 'turkey_district_data.c',
                                              'mapnav.c', 'ui_mapnav.c', 'nav.c', 'ui_goto.c', 'rpt.c', 'ui_rpt.c',
                                              'ui_aprsmsg.c')),
          *(str(APP / 'core/aprs' / f) for f in ('aprs_plus.c', 'aprs_fmt.c', 'ax25.c')), '-lm'], cwd=host)
-    run([OUT / 'test_ui_rptprov'], cwd=host)
+    run([OUT / test], cwd=host)
 
 
 def main(ROOT, APP, OUT, flags, host):
     province_tests(Path(ROOT))
     ui_tests(Path(ROOT), Path(APP), Path(OUT), Path(host))
+    # * adds the picked repeater as a channel (CONFIG_CHAN_EXTRAS): the real codeplug and zone editor
+    ui_tests(Path(ROOT), Path(APP), Path(OUT), Path(host), 'test_ui_rptadd',
+             ('-DCONFIG_CHAN_EXTRAS=1', '-DCONFIG_DMR_ANY=1', '-DCONFIG_LANG_TR=1'))
 
 
 if __name__ == '__main__':

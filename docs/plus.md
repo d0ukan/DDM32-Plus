@@ -3389,6 +3389,47 @@ channels renamed, the rollback on a failing zone write, the 16-channel layout), 
 steps onto the new channel; another zone, a Find & save zone, the VFO, dual watch with B selected on another zone, All
 channels renamed; All channels full said; the Zone options row). Radio test rows Z-1b..Z-1d.
 
+#### Repeaters as channels (beta.8, branch `rptadd`)
+
+Owner's request: in Tools > Repeaters, one key adds the selected repeater as a new channel in the zone the radio is in.
+The page's keys before: Up / Down / the knob pick, OK the details (tune the VFO in the details), `#` the nearest repeater's
+details, Back. `#` (ACT_CONTEXT) was taken, `*` (ACT_QUICK) was free: ui_app.c opens quick settings on it from every
+screen but a few, so `tools/plus_chux.py` adds one exception: on the Repeaters screen `*` goes to the screen first (list
+and details) and only where it does not take it (the province level, which has no pick) quick settings opens as before.
+
+What the channel is (`integration/radiofoundry/rpt/ui_rpt.c`, `add_channel`, `post_add`; `CONFIG_CHAN_EXTRAS` with
+`CONFIG_REPEATERS`; rpt_tune_plan's RX / TX / mode / tone / colour code / slot, so the VFO tune and the channel agree):
+
+- FM: name = the callsign (10 characters at most; the channel name takes 16), RX = the repeater's output, TX = RX + offset
+  (simplex: TX = RX), bandwidth 12.5 kHz when the list says narrow else 25 kHz, TX tone = the CTCSS access tone (none
+  when the list has none), no RX tone, the radio's power (`CODEPLUG_POWER_DEFAULT`). Transmit allowed unless the TX is
+  outside the radio's TX bands (`board_in_band`), then receive only.
+- DMR: colour code as listed, slot 1 / 2 as listed, both or not known: Any (`CODEPLUG_TS_ANY`, with `CONFIG_DMR_ANY`; else
+  1), RX group list Any, **receive only, no TX contact**: the list carries no talkgroup (it is never known there). The owner
+  picks a TX contact in the channel editor to transmit.
+- C4FM, D-STAR, P25, NXDN, M17 entries are info only (the radio has no channel for them, nor does the VFO tune): refused.
+- No band-plan restriction (owner decision 2026-11-22, band plan only for DOTA); only the radio's own bands for RX.
+
+Where it goes: the channel editor's own write, `ZONE_OP_ADD_JOIN` (the zone27 rule, "Zone size: the real cause" above):
+one storage job writes it at a free number and puts it at the end of "All channels" and of the zone Home is on
+(`ui_view()->zone_index`; on the VFO: All channels only). The usual notes follow from the job ("All channels full, in no
+zone: ch N", ...). The toast right after posting is "Added: ch N NAME in zone ZONE" (the zone's name read through a
+`noinline` zone reader, `zone_at`, so the 180 B zone copy never sits beside a channel copy on the UI task's stack; the
+UI task keeps 184 B free, unchanged). A failing write raises the core's own "save failed" toast.
+
+Refusals, before anything is written: not FM / DMR ("Info only: not a mode of this radio"); transmitting (`RS_TX`:
+"Can't add while transmitting"); a zone job queued or running, or a Find & save run ("Saving: wait"); RX outside the radio's
+bands ("Not in the radio's bands"); the zone unreadable; the repeater **already in the zone** (the zone's channels are
+compared: same RX, TX, mode, and TX tone or colour code and slot): "Already in ZONE: ch N", no write; the zone full (80,
+`codeplug_zone_capacity`): "Zone full: max 80 channels"; no free channel number: "No free channel".
+
+Cost (measured, `--plus --stack-check --verify-rebuild`): FLASH 870,784 B (96.63 %), RAM 208,672 B (2,784 B free; +56 B:
+the toast's 52 B text buffer, `add_msg`), 0 warnings, forced rebuild identical. Tests: `tests/plus/test_ui_rptadd.c`
+(`tools/test_rptprov.py`, with `CONFIG_CHAN_EXTRAS`; English and Turkish): FM channel fields and the zone positions, the
+duplicate, narrow and simplex, the details, DMR (CC1 both slots: Any; CC2 TS2), C4FM refused, zone full, transmitting, the
+VFO, the province level's quick settings. Not host-tested: a full codeplug (the simulator's codeplug has a fixed number of
+channel slots; the storage side is `test_zone_cap.c`) and a zone write in progress. Radio rows RA-1 to RA-4.
+
 #### Above 80 channels a zone? (owner's question; not changed)
 
 Measured on the public build (`--plus --public`, base 743c1b7: RAM 209,368 B, 2,088 B free; rule >= 1,500 B free).

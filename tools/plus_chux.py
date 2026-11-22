@@ -90,6 +90,15 @@ def prepare_new_joins(transform, install):
     ])
     transform('core/ui/ui_app.c', [
         ('\tui_svc_zone_poll();\n', '\tui_svc_zone_poll();\n' + _if('\tui_menus_zone_note();\n')),
+        # Tools > Repeaters: * adds the picked repeater as a channel (ui_rpt.c add_channel); where the screen does not take
+        # it (its province level) quick settings opens as everywhere
+        ('\t// QUICK opens quick settings from any screen; BACK returns to where the user was\n',
+         '#if CONFIG_CHAN_EXTRAS && CONFIG_REPEATERS\n'
+         '\tif (ev->action == ACT_QUICK && ev->gesture == GESTURE_PRESS && stack[sp].scr == SCR_REPEATERS && !typing &&\n'
+         '\t\t\tui_scr[SCR_REPEATERS]->key(ev))\t// DDM32 Plus: * adds the repeater as a channel\n'
+         '\t\treturn;\n'
+         '#endif\n'
+         '\t// QUICK opens quick settings from any screen; BACK returns to where the user was\n'),
     ])
     transform('core/ui/ui_menus.c', [
         # The editor's save: All channels and the zone it was made for, in one job

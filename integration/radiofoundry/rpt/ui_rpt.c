@@ -13,7 +13,16 @@
  * "Unknown" when some entries have no province. OK opens that province's list (nearest first or by frequency, the
  * same rows, details, tune and #, all within the province); Back returns to the first level, Back there leaves.
  * # on the first level: the nearest repeater's details in "All". Which groups have entries is a bit each (one pass
- * when the screen opens); a row's count is one pass when it is drawn. */
+ * when the screen opens); a row's count is one pass when it is drawn.
+ *
+ * * (CONFIG_CHAN_EXTRAS, docs/plus.md "Repeaters as channels"): adds the picked repeater (list or details) as a NEW
+ * channel in the zone Home is on, through the channel editor's own path (ZONE_OP_ADD_JOIN: written at a free number
+ * and put into All channels and that zone in one storage job, the zone27 rule; on the VFO: All channels only). FM and
+ * DMR only. FM: RX, TX = RX + offset, the access tone as the TX tone, 12.5 / 25 kHz. DMR: the colour code and slot (both
+ * or not known: Any with CONFIG_DMR_ANY, else 1), RX only (the list has no talkgroup, so no TX contact). A repeater
+ * whose TX is outside the radio's TX bands is added RX only. Refused: a mode the radio has no channel for, while
+ * transmitting, a write going on, no free channel, a full zone; a repeater already in the zone (same RX, TX, mode and
+ * tone or colour code and slot) is reported with its channel number instead. */
 #include "config.h"
 #if CONFIG_REPEATERS
 #include "board.h"
@@ -28,6 +37,17 @@
 #if CONFIG_RPT_PROV
 #include <string.h>
 #include "ui/map.h"
+#endif
+#if CONFIG_CHAN_EXTRAS && CONFIG_ZONE_EDIT
+#define RPT_ADD	1
+#include "ui_svc.h"
+#include "codeplug/codeplug.h"
+#include "codeplug/zone_edit.h"
+#if CONFIG_FIND_SAVE
+#include "ui/findsave.h"
+#endif
+#else
+#define RPT_ADD	0
 #endif
 
 static uint16_t sel = RPT_NONE, top = RPT_NONE;
@@ -329,7 +349,11 @@ static void rpt_draw(void)
 		draw_info(y, &rpt_table[sel], &h, lat, lon);
 	else
 		draw_list(y, &h, lat, lon);
+#if RPT_ADD
+	ui_draw_bottom(&ui_st, info ? TR("OK tune  * add  ^v next") : TR("^v  OK info  # near  * add"));
+#else
 	ui_draw_bottom(&ui_st, info ? TR("OK tune VFO  ^v next") : TR("^v pick  OK info  # nearest"));
+#endif
 	ui_draw_banner(&ui_st);
 }
 
@@ -370,6 +394,186 @@ static void __attribute__((noinline)) tune(const rpt_entry_t *e)
 	ui_toast(tx_ok ? TR("VFO tuned to the repeater") : TR("VFO tuned: its TX is outside the bands"));
 	ui_go_home();
 }
+
+#if RPT_ADD
+static char add_msg[52];	/* the toast's text (ui_toast keeps the pointer) */
+
+/* The channel's DMR slot for e: 1 / 2 as known, else Any (CONFIG_DMR_ANY) or 1 */
+static uint8_t chan_slot(const rpt_entry_t *e)
+{
+	uint8_t ts = (uint8_t)(e->dmr >> 4);
+	return ts == 1u || ts == 2u ? ts : (CONFIG_DMR_ANY ? (uint8_t)CODEPLUG_TS_ANY : 1u);
+}
+
+/* ch is what e would become (same RX, TX, mode and tone, or colour code and slot): the duplicate rule */
+static bool same_as(const channel_t *ch, const rpt_entry_t *e, const rpt_tune_t *t)
+{
+	if (ch->rx_hz != t->rx_hz || ch->tx_hz != t->tx_hz || ch->mode != (t->dmr ? RADIO_MODE_DMR : RADIO_MODE_FM))
+		return false;
+	if (t->dmr)
+		return ch->color_code == t->cc && ch->timeslot == chan_slot(e);
+	return ch->tx_tone.type == (t->ctcss10 ? TONE_CTCSS : TONE_NONE) &&
+	       (t->ctcss10 == 0 || ch->tx_tone.value == t->ctcss10);
+}
+
+/* The zone's size and its channel at position k (0: none), its name into name when non-NULL; false: no such zone. The
+ * zone copy lives only in this frame (the UI task's stack is short: never beside a channel copy) */
+static bool __attribute__((noinline)) zone_at(uint16_t zi, uint16_t k, uint16_t *num, uint16_t *count, char *name)
+{
+	zone_t z;
+	if (!codeplug_zone(zi, &z))
+		return false;
+	*count = z.count;
+	*num = k < z.count ? z.channels[k] : 0u;
+	if (name != NULL)
+		str_copy(name, CODEPLUG_NAME_LEN + 1u, z.name);
+	return true;
+}
+
+/* The channel of zone zi that is e already (its number) in *has, 0 none; *count the zone's size. False: unreadable */
+static bool __attribute__((noinline)) zone_has(uint16_t zi, const rpt_entry_t *e, const rpt_tune_t *t, uint16_t *has,
+					       uint16_t *count)
+{
+	channel_t ch;
+	uint16_t num;
+	*has = 0;
+	if (!zone_at(zi, 0, &num, count, NULL))
+		return false;
+	for (uint16_t k = 0; k < *count; k++) {
+		uint16_t c2;
+		if (!zone_at(zi, k, &num, &c2, NULL) || c2 != *count)
+			return false;
+		if (num != 0 && codeplug_channel(num, &ch) && same_as(&ch, e, t)) {
+			*has = num;
+			return true;
+		}
+	}
+	return true;
+}
+
+/* The channel record of e (the list's settings) and the write: one ZONE_OP_ADD_JOIN, as the channel editor's save
+ * posts it. zone: Home's zone index, ZONE_NONE on the VFO (All channels only) */
+static bool __attribute__((noinline)) post_add(const rpt_entry_t *e, const rpt_tune_t *t, uint16_t num, uint16_t zone,
+					       bool tx_ok)
+{
+	zone_op_t op;
+	memset(&op, 0, sizeof op);
+	op.kind = ZONE_OP_ADD_JOIN;
+	op.zone = zone;
+	op.pos = ZONE_POS_JOIN;
+	op.channel = num;
+	channel_t *c = &op.ch;
+	str_copy(c->name, sizeof c->name, e->name);
+	c->rx_hz = t->rx_hz;
+	c->tx_hz = t->tx_hz;
+	c->power = CODEPLUG_POWER_DEFAULT;
+	c->rx_only = !tx_ok;
+#if CONFIG_P25_CHANNELS
+	c->system = 0xFFu;
+#endif
+	if (t->dmr) {
+		c->mode = RADIO_MODE_DMR;
+		c->bw = RADIO_BW_12K5;
+		c->color_code = t->cc;
+		c->timeslot = chan_slot(e);
+		c->listen_list = CONFIG_DMR_ANY ? CODEPLUG_LIST_ANY : 0u;
+		c->contact = 0;		/* the list has no talkgroup: no TX contact, so receive only */
+		c->rx_only = true;
+	} else {
+		c->mode = RADIO_MODE_FM;
+		c->bw = t->narrow ? RADIO_BW_12K5 : RADIO_BW_25K;
+		c->color_code = 1;
+		c->timeslot = 1;
+		if (t->ctcss10) {
+			c->tx_tone.type = TONE_CTCSS;
+			c->tx_tone.value = t->ctcss10;
+		}
+	}
+	return ui_svc_zone_edit(&op);
+}
+
+/* "Added: ch 28 TA2RAK in zone Home" (mid " in zone "), "Already in Home: ch 5" (mid NULL), the zone's name read here */
+static void __attribute__((noinline)) add_toast(const char *a, uint16_t num, const char *mid, uint16_t zi, const char *nm)
+{
+	char zn[CODEPLUG_NAME_LEN + 1];
+	uint16_t n, c;
+	sbuf_t b;
+	zn[0] = '\0';
+	if (zi != ZONE_NONE)
+		zone_at(zi, 0, &n, &c, zn);
+	sb_init(&b, add_msg, sizeof add_msg);
+	sb_str(&b, a);
+	if (mid == NULL) {
+		sb_str(&b, zn);
+		sb_str(&b, ": ch ");
+		sb_u32(&b, num, 1);
+	} else {
+		sb_u32(&b, num, 1);
+		sb_chr(&b, ' ');
+		sb_str(&b, nm);
+		if (zn[0]) {
+			sb_str(&b, mid);
+			sb_str(&b, zn);
+		}
+	}
+	ui_toast(add_msg);
+}
+
+/* * : the picked repeater as a new channel in Home's zone */
+static void __attribute__((noinline)) add_channel(const rpt_entry_t *e)
+{
+	rpt_tune_t t;
+	if (!rpt_tune_plan(e, &t)) {
+		ui_toast(TR("Info only: not a mode of this radio"));
+		return;
+	}
+	const radio_view_t *v = ui_view();
+	if (v->state == RS_TX) {
+		ui_toast(TR("Can't add while transmitting"));
+		return;
+	}
+	if (ui_svc_zone_pending() || zone_edit_busy()
+#if CONFIG_FIND_SAVE
+	    || ui_findsave_busy()
+#endif
+	) {
+		ui_toast(TR("Saving: wait"));
+		return;
+	}
+	if (!board_in_band(t.rx_hz, false)) {
+		ui_toast(TR("Not in the radio's bands"));
+		return;
+	}
+	uint16_t zone = v->vfo ? ZONE_NONE : v->zone_index, look = zone == ZONE_NONE ? 0u : zone, has, count;
+	if (!zone_has(look, e, &t, &has, &count)) {
+		ui_toast(TR("Couldn't read the zone"));
+		return;
+	}
+	if (has != 0) {
+		add_toast(TR("Already in "), has, NULL, look, NULL);
+		return;
+	}
+	if (zone != ZONE_NONE && count >= codeplug_zone_capacity()) {
+		sbuf_t b;
+		sb_init(&b, add_msg, sizeof add_msg);
+		sb_str(&b, TR("Zone full: max "));
+		sb_u32(&b, codeplug_zone_capacity(), 1);
+		sb_str(&b, TR(" channels"));
+		ui_toast(add_msg);
+		return;
+	}
+	uint16_t num = codeplug_free_channel();
+	if (num == 0) {
+		ui_toast(TR("No free channel"));
+		return;
+	}
+	if (!post_add(e, &t, num, zone, board_in_band(t.tx_hz, true))) {
+		ui_toast(TR("Saving: wait"));
+		return;
+	}
+	add_toast(TR("Added: ch "), num, TR(" in zone "), zone, e->name);
+}
+#endif
 
 #if CONFIG_RPT_PROV
 /* The first level: Up / Down pick (round), OK opens the group's list, # the nearest repeater's details (All), Back
@@ -433,6 +637,13 @@ static bool rpt_key(const input_event_t *ev)
 		ui_dirty();
 		return true;
 	}
+#if RPT_ADD
+	if (ev->action == ACT_QUICK && ev->gesture == GESTURE_PRESS) {	/* * (ui_app.c leaves it to this screen) */
+		if (sel < rpt_info.count)
+			add_channel(&rpt_table[sel]);
+		return true;
+	}
+#endif
 	if (ev->action == ACT_CONTEXT && ev->gesture == GESTURE_PRESS) {
 		rpt_here_t h;
 		int32_t lat, lon;

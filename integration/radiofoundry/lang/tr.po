@@ -6254,6 +6254,31 @@ msgstr "Çapraz bant kapalı: bellek yok"
 msgid "Cross-band off: refused"
 msgstr "Çapraz bant kapalı: reddedildi"
 
+# DDM32 Plus beta.8: Tools > Repeaters, * adds the repeater as a channel (ui_rpt.c)
+#: core/ui/ui_rpt.c
+msgid "OK tune  * add  ^v next"
+msgstr "OK ayarla  * ekle  ^v sonraki"
+
+#: core/ui/ui_rpt.c
+msgid "^v  OK info  # near  * add"
+msgstr "^v  OK bilgi  # yakın  * ekle"
+
+#: core/ui/ui_rpt.c
+msgid "Added: ch "
+msgstr "Eklendi: kanal "
+
+#: core/ui/ui_rpt.c
+msgid " in zone "
+msgstr " bölge "
+
+#: core/ui/ui_rpt.c
+msgid "Can't add while transmitting"
+msgstr "Yayın sırasında eklenemez"
+
+#: core/ui/ui_rpt.c
+msgid "Couldn't read the zone"
+msgstr "Bölge okunamadı"
+
 # DDM32 Plus branch r15-channels: zone size, DMR rows, digital monitor, Delete channel, NAC in decimal (tools/plus_chux.py)
 #: core/ui/ui_menus.c
 msgid "Zone full: max "
