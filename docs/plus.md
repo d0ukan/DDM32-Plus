@@ -477,7 +477,12 @@ mode, which is part of the key; the same engine + ID + mode + frequency twice in
 calls move to another line only for a fill-in: the old key had an unknown field (group 0, colour code / NAC / DG-ID /
 RAN not known) and its known fields agree; the half known line goes and its first-heard time is kept. Any other key
 change on the same serial (TG 91 then TG 92), or its counter going down by more than the one moved call (5 then 1),
-is a new entry: the old line keeps its calls and the new one counts all of its own. The radio's uptime going back (not
+is a new entry: the old line keeps its calls and the new one counts all of its own. A counter exactly one down is the
+moved call only when another entry of the engine rose in the same poll or the engine counted no new call (`seq`
+unchanged: the other entry is read in the next poll); one down while `seq` moved and nothing rose is a new entry too
+(branch `slog3`). A line exists only while it has calls: an entry seen without a call yet makes no line (table, CSV,
+frequency count), and a line whose calls went back to 0 (its only call moved to another talkgroup) goes once no entry
+with calls is on it; a later call brings it back with its first-heard time. The radio's uptime going back (not
 its 49.7 day wrap) or a `seq` going back is a restart: the entries start anew, nothing counted is lost or counted
 twice. `seq` growing more than the entries' calls is calls on entries the PC never saw (more than 8 new between two
 polls): shown as "N calls may be missed"; the balance never goes below 0 (so it never hides a later miss), a call the

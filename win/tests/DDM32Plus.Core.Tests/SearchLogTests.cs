@@ -193,6 +193,48 @@ public sealed class SearchLogTests : IDisposable
     }
 
     [Fact]
+    public void ALineNeedsACall()
+    {
+        // an entry first seen without a call (its talkgroup known): no line, no frequency, nothing in the CSV
+        var b = new SearchLogBook();
+        Assert.False(b.Add(Poll(0, "", 0, "dmrs.f0=438612500,1,2,1,1,0,91,1,0,0,5"), T0));
+        Assert.Equal((0, 0, 0), (b.Groups.Count, b.Frequencies, b.TotalCalls));
+        Assert.Single(SearchLogBook.Write(Path.Combine(dir, "a.csv"), b.Groups) is var r ? File.ReadAllLines(r.Path) : []);
+        // its first call: the line, first heard when the entry was first seen
+        Assert.True(b.Add(Poll(0, "", 1, "dmrs.f0=438612500,1,2,1,1,0,91,1,1,0,5"), T0.AddSeconds(5)));
+        Assert.Equal((1, 1, 1, T0), (b.Groups.Count, b.Frequencies, b.TotalCalls, Line(b, 91).First));
+    }
+
+    [Fact]
+    public void ALineWhoseLastCallMovedGoes()
+    {
+        // the radio counts a call on TG 2 (a new entry), then moves it to TG 1: no TG 2 line left at 0
+        var b = new SearchLogBook();
+        b.Add(Poll(1, "p25s.f0=433500000,456,2,5,1,0,3"), T0);
+        Assert.True(b.Add([.. Poll(1, "p25s.f0=433500000,456,1,9,1,0,4"), "p25s.f1=433500000,456,2,5,0,1,3"], T0.AddSeconds(1)));
+        Assert.Equal((1, 1, 1, 0), (b.Groups.Count, Line(b, 1).Calls, b.Frequencies, b.Missed));
+        // a later call on TG 2 brings its line back
+        b.Add([.. Poll(2, "p25s.f0=433500000,456,2,5,1,0,3"), "p25s.f1=433500000,456,1,9,1,9,4"], T0.AddSeconds(20));
+        Assert.Equal((1, 1, 2), (Line(b, 1).Calls, Line(b, 2).Calls, b.TotalCalls));
+    }
+
+    [Fact]
+    public void ACounterOneDownIsAMoveOnlyWithoutANewCall()
+    {
+        // one down while the engine counted a call and no entry rose: the serial used again (the 2 stay, 1 more)
+        var b = new SearchLogBook();
+        b.Add(Poll(2, "p25s.f0=433500000,456,655,1,2,0,7"), T0);
+        b.Add(Poll(3, "p25s.f0=433500000,456,655,1,1,0,7"), T0.AddSeconds(1));
+        Assert.Equal((3, 0), (Line(b, 655).Calls, b.Missed));
+        // one down with no new call (the moved call's other entry read in the next poll): a move, nothing doubled
+        var m = new SearchLogBook();
+        m.Add(Poll(6, "p25s.f0=433500000,456,2,5,6,0,3"), T0);
+        m.Add(Poll(6, "p25s.f0=433500000,456,2,5,5,0,3"), T0.AddSeconds(1));
+        m.Add([.. Poll(6, "p25s.f0=433500000,456,1,9,1,0,4"), "p25s.f1=433500000,456,2,5,5,1,3"], T0.AddSeconds(2));
+        Assert.Equal((5, 1, 6, 0), (Line(m, 2).Calls, Line(m, 1).Calls, m.TotalCalls, m.Missed));
+    }
+
+    [Fact]
     public void MissedNeverGoesBelowZero()
     {
         var b = new SearchLogBook();

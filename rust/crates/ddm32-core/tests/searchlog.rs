@@ -339,6 +339,53 @@ fn a_serial_used_again_is_a_new_entry() {
 }
 
 #[test]
+fn a_line_needs_a_call() {
+    // an entry first seen without a call (its talkgroup known): no line, no frequency, nothing in the CSV
+    let mut b = SearchLogBook::new();
+    assert!(!b.add(&poll(0, "", 0, "dmrs.f0=438612500,1,2,1,1,0,91,1,0,0,5", 100000), T0));
+    assert_eq!((0, 0, 0), (b.groups().len(), b.frequencies(), b.total_calls()));
+    let dir = tempfile::tempdir().unwrap();
+    let w = searchlog::write(&dir.path().join("a.csv"), &b.groups(), ',', '.').unwrap();
+    assert_eq!(1, std::fs::read_to_string(&w.path).unwrap().lines().count());
+    // its first call: the line, first heard when the entry was first seen
+    assert!(b.add(&poll(0, "", 1, "dmrs.f0=438612500,1,2,1,1,0,91,1,1,0,5", 100000), at(5)));
+    assert_eq!((1, 1, 1, T0), (b.groups().len(), b.frequencies(), b.total_calls(), line(&b, 91).first));
+}
+
+#[test]
+fn a_line_whose_last_call_moved_goes() {
+    // the radio counts a call on TG 2 (a new entry), then moves it to TG 1: no TG 2 line left at 0
+    let mut b = SearchLogBook::new();
+    b.add(&p(1, "p25s.f0=433500000,456,2,5,1,0,3"), T0);
+    let mut moved = p(1, "p25s.f0=433500000,456,1,9,1,0,4");
+    moved.push("p25s.f1=433500000,456,2,5,0,1,3".into());
+    assert!(b.add(&moved, at(1)));
+    assert_eq!((1, 1, 1, 0), (b.groups().len(), line(&b, 1).calls(), b.frequencies(), b.missed()));
+    // a later call on TG 2 brings its line back
+    let mut again = p(2, "p25s.f0=433500000,456,2,5,1,0,3");
+    again.push("p25s.f1=433500000,456,1,9,1,9,4".into());
+    b.add(&again, at(20));
+    assert_eq!((1, 1, 2), (line(&b, 1).calls(), line(&b, 2).calls(), b.total_calls()));
+}
+
+#[test]
+fn a_counter_one_down_is_a_move_only_without_a_new_call() {
+    // one down while the engine counted a call and no entry rose: the serial used again (the 2 stay, 1 more)
+    let mut b = SearchLogBook::new();
+    b.add(&p(2, "p25s.f0=433500000,456,655,1,2,0,7"), T0);
+    b.add(&p(3, "p25s.f0=433500000,456,655,1,1,0,7"), at(1));
+    assert_eq!((3, 0), (line(&b, 655).calls(), b.missed()));
+    // one down with no new call (the moved call's other entry read in the next poll): a move, nothing doubled
+    let mut m = SearchLogBook::new();
+    m.add(&p(6, "p25s.f0=433500000,456,2,5,6,0,3"), T0);
+    m.add(&p(6, "p25s.f0=433500000,456,2,5,5,0,3"), at(1));
+    let mut late = p(6, "p25s.f0=433500000,456,1,9,1,0,4");
+    late.push("p25s.f1=433500000,456,2,5,5,1,3".into());
+    m.add(&late, at(2));
+    assert_eq!((5, 1, 6, 0), (line(&m, 2).calls(), line(&m, 1).calls(), m.total_calls(), m.missed()));
+}
+
+#[test]
 fn missed_never_goes_below_zero() {
     let mut b = SearchLogBook::new();
     b.add(&p(3, "p25s.f0=433500000,456,655,1,3,0,1"), T0);

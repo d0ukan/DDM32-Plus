@@ -9,7 +9,7 @@
 //! its calls to the right line. X.seq (the engine's calls since power on) or the radio's uptime going back is a
 //! restart: the entries start anew, nothing counted is lost. Calls counted on entries the log never saw are `missed`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -82,11 +82,13 @@ type GroupKey = (&'static str, i64, String, i64);
 /// An entry: engine + serial + mode + frequency (a serial wraps; a hot entry may outlive its number's next use).
 type EntryKey = (char, i64, &'static str, i64);
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Entry {
-    row: Option<GroupKey>,
-    calls: i64,   // the radio's counter at the last poll
-    counted: i64, // what this log has counted of it (on row)
+    key: Option<GroupKey>, // its key at the last poll
+    row: Option<GroupKey>, // its line (None: none yet, or its calls went back to 0)
+    first: Stamp,          // when it was first seen
+    calls: i64,            // the radio's counter at the last poll
+    counted: i64,          // what this log has counted of it (on row)
     seen: u64,
 }
 
@@ -342,7 +344,8 @@ impl SearchLogBook {
 
         let mut changed = false;
         let mut delta: HashMap<char, i64> = HashMap::new();
-        let mut seen: std::collections::HashSet<EntryKey> = std::collections::HashSet::new();
+        let mut seen: HashSet<EntryKey> = HashSet::new();
+        let mut calls: Vec<(char, SearchCall)> = vec![];
         for i in 0..8 {
             let found = [
                 ('P', kv.get(format!("p25s.f{i}").as_str()).and_then(|t| parse_p25(t, now))),
@@ -352,9 +355,24 @@ impl SearchLogBook {
             for (eng, c) in found {
                 // the same entry twice in one poll (two entries of one serial, frequency and mode): the newest only
                 if let Some(c) = c.filter(|c| c.id >= 0 && seen.insert((eng, c.id, c.mode, c.hz))) {
-                    changed |= self.take(eng, &c, &mut delta);
+                    calls.push((eng, c));
                 }
             }
+        }
+        // a counter one down is the call the radio moved to another entry when another entry of the engine rose in
+        // this poll or the engine counted no new call; otherwise (its serial used again, seq moved) a new entry
+        let rising: HashSet<char> = calls
+            .iter()
+            .filter(|(eng, c)| self.entries.get(&(*eng, c.id, c.mode, c.hz)).map_or(c.calls > 0, |e| c.calls > e.calls))
+            .map(|(eng, _)| *eng)
+            .collect();
+        let counting: HashSet<char> = seq_now
+            .iter()
+            .filter(|(eng, s)| self.seqs.get(eng).is_some_and(|s0| s0 != s))
+            .map(|(eng, _)| *eng)
+            .collect();
+        for (eng, c) in &calls {
+            changed |= self.take(*eng, c, &mut delta, rising.contains(eng) || !counting.contains(eng));
         }
         let poll = self.poll;
         self.entries.retain(|_, e| poll - e.seen <= FORGET_POLLS);
@@ -373,76 +391,81 @@ impl SearchLogBook {
         changed
     }
 
-    /// One entry of a poll into its line; true when a line changed.
-    fn take(&mut self, eng: char, c: &SearchCall, delta: &mut HashMap<char, i64>) -> bool {
+    /// One entry of a poll into its line; true when a line changed. A line exists only while it has calls: none for
+    /// an entry without a call yet, and a line whose calls went back to 0 (its call moved to another talkgroup) goes
+    /// once no entry with calls is on it.
+    fn take(&mut self, eng: char, c: &SearchCall, delta: &mut HashMap<char, i64>, move_ok: bool) -> bool {
         let id: EntryKey = (eng, c.id, c.mode, c.hz);
         let key: GroupKey = (c.mode, c.hz, c.code.clone(), c.group);
         // the serial used again by a new entry: its key is not a fill-in of the old one's, or its counter went down by
         // more than the one call the radio moves to another talkgroup. The old entry's calls stay on their line.
-        let known = self
-            .entries
-            .get(&id)
-            .is_some_and(|e| c.calls >= e.calls - 1 && e.row.as_ref().is_none_or(|r| *r == key || fill_in(r, &key)));
+        let known = self.entries.get(&id).is_some_and(|e| {
+            (c.calls >= e.calls || (c.calls == e.calls - 1 && move_ok))
+                && e.key.as_ref().is_none_or(|k| *k == key || fill_in(k, &key))
+        });
         if !known {
             if c.calls == 0 && c.group == 0 && c.source == 0 && c.caller.is_empty() {
                 return false; // nothing known yet: taken when it has something
             }
-            self.entries.insert(id, Entry::default());
+            self.entries.insert(id, Entry { key: None, row: None, first: c.time, calls: 0, counted: 0, seen: 0 });
         }
         let poll = self.poll;
-        let (row, prev_calls, prev_counted) = {
+        let (row, prev_calls, prev_counted, mut first) = {
             let e = self.entries.get_mut(&id).unwrap();
             e.seen = poll;
-            (e.row.clone(), e.calls, e.counted)
+            e.key = Some(key.clone());
+            (e.row.clone(), e.calls, e.counted, e.first)
         };
         let d = c.calls - prev_calls;
         *delta.entry(eng).or_default() += d;
         let counted = (prev_counted + d).max(0);
-        if row.is_none() && known && counted == 0 {
-            self.entries.get_mut(&id).unwrap().calls = c.calls;
-            return false; // the log was cleared: back on a line with its next call
-        }
         let mut changed = false;
-        if row.as_ref() != Some(&key) {
-            // the radio filled in the code / group (or the entry is new): its calls go to the right line
-            let mut first = c.time;
-            if let Some(old) = row {
-                let others = self.entries.iter().any(|(k, o)| *k != id && o.row.as_ref() == Some(&old));
-                if let Some(og) = self.groups.get_mut(&old) {
-                    og.calls -= prev_counted;
-                    first = first.min(og.first); // heard first under the half known key
-                    if og.calls <= 0 && !others {
-                        self.groups.remove(&old);
+        let mut on_line = row.clone();
+        if let Some(old) = row.filter(|old| *old != key || counted == 0) {
+            // the radio filled in the code / group, or the entry's last call moved away: it leaves its line
+            let others = self.entries.iter().any(|(k, o)| *k != id && o.row.as_ref() == Some(&old) && o.counted > 0);
+            if let Some(og) = self.groups.get_mut(&old) {
+                og.calls -= prev_counted;
+                first = first.min(og.first); // heard first under the half known key
+                if og.calls <= 0 && !others {
+                    self.groups.remove(&old);
+                    for o in self.entries.values_mut().filter(|o| o.row.as_ref() == Some(&old)) {
+                        o.row = None;
                     }
                 }
             }
-            let ng = self.groups.entry(key.clone()).or_insert_with(|| SearchGroup {
-                mode: c.mode,
-                hz: c.hz,
-                code: c.code.clone(),
-                group: c.group,
-                first,
-                last: c.time,
-                slot: c.slot.clone(),
-                source: c.source,
-                caller: c.caller.clone(),
-                encrypted: c.encrypted,
-                calls: 0,
-            });
-            ng.first = ng.first.min(first);
-            ng.calls += counted;
-            changed = true;
-        } else if counted != prev_counted {
-            self.groups.get_mut(&key).unwrap().calls += counted - prev_counted;
+            on_line = None;
             changed = true;
         }
-        {
-            let e = self.entries.get_mut(&id).unwrap();
-            e.calls = c.calls;
-            e.counted = counted;
-            e.row = Some(key.clone());
+        let e = self.entries.get_mut(&id).unwrap();
+        e.calls = c.calls;
+        e.first = first;
+        if counted == 0 {
+            e.row = None;
+            e.counted = 0;
+            return changed; // no line until it has a call
         }
-        let g = self.groups.get_mut(&key).unwrap();
+        let was = if on_line.is_some() { prev_counted } else { 0 };
+        e.row = Some(key.clone());
+        e.counted = counted;
+        let g = self.groups.entry(key).or_insert_with(|| SearchGroup {
+            mode: c.mode,
+            hz: c.hz,
+            code: c.code.clone(),
+            group: c.group,
+            first,
+            last: c.time,
+            slot: c.slot.clone(),
+            source: c.source,
+            caller: c.caller.clone(),
+            encrypted: c.encrypted,
+            calls: 0,
+        });
+        if counted != was || on_line.is_none() {
+            g.calls += counted - was;
+            g.first = g.first.min(first);
+            changed = true;
+        }
         if c.time > g.last
             || c.source != g.source
             || c.caller != g.caller

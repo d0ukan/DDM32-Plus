@@ -60,7 +60,9 @@ public sealed class SearchLogBook
 
     private sealed class Entry
     {
-        public RowKey? Row;
+        public RowKey? Key;     // its key at the last poll
+        public RowKey? Row;     // its line (null: none yet, or its calls went back to 0)
+        public DateTime First;  // when it was first seen
         public int Calls;       // the radio's counter at the last poll
         public int Counted;     // what this log has counted of it (on Row)
         public int Seen;
@@ -168,6 +170,7 @@ public sealed class SearchLogBook
         var changed = false;
         var delta = new Dictionary<char, int>();
         var seen = new HashSet<(char, long, string, long)>();
+        var calls = new List<(char Eng, SearchCall Call)>();
         for (var i = 0; i < 8; i++)
         {
             foreach (var (eng, call) in new (char, SearchCall?)[]
@@ -178,11 +181,22 @@ public sealed class SearchLogBook
                      })
             {
                 // the same entry twice in one poll (two entries of one serial, frequency and mode): the newest only
-                if (call is null || call.Id < 0 || !seen.Add((eng, call.Id, call.Mode, call.Hz)))
-                    continue;
-                changed |= Take(eng, call, delta);
+                if (call is not null && call.Id >= 0 && seen.Add((eng, call.Id, call.Mode, call.Hz)))
+                    calls.Add((eng, call));
             }
         }
+        // a counter one down is the call the radio moved to another entry when another entry of the engine rose in
+        // this poll or the engine counted no new call; otherwise (its serial used again, seq moved) a new entry
+        var rising = new HashSet<char>();
+        foreach (var (eng, c) in calls)
+            if (entries.TryGetValue((eng, c.Id, c.Mode, c.Hz), out var e) ? c.Calls > e.Calls : c.Calls > 0)
+                rising.Add(eng);
+        var counting = new HashSet<char>();
+        foreach (var (eng, sq) in seqNow)
+            if (seqs.TryGetValue(eng, out var s0) && sq != s0)
+                counting.Add(eng);
+        foreach (var (eng, c) in calls)
+            changed |= Take(eng, c, delta, rising.Contains(eng) || !counting.Contains(eng));
         foreach (var k in entries.Where(e => poll - e.Value.Seen > ForgetPolls).Select(e => e.Key).ToList())
             entries.Remove(k);
         foreach (var (eng, s) in seqNow)
@@ -201,61 +215,75 @@ public sealed class SearchLogBook
         return changed;
     }
 
-    /// <summary>One entry of a poll into its line; true when a line changed.</summary>
-    private bool Take(char eng, SearchCall c, Dictionary<char, int> delta)
+    /// <summary>One entry of a poll into its line; true when a line changed. A line exists only while it has calls:
+    /// none for an entry without a call yet, and a line whose calls went back to 0 (its call moved to another
+    /// talkgroup) goes once no entry with calls is on it.</summary>
+    private bool Take(char eng, SearchCall c, Dictionary<char, int> delta, bool moveOk)
     {
         var id = (eng, c.Id, c.Mode, c.Hz);
         var key = new RowKey(c.Mode, c.Hz, c.Code, c.Group);
-        var fresh = false;
         // the serial used again by a new entry: its key is not a fill-in of the old one's, or its counter went down by
         // more than the one call the radio moves to another talkgroup. The old entry's calls stay on their line.
-        if (!entries.TryGetValue(id, out var e) || c.Calls < e.Calls - 1 || (e.Row is { } r && r != key && !FillIn(r, key)))
+        if (!entries.TryGetValue(id, out var e) || c.Calls < e.Calls - 1 || (c.Calls == e.Calls - 1 && !moveOk) ||
+            (e.Key is { } k && k != key && !FillIn(k, key)))
         {
             if (c.Calls == 0 && c.Group == 0 && c.Source == 0 && c.Caller.Length == 0)
                 return false;   // nothing known yet: taken when it has something
-            e = new Entry();
+            e = new Entry { First = c.Time };
             entries[id] = e;
-            fresh = true;
         }
         e.Seen = poll;
+        e.Key = key;
         var d = c.Calls - e.Calls;
         delta[eng] = delta.GetValueOrDefault(eng) + d;
         e.Calls = c.Calls;
         var counted = Math.Max(0, e.Counted + d);
-        if (e.Row is null && !fresh && counted == 0)
-            return false;   // the log was cleared: back on a line with its next call
         var changed = false;
-        if (e.Row != key)
+        if (e.Row is { } old && (old != key || counted == 0))
         {
-            // the radio filled in the code / group (or the entry is new): its calls go to the right line
-            var first = c.Time;
-            if (e.Row is { } old && groups.TryGetValue(old, out var og))
+            // the radio filled in the code / group, or the entry's last call moved away: it leaves its line
+            if (groups.TryGetValue(old, out var og))
             {
                 og.Calls -= e.Counted;
-                if (og.First < first)
-                    first = og.First;   // heard first under the half known key
-                if (og.Calls <= 0 && !entries.Values.Any(o => o != e && o.Row == old))
+                if (og.First < e.First)
+                    e.First = og.First;   // heard first under the half known key
+                if (og.Calls <= 0 && !entries.Values.Any(o => o != e && o.Row == old && o.Counted > 0))
+                {
                     groups.Remove(old);
+                    foreach (var o in entries.Values.Where(o => o.Row == old))
+                        o.Row = null;
+                }
             }
+            e.Row = null;
+            e.Counted = 0;
+            changed = true;
+        }
+        if (counted == 0)
+        {
+            e.Counted = 0;
+            return changed;     // no line until it has a call
+        }
+        if (e.Row is null)
+        {
             if (!groups.TryGetValue(key, out var ng))
                 groups[key] = ng = new SearchGroup
                 {
-                    Mode = c.Mode, Hz = c.Hz, Code = c.Code, Group = c.Group, First = first, Last = c.Time, Slot = c.Slot,
+                    Mode = c.Mode, Hz = c.Hz, Code = c.Code, Group = c.Group, First = e.First, Last = c.Time, Slot = c.Slot,
                     Source = c.Source, Caller = c.Caller, Encrypted = c.Encrypted,
                 };
-            else if (first < ng.First)
-                ng.First = first;
+            else if (e.First < ng.First)
+                ng.First = e.First;
             ng.Calls += counted;
             e.Row = key;
             changed = true;
         }
-        var g = groups[key];
-        if (counted != e.Counted && !changed)
+        else if (counted != e.Counted)
         {
-            g.Calls += counted - e.Counted;
+            groups[key].Calls += counted - e.Counted;
             changed = true;
         }
         e.Counted = counted;
+        var g = groups[key];
         if (c.Time > g.Last || c.Source != g.Source || c.Caller != g.Caller || (c.Encrypted && !g.Encrypted) ||
             (c.Slot.Length > 0 && c.Slot != g.Slot))
         {
