@@ -3,7 +3,7 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## v1.0.0-beta.8 (candidate, not released yet)
+## v1.0.0-beta.8 (2026-11-22, beta: not yet confirmed on the radio)
 
 - Upstream RadioFoundry fixes, second round (docs/plus.md "Upstream RadioFoundry fixes"; host-tested, not yet
   checked on the radio, rows RF-7..RF-12):
@@ -37,7 +37,7 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   A new P25 receive starts without the last call's talk group (the old one showed on another letter before the first
   link control); "TG 0" / "Pvt 0" are never drawn; the new texts are translated.
 
-## v1.0.0-beta.7 (candidate, not released yet)
+## v1.0.0-beta.7 (not released on its own; included in beta.8)
 
 - PC programmers (Windows C# and Rust): a classic menu bar (File, Radio, Tools, Help) on top of the window, reaching the existing pages, the backups and logs folders, the GitHub page and About; the radio entries are off while a radio job holds the port.
 - Transmit safety (pre-release hole hunt; docs/plus.md "Pre-release hole hunt: transmit safety"): SSTV send is
