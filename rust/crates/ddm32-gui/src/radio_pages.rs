@@ -627,12 +627,18 @@ fn slog_line(ui: &AppWindow, line: String) {
         (changed, path, s.slog_book.groups())
     });
     if changed {
-        match searchlog::write(&path, &lines, searchlog::list_separator()) {
+        let (sep, dec) = searchlog::csv_format();
+        match searchlog::write(&path, &lines, sep, dec) {
             Ok(w) => {
                 if w.locked {
-                    message(ui, &trf("slog_locked", &w.path.display().to_string()), "warning");
-                } else if with(|s| s.slog_written.as_ref().is_some_and(|p| *p != w.path)) {
-                    message(ui, "", "info"); // the file is free again
+                    let note = trf("slog_locked", &w.path.display().to_string());
+                    message(ui, &note, "warning");
+                    with(|s| s.slog_lock_note = Some(note));
+                } else if let Some(note) = with(|s| s.slog_lock_note.take()) {
+                    // the file is free again: only the lock message goes, never another page's warning
+                    if ui.global::<Radio>().get_message() == note.as_str() {
+                        message(ui, "", "info");
+                    }
                 }
                 with(|s| s.slog_written = Some(w.path));
             }
@@ -653,7 +659,13 @@ fn slog_start(ui: &AppWindow) {
         message(ui, &tr("radio_nocable"), "warning");
         return;
     };
-    if with(|s| s.slog_cancel.is_some() || s.live_cancel.is_some()) {
+    // one radio step at a time (the C# ToolRunner.AnyBusy): not while a backup, install, restore, pack write, Health or
+    // Live holds the port
+    if ui.global::<App>().get_busy()
+        || ui.global::<Radio>().get_busy()
+        || with(|s| s.slog_cancel.is_some() || s.live_cancel.is_some())
+    {
+        message(ui, &tr("slog_busy_other"), "warning");
         return;
     }
     let cancel = Arc::new(AtomicBool::new(false));

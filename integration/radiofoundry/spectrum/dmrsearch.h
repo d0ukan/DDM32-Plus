@@ -109,11 +109,11 @@ typedef struct {
 	uint16_t cc;		/* DMRS_CC_NONE = not named yet (P25 NAC, DMR color code, YSF DG-ID, NXDN RAN) */
 	uint8_t ts_mask;	/* slots with traffic seen there */
 	uint8_t sync_mask;	/* DMRS_SYNC_*: repeater and / or mobile */
-	uint8_t mode;		/* DMRS_MODE_* (the DMR search: always DMR) */
+	uint8_t id;		/* the entry's serial (mod 256), given when it was made: the PC's search log follows an entry
+				 * by it with its frequency and mode (searchlog_view.c) */
+	uint8_t mode : 2;	/* DMRS_MODE_* (the DMR search: always DMR) */
 	bool group : 1;
 	bool enc : 1;		/* a call there was encrypted (not played) */
-	uint8_t id : 6;		/* the entry's serial (mod 64), given when it was made: the PC's search log follows an entry
-				 * by it with its frequency and mode (searchlog_view.c) */
 } dmrs_found_t;
 
 typedef struct {

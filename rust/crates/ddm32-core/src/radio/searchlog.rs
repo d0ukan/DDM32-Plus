@@ -79,11 +79,11 @@ impl SearchGroup {
 }
 
 type GroupKey = (&'static str, i64, String, i64);
+/// An entry: engine + serial + mode + frequency (a serial wraps; a hot entry may outlive its number's next use).
+type EntryKey = (char, i64, &'static str, i64);
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Entry {
-    mode: &'static str,
-    hz: i64,
     row: Option<GroupKey>,
     calls: i64,   // the radio's counter at the last poll
     counted: i64, // what this log has counted of it (on row)
@@ -95,9 +95,10 @@ struct Entry {
 #[derive(Debug, Default)]
 pub struct SearchLogBook {
     groups: HashMap<GroupKey, SearchGroup>,
-    entries: HashMap<(char, i64), Entry>,
+    entries: HashMap<EntryKey, Entry>,
     seqs: HashMap<char, i64>,
     balance: HashMap<char, i64>,
+    debt: HashMap<char, i64>,
     uptime: Option<i64>,
     poll: u64,
     pub p25_on: Option<bool>,
@@ -133,7 +134,7 @@ pub fn parse_p25(text: &str, now: Stamp) -> Option<SearchCall> {
         time: Stamp(now.0 - age),
         mode: "P25",
         hz: v[0],
-        code: nac(v[1]),
+        code: if (0..0xFFFF).contains(&v[1]) { nac(v[1]) } else { "$?".to_string() },
         slot: String::new(),
         group: v[2],
         source: v[3],
@@ -285,6 +286,7 @@ impl SearchLogBook {
             e.counted = 0;
         }
         self.balance.clear();
+        self.debt.clear();
     }
 
     /// One poll's lines (all three sections, with the reader's uptime_ms lines); true when a line was added, changed
@@ -340,6 +342,7 @@ impl SearchLogBook {
 
         let mut changed = false;
         let mut delta: HashMap<char, i64> = HashMap::new();
+        let mut seen: std::collections::HashSet<EntryKey> = std::collections::HashSet::new();
         for i in 0..8 {
             let found = [
                 ('P', kv.get(format!("p25s.f{i}").as_str()).and_then(|t| parse_p25(t, now))),
@@ -347,7 +350,8 @@ impl SearchLogBook {
                 ('D', kv.get(format!("alls.f{i}").as_str()).and_then(|t| parse_all(t, now))),
             ];
             for (eng, c) in found {
-                if let Some(c) = c.filter(|c| c.id >= 0) {
+                // the same entry twice in one poll (two entries of one serial, frequency and mode): the newest only
+                if let Some(c) = c.filter(|c| c.id >= 0 && seen.insert((eng, c.id, c.mode, c.hz))) {
                     changed |= self.take(eng, &c, &mut delta);
                 }
             }
@@ -355,8 +359,14 @@ impl SearchLogBook {
         let poll = self.poll;
         self.entries.retain(|_, e| poll - e.seen <= FORGET_POLLS);
         for (eng, s) in seq_now {
+            // never below 0, so it never hides a later real miss; a call the entries showed before seq had it (the
+            // radio counted it between printing the two) is owed for one poll only
             if let Some(s0) = self.seqs.get(&eng) {
-                *self.balance.entry(eng).or_default() += ((s - s0) & 0xFFFF) - delta.get(&eng).copied().unwrap_or(0);
+                let owed = self.debt.get(&eng).copied().unwrap_or(0);
+                let raw = self.balance.get(&eng).copied().unwrap_or(0) + owed + ((s - s0) & 0xFFFF)
+                    - delta.get(&eng).copied().unwrap_or(0);
+                self.balance.insert(eng, raw.max(0));
+                self.debt.insert(eng, if raw < 0 && owed == 0 { raw } else { 0 });
             }
             self.seqs.insert(eng, s);
         }
@@ -365,14 +375,19 @@ impl SearchLogBook {
 
     /// One entry of a poll into its line; true when a line changed.
     fn take(&mut self, eng: char, c: &SearchCall, delta: &mut HashMap<char, i64>) -> bool {
-        let id = (eng, c.id);
-        let known = self.entries.get(&id).is_some_and(|e| e.mode == c.mode && e.hz == c.hz);
+        let id: EntryKey = (eng, c.id, c.mode, c.hz);
+        let key: GroupKey = (c.mode, c.hz, c.code.clone(), c.group);
+        // the serial used again by a new entry: its key is not a fill-in of the old one's, or its counter went down by
+        // more than the one call the radio moves to another talkgroup. The old entry's calls stay on their line.
+        let known = self
+            .entries
+            .get(&id)
+            .is_some_and(|e| c.calls >= e.calls - 1 && e.row.as_ref().is_none_or(|r| *r == key || fill_in(r, &key)));
         if !known {
-            // new (or a serial used again for another frequency): nothing of it seen before
             if c.calls == 0 && c.group == 0 && c.source == 0 && c.caller.is_empty() {
                 return false; // nothing known yet: taken when it has something
             }
-            self.entries.insert(id, Entry { mode: c.mode, hz: c.hz, row: None, calls: 0, counted: 0, seen: 0 });
+            self.entries.insert(id, Entry::default());
         }
         let poll = self.poll;
         let (row, prev_calls, prev_counted) = {
@@ -387,7 +402,6 @@ impl SearchLogBook {
             self.entries.get_mut(&id).unwrap().calls = c.calls;
             return false; // the log was cleared: back on a line with its next call
         }
-        let key: GroupKey = (c.mode, c.hz, c.code.clone(), c.group);
         let mut changed = false;
         if row.as_ref() != Some(&key) {
             // the radio filled in the code / group (or the entry is new): its calls go to the right line
@@ -449,6 +463,21 @@ impl SearchLogBook {
     }
 }
 
+/// A code the radio has not named yet ("CC?", "$?", "DG?", "RAN?").
+fn unknown(code: &str) -> bool {
+    code.ends_with('?')
+}
+
+/// The radio filled in an entry's code and / or group: the old key had an unknown field and the known ones agree
+/// (anything else is another entry).
+fn fill_in(old: &GroupKey, now: &GroupKey) -> bool {
+    old.0 == now.0
+        && old.1 == now.1
+        && (unknown(&old.2) || old.3 == 0)
+        && (old.2 == now.2 || unknown(&old.2))
+        && (old.3 == now.3 || old.3 == 0)
+}
+
 /// The local clock as a Stamp (seconds of local time since 1970-01-01 00:00 local).
 pub fn local_stamp() -> Stamp {
     Stamp(chrono::Local::now().naive_local().and_utc().timestamp())
@@ -461,6 +490,11 @@ pub fn nac(v: i64) -> String {
 
 pub fn mhz(hz: i64) -> String {
     format!("{:.4}", hz as f64 / 1e6)
+}
+
+/// MHz with the given decimal separator (the CSV's: "433,5000" for Turkish Excel).
+pub fn mhz_with(hz: i64, dec: char) -> String {
+    mhz(hz).replace('.', &dec.to_string())
 }
 
 /// "2026-11-21 22:00:00" from a local Stamp.
@@ -503,12 +537,12 @@ pub fn csv_header(sep: char) -> String {
     CSV_COLUMNS.join(&sep.to_string())
 }
 
-pub fn csv_row(g: &SearchGroup, sep: char) -> String {
+pub fn csv_row(g: &SearchGroup, sep: char, dec: char) -> String {
     [
         format_time(g.first),
         format_time(g.last),
         g.mode.to_string(),
-        mhz(g.hz),
+        mhz_with(g.hz, dec),
         g.code.clone(),
         g.slot.clone(),
         g.group.to_string(),
@@ -556,7 +590,7 @@ pub struct CsvWritten {
 /// cells), whole, through a temporary file, so a crash never leaves half a file. While another program holds the file
 /// (Excel locks an open CSV on Windows) the rows go to `side_path`; once the file is free again it is written and the
 /// side file goes.
-pub fn write(path: &Path, lines: &[SearchGroup], sep: char) -> std::io::Result<CsvWritten> {
+pub fn write(path: &Path, lines: &[SearchGroup], sep: char, dec: char) -> std::io::Result<CsvWritten> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -564,7 +598,7 @@ pub fn write(path: &Path, lines: &[SearchGroup], sep: char) -> std::io::Result<C
     text.push_str(&csv_header(sep));
     text.push_str("\r\n");
     for g in lines {
-        text.push_str(&csv_row(g, sep));
+        text.push_str(&csv_row(g, sep, dec));
         text.push_str("\r\n");
     }
     let tmp = path.with_extension("csv.tmp");
@@ -587,4 +621,18 @@ pub fn write(path: &Path, lines: &[SearchGroup], sep: char) -> std::io::Result<C
 /// The CSV separator Excel expects here: Windows' list separator (";" in Turkish, "," in English), else ",".
 pub fn list_separator() -> char {
     crate::sys::list_separator().filter(|c| matches!(c, ',' | ';' | '\t')).unwrap_or(',')
+}
+
+/// The CSV's separator and decimal separator for Excel: the list separator and, with it, the decimal separator of
+/// the regional settings (";" and "," in Turkish, so 433,5000 is a number); "," and "." otherwise (csv_format_of).
+pub fn csv_format() -> (char, char) {
+    csv_format_of(list_separator(), crate::sys::decimal_separator())
+}
+
+/// csv_format from a list separator and a decimal separator (None: not known).
+pub fn csv_format_of(sep: char, dec: Option<char>) -> (char, char) {
+    match dec {
+        Some(d @ (',' | '.')) if sep != ',' => (sep, d),
+        _ => (sep, '.'),
+    }
 }

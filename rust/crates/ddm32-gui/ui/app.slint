@@ -527,7 +527,7 @@ export component AppWindow inherits Window {
     if App.page == 7 : HealthPage {}
     if App.page == 8 : LivePage {}
     if App.page == 9 : ChannelsPage {}
-    if App.page == 10 : SearchLogPage {}
+    if App.page == 10 : SearchLogPage { app-busy: App.busy; }
 
     // the second confirmation of the install without backup
     if App.confirm-open : Rectangle {

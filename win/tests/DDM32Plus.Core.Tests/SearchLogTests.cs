@@ -162,6 +162,48 @@ public sealed class SearchLogTests : IDisposable
     }
 
     [Fact]
+    public void TwoLiveEntriesWithOneSerialAreCountedApart()
+    {
+        // verifier: a hot DMR entry survives while its serial comes round again on another frequency / mode; read 6
+        // times, the radio's 4 and 3 stay 4 and 3 (not 24 and 12)
+        var b = new SearchLogBook();
+        for (var i = 0; i < 6; i++)
+            b.Add(["dmrs.on=1", "dmrs.seq=7", "dmrs.f0=438612500,1,2,1,1,0,91,1,4,0,5",
+                   "dmrs.f1=439000000,2,2,1,1,0,92,2,3,0,5"], T0.AddSeconds(i));
+        Assert.Equal((4, 3, 7, 0), (Line(b, 91).Calls, Line(b, 92).Calls, b.TotalCalls, b.Missed));
+        // the same entry twice in one poll: counted once
+        var t = new SearchLogBook();
+        t.Add(["dmrs.seq=2", "dmrs.f0=438612500,1,2,1,1,0,91,1,2,0,9", "dmrs.f1=438612500,1,2,1,1,0,91,1,2,0,9"], T0);
+        Assert.Equal(2, t.TotalCalls);
+    }
+
+    [Fact]
+    public void ASerialUsedAgainIsANewEntry()
+    {
+        // TG 91 with 4 calls; the same serial on the same frequency then names TG 92 (another entry): 4 and 1
+        var b = new SearchLogBook();
+        b.Add(Poll(0, "", 4, "dmrs.f0=438612500,1,2,1,1,0,91,1,4,0,5"), T0);
+        Assert.True(b.Add(Poll(0, "", 5, "dmrs.f0=438612500,1,2,1,1,0,92,2,1,0,5"), T0.AddSeconds(1)));
+        Assert.Equal((4, 1, 0), (Line(b, 91).Calls, Line(b, 92).Calls, b.Missed));
+        // the same key, the counter 5 then 1: a new entry with one call, the 5 kept
+        var s = new SearchLogBook();
+        s.Add(Poll(5, "p25s.f0=433500000,456,655,1,5,0,7"), T0);
+        s.Add(Poll(6, "p25s.f0=433500000,456,655,1,1,0,7"), T0.AddSeconds(1));
+        Assert.Equal((6, 0), (Line(s, 655).Calls, s.Missed));
+    }
+
+    [Fact]
+    public void MissedNeverGoesBelowZero()
+    {
+        var b = new SearchLogBook();
+        b.Add(Poll(3, "p25s.f0=433500000,456,655,1,3,0,1"), T0);
+        // a call the entries show before seq has it: the balance stays 0, a later real miss still shows
+        b.Add(Poll(3, "p25s.f0=433500000,456,655,1,4,0,1"), T0.AddSeconds(1));
+        b.Add(Poll(6, "p25s.f0=433500000,456,655,1,5,0,1"), T0.AddSeconds(2));
+        Assert.Equal((5, 1), (b.TotalCalls, b.Missed));
+    }
+
+    [Fact]
     public void CallsNoEntryShowedAreToldAsMissed()
     {
         var b = new SearchLogBook();
@@ -220,6 +262,12 @@ public sealed class SearchLogTests : IDisposable
         Assert.Equal("$1C8/456", SearchLogBook.CsvCell("$1C8/456", ','));
         var g = new SearchGroup { Mode = "YSF", Hz = 439100000, Code = "DG0", Group = 0, First = T0, Last = T0, Caller = "=CMD|x", Calls = 2 };
         Assert.Equal("2026-11-21 22:00:00;2026-11-21 22:00:00;YSF;439.1000;DG0;;0;0;'=CMD|x;0;2", SearchLogBook.CsvRow(g, ';'));
+        // Turkish Excel: ";" between the cells and the frequency with a decimal comma, so it reads as a number
+        var tr = SearchLogBook.CsvFormat(CultureInfo.GetCultureInfo("tr-TR"));
+        Assert.Equal((';', ","), tr);
+        Assert.Equal((',', "."), SearchLogBook.CsvFormat(CultureInfo.GetCultureInfo("en-US")));
+        Assert.Equal("2026-11-21 22:00:00;2026-11-21 22:00:00;YSF;439,1000;DG0;;0;0;'=CMD|x;0;2", SearchLogBook.CsvRow(g, tr.Sep, tr.Dec));
+        Assert.Equal("\"439,1000\"", SearchLogBook.CsvCell(SearchLogBook.Mhz(439100000, ","), ','));
     }
 
     [Fact]

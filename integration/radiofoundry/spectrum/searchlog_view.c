@@ -16,7 +16,7 @@
  * engine: whichever of the two ran last has the list, the other reads as off with nothing found.
  * The PC's call count (A2 of the beta.7 hole hunt): X.seq is the engine's calls counted since power on (16 bits,
  * wraps; dmrs and alls show the same engine's), ID an entry's serial given when it was made (p25s 16 bits, dmrs /
- * alls 6 bits) that stays while its code / group are filled in. The PC follows each entry by engine + ID + frequency
+ * alls 8 bits) that stays while its code / group are filled in. The PC follows each entry by engine + ID + frequency
  * + mode and adds the change of its CALLS (a call the radio moves to the right talkgroup goes down on one entry and up
  * on the other); seq going back is a restart, seq growing more than the entries' calls is calls lost between polls. */
 #include "config.h"

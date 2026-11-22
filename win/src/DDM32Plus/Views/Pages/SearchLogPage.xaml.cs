@@ -221,7 +221,8 @@ public partial class SearchLogPage : UserControl, IPage
             try
             {
                 csvPath ??= SearchLogBook.SessionPath(state.Paths.Logs, started ?? now);
-                var r = SearchLogBook.Write(csvPath, groups, SearchLogBook.ListSeparator());
+                var (sep, dec) = SearchLogBook.CsvFormat();
+                var r = SearchLogBook.Write(csvPath, groups, sep, dec);
                 writtenPath = r.Path;
                 error = r.Locked ? Loc.F("SLog_Locked", r.Path) : "";
             }

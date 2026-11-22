@@ -210,7 +210,7 @@ fn both_lists_and_a_second_search_are_not_counted_twice() {
     assert_eq!(0, b.missed());
     let dir = tempfile::tempdir().unwrap();
     let path = searchlog::session_path(dir.path(), T0);
-    searchlog::write(&path, &b.groups(), ',').unwrap();
+    searchlog::write(&path, &b.groups(), ',', '.').unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.lines().any(|l| l.ends_with(",YSF,439.1000,DG0,,0,0,YM2KDZ,0,2")));
 }
@@ -242,9 +242,12 @@ fn the_sessions_csv_is_the_log_itself() {
     b.add(&p(1, "p25s.f0=433500000,456,655,1234567,1,0,1"), T0);
     let path = searchlog::session_path(dir.path(), T0);
     assert_eq!(dir.path().join("search-20261121-220000.csv"), path);
-    assert_eq!(CsvWritten { path: path.clone(), locked: false }, searchlog::write(&path, &b.groups(), ',').unwrap());
+    assert_eq!(
+        CsvWritten { path: path.clone(), locked: false },
+        searchlog::write(&path, &b.groups(), ',', '.').unwrap()
+    );
     b.add(&p(2, "p25s.f0=433500000,456,655,7654321,2,0,1"), at(5));
-    searchlog::write(&path, &b.groups(), ',').unwrap();
+    searchlog::write(&path, &b.groups(), ',', '.').unwrap();
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!([0xEF, 0xBB, 0xBF], bytes[..3]); // a BOM: Excel reads the Turkish letters
     let text = String::from_utf8(bytes[3..].to_vec()).unwrap();
@@ -282,9 +285,67 @@ fn csv_cells_fit_excel() {
     };
     assert_eq!(
         "2026-11-21 22:00:00;2026-11-21 22:00:00;YSF;439.1000;DG0;;0;0;'=CMD|x;0;2",
-        searchlog::csv_row(&g, ';')
+        searchlog::csv_row(&g, ';', '.')
     );
     assert!([',', ';', '\t'].contains(&searchlog::list_separator()));
+    // Turkish Excel: ";" between the cells and the frequency with a decimal comma, so it reads as a number
+    assert_eq!((';', ','), searchlog::csv_format_of(';', Some(',')));
+    assert_eq!((',', '.'), searchlog::csv_format_of(',', Some('.')));
+    assert_eq!((',', '.'), searchlog::csv_format_of(',', Some(','))); // never the separator itself
+    assert_eq!((';', '.'), searchlog::csv_format_of(';', None));
+    assert_eq!(
+        "2026-11-21 22:00:00;2026-11-21 22:00:00;YSF;439,1000;DG0;;0;0;'=CMD|x;0;2",
+        searchlog::csv_row(&g, ';', ',')
+    );
+    let (sep, dec) = searchlog::csv_format();
+    assert!(dec == '.' || sep != ',');
+}
+
+#[test]
+fn two_live_entries_with_one_serial_are_counted_apart() {
+    // verifier: a hot DMR entry survives while its serial comes round again on another frequency / mode; read 6
+    // times, the radio's 4 and 3 stay 4 and 3 (not 24 and 12)
+    let mut b = SearchLogBook::new();
+    for i in 0..6 {
+        b.add(
+            &[
+                "dmrs.on=1",
+                "dmrs.seq=7",
+                "dmrs.f0=438612500,1,2,1,1,0,91,1,4,0,5",
+                "dmrs.f1=439000000,2,2,1,1,0,92,2,3,0,5",
+            ],
+            at(i),
+        );
+    }
+    assert_eq!((4, 3, 7, 0), (line(&b, 91).calls(), line(&b, 92).calls(), b.total_calls(), b.missed()));
+    // the same entry twice in one poll: counted once
+    let mut t = SearchLogBook::new();
+    t.add(&["dmrs.seq=2", "dmrs.f0=438612500,1,2,1,1,0,91,1,2,0,9", "dmrs.f1=438612500,1,2,1,1,0,91,1,2,0,9"], T0);
+    assert_eq!(2, t.total_calls());
+}
+
+#[test]
+fn a_serial_used_again_is_a_new_entry() {
+    // TG 91 with 4 calls; the same serial on the same frequency then names TG 92 (another entry): 4 and 1
+    let mut b = SearchLogBook::new();
+    b.add(&poll(0, "", 4, "dmrs.f0=438612500,1,2,1,1,0,91,1,4,0,5", 100000), T0);
+    assert!(b.add(&poll(0, "", 5, "dmrs.f0=438612500,1,2,1,1,0,92,2,1,0,5", 100000), at(1)));
+    assert_eq!((4, 1, 0), (line(&b, 91).calls(), line(&b, 92).calls(), b.missed()));
+    // the same key, the counter 5 then 1: a new entry with one call, the 5 kept
+    let mut s = SearchLogBook::new();
+    s.add(&p(5, "p25s.f0=433500000,456,655,1,5,0,7"), T0);
+    s.add(&p(6, "p25s.f0=433500000,456,655,1,1,0,7"), at(1));
+    assert_eq!((6, 0), (line(&s, 655).calls(), s.missed()));
+}
+
+#[test]
+fn missed_never_goes_below_zero() {
+    let mut b = SearchLogBook::new();
+    b.add(&p(3, "p25s.f0=433500000,456,655,1,3,0,1"), T0);
+    // a call the entries show before seq has it: owed one poll, a later real miss still shows
+    b.add(&p(3, "p25s.f0=433500000,456,655,1,4,0,1"), at(1));
+    b.add(&p(6, "p25s.f0=433500000,456,655,1,5,0,1"), at(2));
+    assert_eq!((5, 1), (b.total_calls(), b.missed()));
 }
 
 #[cfg(windows)]
@@ -295,17 +356,20 @@ fn an_open_csv_goes_to_a_side_file_until_it_is_free() {
     let mut b = SearchLogBook::new();
     b.add(&p(1, "p25s.f0=433500000,456,655,1,1,0,1"), T0);
     let path = searchlog::session_path(dir.path(), T0);
-    searchlog::write(&path, &b.groups(), ',').unwrap();
+    searchlog::write(&path, &b.groups(), ',', '.').unwrap();
     let held = {
         // Excel holds it: no delete / rename sharing
         let _f = std::fs::OpenOptions::new().read(true).share_mode(1).open(&path).unwrap();
         b.add(&p(2, "p25s.f0=433500000,456,655,1,2,0,1"), at(1));
-        searchlog::write(&path, &b.groups(), ',').unwrap()
+        searchlog::write(&path, &b.groups(), ',', '.').unwrap()
     };
     assert_eq!(CsvWritten { path: searchlog::side_path(&path), locked: true }, held);
     assert!(held.path.to_string_lossy().ends_with("-open.csv"));
     assert!(std::fs::read_to_string(&held.path).unwrap().lines().any(|l| l.ends_with(",2")));
-    assert_eq!(CsvWritten { path: path.clone(), locked: false }, searchlog::write(&path, &b.groups(), ',').unwrap());
+    assert_eq!(
+        CsvWritten { path: path.clone(), locked: false },
+        searchlog::write(&path, &b.groups(), ',', '.').unwrap()
+    );
     assert!(!held.path.exists());
 }
 

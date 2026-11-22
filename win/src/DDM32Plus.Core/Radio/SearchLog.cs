@@ -60,8 +60,6 @@ public sealed class SearchLogBook
 
     private sealed class Entry
     {
-        public required string Mode;
-        public required long Hz;
         public RowKey? Row;
         public int Calls;       // the radio's counter at the last poll
         public int Counted;     // what this log has counted of it (on Row)
@@ -69,9 +67,11 @@ public sealed class SearchLogBook
     }
 
     private readonly Dictionary<RowKey, SearchGroup> groups = [];
-    private readonly Dictionary<(char Engine, long Id), Entry> entries = [];
+    // an entry: engine + serial + mode + frequency (a serial wraps; a hot entry may outlive its number's next use)
+    private readonly Dictionary<(char Engine, long Id, string Mode, long Hz), Entry> entries = [];
     private readonly Dictionary<char, long> seqs = [];
     private readonly Dictionary<char, int> balance = [];
+    private readonly Dictionary<char, int> debt = [];
     private long? uptime;
     private int poll;
 
@@ -114,6 +114,7 @@ public sealed class SearchLogBook
             e.Counted = 0;
         }
         balance.Clear();
+        debt.Clear();
     }
 
     /// <summary>Whether one poll's lines come from a firmware with the search log (beta.7 and later: an X.seq line).</summary>
@@ -166,6 +167,7 @@ public sealed class SearchLogBook
 
         var changed = false;
         var delta = new Dictionary<char, int>();
+        var seen = new HashSet<(char, long, string, long)>();
         for (var i = 0; i < 8; i++)
         {
             foreach (var (eng, call) in new (char, SearchCall?)[]
@@ -175,7 +177,8 @@ public sealed class SearchLogBook
                          ('D', kv.TryGetValue($"alls.f{i}", out var x) ? ParseAll(x, now)?.Call : null),
                      })
             {
-                if (call is null || call.Id < 0)
+                // the same entry twice in one poll (two entries of one serial, frequency and mode): the newest only
+                if (call is null || call.Id < 0 || !seen.Add((eng, call.Id, call.Mode, call.Hz)))
                     continue;
                 changed |= Take(eng, call, delta);
             }
@@ -184,8 +187,15 @@ public sealed class SearchLogBook
             entries.Remove(k);
         foreach (var (eng, s) in seqNow)
         {
+            // never below 0, so it never hides a later real miss; a call the entries showed before seq had it (the
+            // radio counted it between printing the two) is owed for one poll only
             if (seqs.TryGetValue(eng, out var s0))
-                balance[eng] = balance.GetValueOrDefault(eng) + (int)((s - s0) & 0xFFFF) - delta.GetValueOrDefault(eng);
+            {
+                var owed = debt.GetValueOrDefault(eng);
+                var raw = balance.GetValueOrDefault(eng) + owed + (int)((s - s0) & 0xFFFF) - delta.GetValueOrDefault(eng);
+                balance[eng] = Math.Max(0, raw);
+                debt[eng] = raw < 0 && owed == 0 ? raw : 0;
+            }
             seqs[eng] = s;
         }
         return changed;
@@ -194,14 +204,16 @@ public sealed class SearchLogBook
     /// <summary>One entry of a poll into its line; true when a line changed.</summary>
     private bool Take(char eng, SearchCall c, Dictionary<char, int> delta)
     {
-        var id = (eng, c.Id);
+        var id = (eng, c.Id, c.Mode, c.Hz);
+        var key = new RowKey(c.Mode, c.Hz, c.Code, c.Group);
         var fresh = false;
-        if (!entries.TryGetValue(id, out var e) || e.Mode != c.Mode || e.Hz != c.Hz)
+        // the serial used again by a new entry: its key is not a fill-in of the old one's, or its counter went down by
+        // more than the one call the radio moves to another talkgroup. The old entry's calls stay on their line.
+        if (!entries.TryGetValue(id, out var e) || c.Calls < e.Calls - 1 || (e.Row is { } r && r != key && !FillIn(r, key)))
         {
-            // new (or a serial used again for another frequency): nothing of it seen before
             if (c.Calls == 0 && c.Group == 0 && c.Source == 0 && c.Caller.Length == 0)
                 return false;   // nothing known yet: taken when it has something
-            e = new Entry { Mode = c.Mode, Hz = c.Hz };
+            e = new Entry();
             entries[id] = e;
             fresh = true;
         }
@@ -212,7 +224,6 @@ public sealed class SearchLogBook
         var counted = Math.Max(0, e.Counted + d);
         if (e.Row is null && !fresh && counted == 0)
             return false;   // the log was cleared: back on a line with its next call
-        var key = new RowKey(c.Mode, c.Hz, c.Code, c.Group);
         var changed = false;
         if (e.Row != key)
         {
@@ -261,6 +272,15 @@ public sealed class SearchLogBook
         return changed;
     }
 
+    /// <summary>A code the radio has not named yet ("CC?", "$?", "DG?", "RAN?").</summary>
+    private static bool Unknown(string code) => code.EndsWith('?');
+
+    /// <summary>The radio filled in an entry's code and / or group: the old key had an unknown field and the known
+    /// ones agree (anything else is another entry).</summary>
+    private static bool FillIn(RowKey old, RowKey now) =>
+        old.Mode == now.Mode && old.Hz == now.Hz && (Unknown(old.Code) || old.Group == 0) &&
+        (old.Code == now.Code || Unknown(old.Code)) && (old.Group == now.Group || old.Group == 0);
+
     private static DateTime? Stopped(bool? before, bool? now, DateTime? at, DateTime t) => now switch
     {
         true => null,
@@ -292,7 +312,7 @@ public sealed class SearchLogBook
         if (Fields(text, 7) is not { } v || v[0] <= 0)
             return null;
         var age = (int)Math.Clamp(v[5], 0, 86400);
-        return (new SearchCall(now.AddSeconds(-age), "P25", v[0], Nac(v[1]), "",
+        return (new SearchCall(now.AddSeconds(-age), "P25", v[0], v[1] is >= 0 and < 0xFFFF ? Nac(v[1]) : "$?", "",
             v[2], v[3], false, (int)v[4], "", v[6]), age);
     }
 
@@ -350,6 +370,9 @@ public sealed class SearchLogBook
 
     public static string Mhz(long hz) => (hz / 1e6).ToString("0.0000", CultureInfo.InvariantCulture);
 
+    /// <summary>MHz with the given decimal separator (the CSV's: "433,5000" for Turkish Excel).</summary>
+    public static string Mhz(long hz, string dec) => Mhz(hz).Replace(".", dec, StringComparison.Ordinal);
+
     public static readonly string[] CsvColumns =
         ["first_heard", "last_heard", "mode", "mhz", "code", "slot", "group", "last_source", "caller", "encrypted", "calls"];
 
@@ -358,6 +381,16 @@ public sealed class SearchLogBook
     {
         var s = (culture ?? CultureInfo.CurrentCulture).TextInfo.ListSeparator;
         return s is [var c] && c is ',' or ';' or '\t' ? c : ',';
+    }
+
+    /// <summary>The CSV's separator and decimal separator for Excel here: Windows' list separator and, with it, the
+    /// culture's decimal separator (";" and "," in Turkish, so 433,5000 is a number); "," and "." otherwise.</summary>
+    public static (char Sep, string Dec) CsvFormat(CultureInfo? culture = null)
+    {
+        var c = culture ?? CultureInfo.CurrentCulture;
+        var sep = ListSeparator(c);
+        var dec = c.NumberFormat.NumberDecimalSeparator;
+        return sep == ',' || dec is not ("," or ".") ? (sep, ".") : (sep, dec);
     }
 
     /// <summary>One CSV cell: text Excel would run as a formula (starting with = + - @, a tab or CR) gets a leading
@@ -371,10 +404,10 @@ public sealed class SearchLogBook
 
     public static string CsvHeader(char sep = ',') => string.Join(sep, CsvColumns);
 
-    public static string CsvRow(SearchGroup g, char sep = ',') => string.Join(sep, new[]
+    public static string CsvRow(SearchGroup g, char sep = ',', string dec = ".") => string.Join(sep, new[]
     {
         g.First.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
-        g.Last.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), g.Mode, Mhz(g.Hz), g.Code, g.Slot,
+        g.Last.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), g.Mode, Mhz(g.Hz, dec), g.Code, g.Slot,
         g.Group.ToString(CultureInfo.InvariantCulture), g.Source.ToString(CultureInfo.InvariantCulture),
         g.Caller, g.Encrypted ? "1" : "0", g.Calls.ToString(CultureInfo.InvariantCulture),
     }.Select(c => CsvCell(c, sep)));
@@ -399,12 +432,12 @@ public sealed class SearchLogBook
     /// letters; <paramref name="sep"/> between the cells), whole, through a temporary file, so a crash never leaves half a
     /// file. While another program holds the file (Excel locks an open CSV) the rows go to <see cref="SidePath"/> and
     /// the result says so; once the file is free again it is written and the side file goes.</summary>
-    public static SearchCsvResult Write(string path, IEnumerable<SearchGroup> lines, char sep = ',')
+    public static SearchCsvResult Write(string path, IEnumerable<SearchGroup> lines, char sep = ',', string dec = ".")
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
         var sb = new StringBuilder().Append(CsvHeader(sep)).Append("\r\n");
         foreach (var g in lines)
-            sb.Append(CsvRow(g, sep)).Append("\r\n");
+            sb.Append(CsvRow(g, sep, dec)).Append("\r\n");
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(true));
         var side = SidePath(path);

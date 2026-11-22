@@ -41,12 +41,25 @@ pub fn list_separator() -> Option<char> {
     }
 }
 
+/// Windows' decimal separator of the user's regional settings ("," for Turkish); None elsewhere.
+pub fn decimal_separator() -> Option<char> {
+    #[cfg(windows)]
+    {
+        win::locale_char(win::LOCALE_SDECIMAL)
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod win {
     pub const ES_CONTINUOUS: u32 = 0x8000_0000;
     pub const ES_SYSTEM_REQUIRED: u32 = 0x0000_0001;
     const LOCALE_SLIST: u32 = 0x0000_000C;
+    pub const LOCALE_SDECIMAL: u32 = 0x0000_000E;
 
     #[link(name = "kernel32")]
     extern "system" {
@@ -62,9 +75,14 @@ mod win {
     }
 
     pub fn list_separator() -> Option<char> {
+        locale_char(LOCALE_SLIST)
+    }
+
+    /// The first character of a locale string of the user's regional settings.
+    pub fn locale_char(what: u32) -> Option<char> {
         let mut buf = [0u16; 8];
         // SAFETY: a null name is LOCALE_NAME_USER_DEFAULT; the buffer and its length in UTF-16 units are ours
-        let n = unsafe { GetLocaleInfoEx(std::ptr::null(), LOCALE_SLIST, buf.as_mut_ptr(), buf.len() as i32) };
+        let n = unsafe { GetLocaleInfoEx(std::ptr::null(), what, buf.as_mut_ptr(), buf.len() as i32) };
         if n < 2 {
             return None;
         }

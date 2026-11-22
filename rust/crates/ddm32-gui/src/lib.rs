@@ -61,6 +61,8 @@ pub struct State {
     pub slog_written: Option<std::path::PathBuf>,
     pub slog_started: Option<ddm32_core::radio::searchlog::Stamp>,
     pub slog_nofw: bool,
+    /// The "CSV open in another program" message this page showed (cleared only while it is still the one shown)
+    pub slog_lock_note: Option<String>,
 }
 
 thread_local! {
@@ -178,6 +180,7 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             slog_written: None,
             slog_started: None,
             slog_nofw: false,
+            slog_lock_note: None,
         })
     });
     wire(ui);

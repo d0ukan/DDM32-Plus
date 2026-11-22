@@ -448,7 +448,7 @@ void p25s_probe_found(uint16_t nac, uint16_t tg, uint32_t src, uint32_t now_ms)
 	if (!s.playing)
 		s.probes_p25++;
 	s.playing = true;
-	bool fresh = false, call, moved = false;
+	bool fresh = false, call, moved = false, undone = false;
 	if (held && fits(&s.found[0], nac, tg)) {
 		call = now_ms - s.found[0].heard_ms > P25S_CALL_GAP_MS;	/* the probe's entry (on top) */
 	} else {
@@ -459,7 +459,8 @@ void p25s_probe_found(uint16_t nac, uint16_t tg, uint32_t src, uint32_t now_ms)
 			end_write();
 			return;
 		}
-		if (moved && s.found[1].calls)
+		undone = moved && s.found[1].calls;
+		if (undone)
 			s.found[1].calls--;	/* the held entry, one down now */
 		held = true;
 		credited = false;
@@ -474,8 +475,8 @@ void p25s_probe_found(uint16_t nac, uint16_t tg, uint32_t src, uint32_t now_ms)
 		f->src = src;
 	if (call) {
 		f->calls++;
-		if (!moved)
-			calls_seq++;	/* a moved call was counted when it began */
+		if (!undone)
+			calls_seq++;	/* a moved call (taken off the held entry) was counted when it began */
 		credited = true;
 		credit_ms = now_ms;
 	}

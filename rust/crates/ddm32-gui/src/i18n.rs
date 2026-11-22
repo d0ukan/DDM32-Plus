@@ -181,6 +181,7 @@ pub const TEXTS: &[(&str, &str, &str)] = &[
     ("slog_locked", "CSV dosyası başka bir programda açık (Excel?): kapatılana kadar kayıt {} dosyasına yazılıyor.", "The CSV file is open in another program (Excel?): until it is closed the log is written to {}."),
     ("slog_stopped", "{} arama: durdu ({})", "{} search: stopped at {}"),
     ("slog_missed", "({} konuşma kaçmış olabilir: telsiz iki okuma arasında 8'den fazla buldu)", "({} calls may be missed: the radio found more than 8 between two reads)"),
+    ("slog_busy_other", "Telsiz portu başka bir işte (yedek, kurulum, sağlık ya da canlı izleme): önce onu bitirin.", "The radio's port is busy (backup, install, health or live view): finish that first."),
     ("slog_busy", "Arama kaydı portu kullanıyor: önce kaydı durdurun.", "The search log has the port: stop the log first."),
     ("home_channels", "Kanallarım", "My channels"),
     ("health_intro", "Telsiz açık ve DDM32 Plus çalışıyor olmalı. Yalnızca okunur; telsize hiçbir şey yazılmaz.",

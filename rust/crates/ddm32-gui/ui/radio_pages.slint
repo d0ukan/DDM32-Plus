@@ -307,6 +307,8 @@ export component ChannelsPage inherits Screen {
 }
 
 export component SearchLogPage inherits Screen {
+    // App.busy (a backup, install, restore or pack write holds the port), passed in by app.slint
+    in property <bool> app-busy;
     // the search log: the radio's P25 / DMR search finds read every second (radio_pages.rs slog_*), newest first
     property <[float]> widths: [0.13, 0.13, 0.06, 0.1, 0.12, 0.1, 0.1, 0.18, 0.08];
     property <length> cols-w: self.width - 2 * Theme.pad - 16px - 16px - 8px * 8 - 14px;
@@ -318,7 +320,7 @@ export component SearchLogPage inherits Screen {
             text: Radio.slog-running ? Tr.t(Tr.lang, "b_live_stop") : Tr.t(Tr.lang, "b_slog_start");
             kind: Radio.slog-running ? "secondary" : "primary";
             big: true;
-            enabled: !Radio.busy && !Radio.live-running;
+            enabled: Radio.slog-running || (!Radio.busy && !Radio.live-running && !root.app-busy);
             horizontal-stretch: 0;
             clicked => {
                 if Radio.slog-running {
