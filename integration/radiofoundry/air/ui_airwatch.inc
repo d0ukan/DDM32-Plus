@@ -18,6 +18,12 @@ static struct {
 	ui_dual_ref_t ref[2], mw[UI_MW_MAX];
 } mw_keep;
 
+// DDM32 Plus: the air watch runs (or its end is not taken yet): pages that key or search refuse then (UI_AIR_ON)
+bool ui_air_watch_on(void)
+{
+	return mw_air;
+}
+
 // The air watch stopped (any way the watch stops: the tick finds it off): the radio and the user's watch as they were
 static bool __attribute__((noinline)) mw_air_end(void)
 {

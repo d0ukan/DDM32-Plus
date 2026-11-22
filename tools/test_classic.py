@@ -742,7 +742,7 @@ def main():
     argv[argv.index('-o')+1]=str(OUT/'test_radio_vfox')
     run([*argv,'-DCONFIG_MULTI_WATCH=1','-DCONFIG_P25_SCAN=1','-DCONFIG_SPECTRUM=1','-DCONFIG_FOX=1','-DCONFIG_CW_BEACON=1',
          '-DCONFIG_P25_SEARCH=1','-DCONFIG_P25_CALLER=1','-DCONFIG_P25_ANY=1','-DCONFIG_VFO_MODES=1','-DCONFIG_YSF=1',
-         '-DCONFIG_NXDN=1','-DCONFIG_DPMR=1','-DCONFIG_DMR_ANY=1','-I'+str(ROOT/'tests/classic'),
+         '-DCONFIG_NXDN=1','-DCONFIG_DPMR=1','-DCONFIG_DMR_ANY=1','-DCONFIG_VFO_PLAN=1','-DVFO_PLAN_TEST=1','-I'+str(ROOT/'tests/classic'),
          str(APP/'core/radio/spectrum.c'),str(APP/'core/radio/fox.c'),str(APP/'core/radio/cw_beacon.c'),
          str(APP/'core/radio/p25search.c'),str(APP/'core/radio/vfox.c')],cwd=host)
     run([OUT/'test_radio_vfox'],cwd=host)

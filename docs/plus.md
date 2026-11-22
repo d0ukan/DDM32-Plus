@@ -4040,4 +4040,21 @@ the watch goes on, the emergency fails), `test_allsearch_sm.inc` (all digital, D
 watch, a zone scan still stopped), `test_airwatch_radio.inc` (P25 search refused during the air watch, the watch ends
 as usual), `test_vfox_radio.inc` (a find's receive-only VFO in FM and DMR keys nothing, a new frequency transmits
 again, a P25 find stays receive only). Radio rows: `docs/plus-radio-test.md` "Transmit safety (branch `txsafe`)".
-Cost: 632 B flash (96.33 %), no RAM.
+Cost (first round): 632 B flash, no RAM.
+
+**Second round** (branch `txsafe2`, the verifier's findings; `tools/plus_txsafe.py`):
+
+| # | Found | Fix |
+|---|---|---|
+| 1 | The CW beacon keyed whatever letter a scan or the watch ring was on (`radio_sm_tx_check` on the view, then `scan_stop(false)`), repeated unattended, and never asked the band plan | `radio_moving()` (SSTV's rule moved into one helper) refuses it each time it keys; the band plan (`xband_check_hz`) refuses with TXDENY_BAND; the beacon page says "Stop the scan or watch first" before asking |
+| 2, 3 | Heard -> VFO made a VFO that may transmit on any heard frequency; B4's receive only was RAM only and ended with a VFO settings apply or a power off | `CONFIG_VFO_PLAN` in `radio_sm_tx_check`: **the VFO** transmits only on 144-146 / 430-440 MHz, never PMR446, never simplex on a repeater output segment (145.600-145.7875, 438.650-439.425 MHz, half a channel either side); a repeater input with the VFO's split is fine, satellites and APRS are allowed. TXDENY_VFO_PLAN, "VFO: outside the amateur bands" / "VFO: amatör bantların dışında", hint "Tune into a band, then PTT". Whatever made the VFO, and after a restart. Codeplug channels are not affected (CPS-programmed channels are the user's). Heard -> VFO also applies the find's receive-only rule (`ui_heard.c`) |
+| 4 | An in-plan repeater-output find said "RX only", and RREQ_VFO_TX left receive only set | a find on a repeater segment keeps the VFO (simplex on an output is refused by the VFO plan) and says "Repeater: set the TX offset"; RREQ_VFO_TX with a split clears a find's receive only (FM / DMR) |
+| 5 | `call_shape` refused real special-event calls (TC100A, TC1453, YM100TC, W100AW, TC18MRT); an SFR repeater with its CW ID on and no callsign repeated unidentified | 2-4 digits after a one / two character prefix ending in a letter; two digits take three letters or more, only four digits may stand alone (DM32UV, AT878, MD380, UV82, BF888, BAOFENG, 12345 stay refused; shape can't tell UV5R or DM1701 from a callsign). The SFR repeater role is not started then (`radio_dmr_view_t.sfr_nocall`); its page says "Set your callsign (the radio name) in qdmr." |
+| 6 | `sm->air` set after its ring stopped (before the UI's RREQ_AIR_END): searches / SSTV refused without a word | the pages also ask the UI's air watch flag (`ui_air_watch_on`, weak) and say "Stop the scan or watch first" (UI only, not host-tested) |
+| 7 | `dual_dmr_tx` reset `view.am` for a letter but not `view.bcast` | reset and restored too |
+
+Host tests: CW beacon refused during a zone scan (`tests/classic/test_scan.inc`), 146.520 refused and 145.500 keyed
+(`test_sstvtx_radio.inc`, now built with the beacon), the SFR role not started with DM32UV and started with TA2DOU,
+both callsign lists; the VFO plan (`test_vfox_radio.inc` with `CONFIG_VFO_PLAN`): 159.125 FM / DMR / P25 and PMR446
+refused, 145.500 allowed, 438.650 simplex refused and with TX 431.050 allowed, 159.125 still refused after a restart,
+a find's receive only cleared by the split, a codeplug channel on 146.520 unaffected.

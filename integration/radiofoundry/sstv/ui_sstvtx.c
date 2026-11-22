@@ -17,6 +17,14 @@
 #include "ui_svc.h"
 #include "fmt.h"
 #include "i18n.h"
+#if CONFIG_AIR_WATCH
+/* DDM32 Plus: the UI's air watch (ui_airwatch.inc; weak: a build without the watch screens has none). It can still
+ * be set for a moment after its ring stopped (until the UI ends it): the radio core refuses then too */
+bool ui_air_watch_on(void) __attribute__((weak));
+#define UI_AIR_ON()	(ui_air_watch_on != NULL && ui_air_watch_on())
+#else
+#define UI_AIR_ON()	false
+#endif
 #include "gfx.h"
 #include "radio/radio.h"
 #include "radio/radio_cwid.h"
@@ -85,7 +93,7 @@ static const char *refusal(void)
 	char call[RADIO_CWID_CALL_MAX + 1];
 	if (callsign(call) == 0)
 		return TR("Set your callsign (the radio name) in qdmr.");
-	if (v->scan != 0)	/* a scan or a watch: the channel on view is the ring's, not the selected letter */
+	if (v->scan != 0 || UI_AIR_ON())	/* a scan or a watch: the channel on view is the ring's, not the selected letter */
 		return TR("Stop the scan or watch first");
 	if (v->ch.mode != RADIO_MODE_FM || v->am)
 		return TR("SSTV: tune an FM channel");

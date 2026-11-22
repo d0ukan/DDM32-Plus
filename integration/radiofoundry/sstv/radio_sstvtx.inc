@@ -37,35 +37,6 @@ static void sstvtx_refuse(radio_sm_t *sm, uint8_t why, uint8_t deny)
 	beep(sm, BEEP_TX_DENY);
 }
 
-/* Something moves the receiver by itself: a scan, a dual / multi-watch or the air watch (the ring would key a letter
- * the page never checked), a search, the spectrum, trunk following (their polls run before SSTV's and retune) */
-static bool sstvtx_moving(const radio_sm_t *sm)
-{
-	bool on = false;
-#if CONFIG_SCAN
-	on = scan_on(&sm->scan);
-#endif
-#if CONFIG_AIR_WATCH
-	on = on || sm->air;
-#endif
-#if CONFIG_DMR_SEARCH
-	on = on || dmrs_on();		/* the DMR and the all digital search */
-#endif
-#if CONFIG_P25_SEARCH
-	on = on || p25s_on();
-#endif
-#if CONFIG_SPECTRUM
-	on = on || spectrum_on();
-#endif
-#if CONFIG_DMR_TRUNK
-	on = on || dmrtk_on();
-#endif
-#if CONFIG_P25_TRUNK
-	on = on || p25tk_on();
-#endif
-	return on;
-}
-
 static void sstvtx_start(radio_sm_t *sm, uint8_t mode, uint32_t now_ms)
 {
 	const channel_t *ch = &sm->view.ch;
@@ -89,7 +60,7 @@ static void sstvtx_start(radio_sm_t *sm, uint8_t mode, uint32_t now_ms)
 	uint32_t ms = sstv_tx_ms(mode) + SSTVTX_KEYUP_MS;
 	if (busy) {
 		sstvtx_refuse(sm, SSTVTX_R_BUSY, 0);
-	} else if (sstvtx_moving(sm)) {
+	} else if (radio_moving(sm)) {	/* a scan, a watch, a search ... (plus_txsafe.py) */
 		sstvtx_refuse(sm, SSTVTX_R_WATCH, 0);
 	} else if (ch->mode != RADIO_MODE_FM) {
 		sstvtx_refuse(sm, SSTVTX_R_MODE, 0);

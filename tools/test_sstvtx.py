@@ -53,7 +53,7 @@ def radio(argv_cw, cwrad, fixture, ROOT, APP, OUT, host):
     argv[argv.index(str(cwrad))] = str(wrap)
     argv[argv.index('-o') + 1] = str(OUT / 'test_radio_sstvtx')
     core = APP / 'core'
-    run([*argv, '-DCONFIG_SSTV_TX=1', '-DCONFIG_PLUS_ART=1', '-I' + str(ROOT / 'tests/classic'),
+    run([*argv, '-DCONFIG_SSTV_TX=1', '-DCONFIG_PLUS_ART=1', '-DCONFIG_CW_BEACON=1', str(core / 'radio/cw_beacon.c'), '-I' + str(ROOT / 'tests/classic'),
          '-DpvPortMalloc=__builtin_malloc', '-DvPortFree=__builtin_free',
          str(core / 'radio/radio_sstvtx.c'), str(core / 'radio/sstv_tx.c'), str(core / 'radio/xband.c'),
          str(core / 'ui/art_data.c')], cwd=host)

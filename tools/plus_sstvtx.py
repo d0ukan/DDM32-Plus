@@ -79,17 +79,28 @@ def prepare_sstvtx(transform, install):
     # --- The callsign check (hole hunt B16): SSTV's, the cross-band's and the CW ID's identification. Upstream's rule (4
     # to 7 letters and digits, one of each) took "DM32UV", the factory radio name; now it must be shaped like an ITU
     # callsign: a prefix (a letter, two letters, letter + digit, digit + letter, digit + two letters), one digit, 1-4
-    # letters. "TA2DOU/P" gives TA2DOU as before (the word ends at '/', '-' or a space) ---
+    # letters. "TA2DOU/P" gives TA2DOU as before (the word ends at '/', '-' or a space). Special-event calls (second
+    # round): 2-4 digits after a one / two character prefix ending in a letter (TC100A, YM100TC, W100AW, TC18MRT, TC1453);
+    # two digits take three letters or more and only four digits may stand alone, so radio model names (DM32UV, AT878,
+    # MD380, UV82, BF888) stay refused ---
     transform('core/radio/radio_cwid.c', [
         ('uint8_t radio_cwid_callsign(const char *name, char *out, uint8_t cap)\n{\n',
-         '// DDM32 Plus: s (n characters, A-Z and 0-9 only) shaped like an ITU callsign: prefix, one digit, 1-4 letters\n'
+         '// DDM32 Plus: s (n characters, A-Z and 0-9 only) shaped like an ITU callsign: prefix, one digit, 1-4 letters;\n'
+         '// or a special-event call: a one / two character prefix ending in a letter, 2-4 digits, letters (see below)\n'
          'static bool call_shape(const char *s, uint8_t n)\n{\n'
          '\tuint8_t e = n;\n'
          '\twhile (e > 0 && s[e - 1u] >= \'A\')\n\t\te--;\t\t// the suffix: letters\n'
-         '\tif (e == n || (uint8_t)(n - e) > 4u || e < 2u || e > 4u)\n\t\treturn false;\n'
-         '\tuint8_t p = (uint8_t)(e - 1u);\t// s[p] is the digit; s[0..p) the prefix\n'
-         '\tbool d0 = s[0] <= \'9\', d1 = s[1] <= \'9\';\n'
-         '\treturn p == 1u ? !d0 : p == 2u ? !(d0 && d1) : d0 && !d1 && s[2] >= \'A\';\n}\n\n'
+         '\tuint8_t suf = (uint8_t)(n - e);\n'
+         '\tif (suf > 4u || e < 2u)\n\t\treturn false;\n'
+         '\tif (suf != 0 && e <= 4u) {\t// one digit, s[e - 1]; the prefix s[0..e - 1)\n'
+         '\t\tuint8_t p = (uint8_t)(e - 1u);\n'
+         '\t\tbool d0 = s[0] <= \'9\', d1 = s[1] <= \'9\';\n'
+         '\t\tif (p == 1u ? !d0 : p == 2u ? !(d0 && d1) : d0 && !d1 && s[2] >= \'A\')\n\t\t\treturn true;\n\t}\n'
+         '\tuint8_t d = e;\n'
+         '\twhile (d > 0 && s[d - 1u] <= \'9\')\n\t\td--;\t\t// the number; s[0..d) the prefix\n'
+         '\tuint8_t k = (uint8_t)(e - d);\n'
+         '\tif (k < 2u || k > 4u || d == 0 || d > 2u || s[d - 1u] < \'A\')\n\t\treturn false;\n'
+         '\treturn k == 4u || (k == 3u ? suf >= 1u : suf >= 3u);\n}\n\n'
          'uint8_t radio_cwid_callsign(const char *name, char *out, uint8_t cap)\n{\n'),
         ('\tif (!word_end(name[n]) || n < RADIO_CWID_CALL_MIN || !letter || !digit) {\n',
          '\tif (!word_end(name[n]) || n < RADIO_CWID_CALL_MIN || !letter || !digit || !call_shape(out, n)) {\n'),

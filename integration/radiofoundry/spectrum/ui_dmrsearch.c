@@ -18,6 +18,14 @@
 #include "ui_screens.h"
 #include "fmt.h"
 #include "i18n.h"
+#if CONFIG_AIR_WATCH
+/* DDM32 Plus: the UI's air watch (ui_airwatch.inc; weak: a build without the watch screens has none). It can still
+ * be set for a moment after its ring stopped (until the UI ends it): the radio core refuses then too */
+bool ui_air_watch_on(void) __attribute__((weak));
+#define UI_AIR_ON()	(ui_air_watch_on != NULL && ui_air_watch_on())
+#else
+#define UI_AIR_ON()	false
+#endif
 #include "gfx.h"
 #include "radio/radio.h"
 #include "radio/dmrsearch.h"
@@ -32,13 +40,16 @@
 #include "radio/vfox.h"
 #if CONFIG_XBAND || CONFIG_DOTA || CONFIG_SSTV_TX
 #include "radio/xband.h"
-/* Hole hunt B4: a find becomes a VFO that may transmit only on a frequency the band plan allows (amateur, no repeater,
- * satellite, APRS or PMR446 frequency); elsewhere receive only (a public-safety P25 system, a repeater's output) */
-#define FIND_TX_OK(hz)	(xband_check_hz(hz) == XB_R_OK)
+/* Hole hunt B4: a find becomes a VFO that may transmit only on a frequency the band plan allows (amateur, no satellite,
+ * APRS or PMR446 frequency); elsewhere receive only (a public-safety P25 system). A repeater segment: the VFO is kept
+ * (the radio core refuses simplex on an output until the TX offset is set, CONFIG_VFO_PLAN) */
+#define FIND_PLAN(hz)	xband_check_hz(hz)
+#define FIND_RPT	XB_R_REPEATER
 #endif
 #endif
-#ifndef FIND_TX_OK
-#define FIND_TX_OK(hz)	true
+#ifndef FIND_PLAN
+#define FIND_PLAN(hz)	0
+#define FIND_RPT	0xFFu
 #endif
 
 #if CONFIG_SEARCH_RANGE
@@ -374,7 +385,7 @@ static void dmrs_draw(void)
 static void restart(void)
 {
 	uint32_t lo, hi;
-	if (ui_view()->scan == 3 /* SCAN_DUAL: dual / multi-watch, the air watch */) {
+	if (ui_view()->scan == 3 /* SCAN_DUAL: dual / multi-watch, the air watch */ || UI_AIR_ON()) {
 		ui_toast(TR("Stop the scan or watch first"));	/* the radio core refuses it over a watch (hole hunt B3) */
 		return;
 	}
@@ -422,7 +433,8 @@ static bool tune_other(const dmrs_found_t *f, bool tx)
  * digital search: in the find's mode); receive only where the band plan does not allow transmitting */
 static void tune_find(const dmrs_found_t *f)
 {
-	bool tx = FIND_TX_OK(f->hz);
+	uint8_t why = FIND_PLAN(f->hz);
+	bool rpt = why == FIND_RPT, tx = why == 0 || rpt;
 	(void)tx;
 	req_search(0, 0);
 	sel_hz = 0;
@@ -432,6 +444,8 @@ static void tune_find(const dmrs_found_t *f)
 			ui_toast(TR("VFO: not in this build"));
 		else if (!tx)
 			ui_toast(TR("This channel is RX only"));
+		else if (rpt)
+			ui_toast(TR("Repeater: set the TX offset"));
 		ui_go_home();
 		return;
 	}
@@ -444,7 +458,7 @@ static void tune_find(const dmrs_found_t *f)
 		radio_req_dmr_timeslot((f->ts_mask & 1u) ? 1u : 2u);
 	ui_go_home();
 	/* A repeater's output: the VFO is simplex there, so PTT would talk on the output; say so */
-	if (f->sync_mask & DMRS_SYNC_BS)
+	if ((f->sync_mask & DMRS_SYNC_BS) || rpt)
 		ui_toast(TR("Repeater: set the TX offset"));
 }
 

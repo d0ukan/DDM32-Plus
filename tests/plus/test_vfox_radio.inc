@@ -452,6 +452,71 @@ static void test_vfox_find_rx_only(void)
     printf("Plus every mode in the VFO: a search find outside the band plan is receive only until the frequency changes\n");
 }
 
+/* Hole hunt, second round (CONFIG_VFO_PLAN): the VFO transmits only in the amateur bands, whatever made it (Heard,
+ * a find, typed, the VFO settings) and after a restart: 159.125 refused in FM, DMR and a P25 that could otherwise
+ * talk; PMR446 refused; 145.500 simplex keys; 438.650 simplex (a repeater output) refused, with TX 431.050 (the
+ * repeater's input) allowed; a codeplug channel outside the bands is the user's (not affected). A find's receive only
+ * ends when a split is set (RREQ_VFO_TX) */
+static void vx_plan(uint32_t hz, uint8_t m, uint8_t want)
+{
+    vx_request(RREQ_VFO_SET, (int32_t)hz);
+    vx_apply(hz, m, 0x293, 99, 3101234);
+    vx_pump(5);
+    CHECK(sm.view.vfo && sm.view.ch.rx_hz == hz && sm.view.ch.mode == m);
+    if (radio_sm_tx_check(&sm) != want)
+        printf("  VFO %u Hz mode %u: deny %u, want %u\n", (unsigned)hz, m, radio_sm_tx_check(&sm), want);
+    CHECK(radio_sm_tx_check(&sm) == want);
+}
+
+#if CONFIG_VFO_PLAN
+bool vfo_plan_test_on;	/* the plan only here (upstream's suites put the VFO anywhere): radio_sm.c VFO_PLAN_TEST */
+#endif
+static void test_vfox_plan(void)
+{
+#if CONFIG_VFO_PLAN
+    vfo_plan_test_on = true;
+    static const uint8_t modes[] = { RADIO_MODE_FM, RADIO_MODE_DMR, RADIO_MODE_P25 };
+    vx_start();
+    for (unsigned i = 0; i < sizeof modes; i++) {
+        vx_plan(159125000, modes[i], TXDENY_VFO_PLAN);
+        vx_plan(145500000, modes[i], TXDENY_NONE);
+    }
+    vx_plan(446006250, RADIO_MODE_FM, TXDENY_VFO_PLAN);
+    vx_plan(438650000, RADIO_MODE_FM, TXDENY_VFO_PLAN);
+    int tx0 = hw.tx_calls;
+    vx_request(RREQ_PTT, 1);
+    vx_pump(5);
+    CHECK(hw.tx_calls == tx0 && sm.view.state != RS_TX);
+    vx_request(RREQ_PTT, 0);
+    vx_pump(20);
+    vx_request(RREQ_VFO_TX, 431050000);
+    CHECK(sm.view.ch.tx_hz == 431050000 && radio_sm_tx_check(&sm) == TXDENY_NONE);
+    /* restart: the VFO comes back on 159.125 from the settings, still refused */
+    vx_plan(159125000, RADIO_MODE_FM, TXDENY_VFO_PLAN);
+    boot();
+    CHECK(sm.view.vfo && sm.view.ch.rx_hz == 159125000 && radio_sm_tx_check(&sm) == TXDENY_VFO_PLAN);
+    /* a search find's receive only on a repeater output ends with the split */
+    vx_request(RREQ_VFO_SET, 438650000);
+    channel_t c = sm.view.ch;
+    c.rx_hz = c.tx_hz = 438650000;
+    vfox_set_mode(&c, RADIO_MODE_FM, 0);
+    c.rx_only = true;
+    radio_req_vfo_apply(&c);
+    vx_pump(5);
+    CHECK(radio_sm_tx_check(&sm) == TXDENY_RX_ONLY);
+    vx_request(RREQ_VFO_TX, 431050000);
+    CHECK(!sm.vfo_ch.rx_only && radio_sm_tx_check(&sm) == TXDENY_NONE);
+    /* a codeplug channel is not affected (channel 2 of the fixture: 162.550, receive only by its own flag; channel 1
+     * 146.520, outside Region 1's 2 m band, still transmits) */
+    vx_request(RREQ_VFO, 0);
+    vx_pump(20);
+    CHECK(!sm.view.vfo && sm.view.ch.rx_hz == 146520000 && radio_sm_tx_check(&sm) == TXDENY_NONE);
+    vfo_plan_test_on = false;
+    printf("Plus VFO band plan: 159.125 / PMR446 / simplex on 438.650 refused, 145.500 and the repeater split allowed, "
+           "also after a restart; codeplug channels unchanged\n");
+#endif
+}
+
 int main(void)
 {
     int prior = mwatch_radio_main();
@@ -464,6 +529,7 @@ int main(void)
     test_vfox_ring();
     test_vfox_ring_tx();
     test_vfox_find_rx_only();
+    test_vfox_plan();
     printf("Plus every mode in the VFO, radio core: %d failures\n", failures - before);
     return prior || failures != before ? 1 : 0;
 }

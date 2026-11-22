@@ -204,7 +204,26 @@ static void test_plus_spectrum_sm(void)
         /* Stop request while armed */
         rb.arg2=3;radio_sm_request(&sm,&rb,now);rb.arg=CW_BEACON_KINDS;radio_sm_request(&sm,&rb,now);
         now+=10;radio_sm_tick(&sm,now);cw_beacon_view(&bv);CHECK(!bv.on && !bv.keying);
-        printf("Plus CW beacon: once, periodic, PTT cut, no callsign, TX inhibit, stop\n");
+        /* DDM32 Plus (hole hunt): a zone scan runs: refused (it would key whatever channel the scan is on), the scan
+         * goes on, nothing keyed */
+        {
+            radio_req_t zs={.type=RREQ_SCAN,.arg=RSCAN_ZONE};radio_sm_request(&sm,&zs,now);
+            for(int i=0;i<30;i++){ now+=10;radio_sm_tick(&sm,now);radio_sm_poll(&sm,now); }
+            CHECK(scan_on(&sm.scan));
+            int tx3=hw.tx_calls;bool busy_seen=false;
+            for(int k=0;k<8;k++){   /* wherever the scan is (a receive-only channel says so with its own reason) */
+                rb.arg=CW_BEACON_CQ;rb.arg2=0;radio_sm_request(&sm,&rb,now);
+                for(int i=0;i<5;i++){ now+=10;radio_sm_tick(&sm,now); }
+                cw_beacon_view(&bv);
+                busy_seen=busy_seen || bv.refused==0xFFu;
+                CHECK(!bv.on && !bv.keying && bv.refused!=0 && hw.tx_calls==tx3 && scan_on(&sm.scan));
+                for(int i=0;i<17;i++){ now+=10;radio_sm_tick(&sm,now);radio_sm_poll(&sm,now); }
+            }
+            CHECK(busy_seen);   /* refused on a channel that may transmit too */
+            zs.arg=RSCAN_STOP;radio_sm_request(&sm,&zs,now);
+            for(int i=0;i<30;i++){ now+=10;radio_sm_tick(&sm,now);radio_sm_poll(&sm,now); }
+        }
+        printf("Plus CW beacon: once, periodic, PTT cut, no callsign, TX inhibit, stop, refused during a scan\n");
     }
 #endif
     printf("Plus spectrum in the radio state machine: takes the receiver muted, request/stop/idle give it back\n");

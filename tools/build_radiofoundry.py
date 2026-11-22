@@ -691,6 +691,7 @@ def main():
         "CONFIG_P25_EXTRAS="+("y" if args.plus else "n"),
         "CONFIG_P25_MODE2="+("y" if args.plus else "n"),
         "CONFIG_VFO_MODES="+("y" if args.plus else "n"),
+        "CONFIG_VFO_PLAN="+("y" if args.plus else "n"),	# DDM32 Plus: the VFO transmits in the amateur bands only (tools/plus_txsafe.py)
         "CONFIG_TONE_FIND="+("y" if args.plus else "n"),
         "CONFIG_SELCALL="+("y" if args.plus else "n"),
         "CONFIG_SCAN_PRIO="+("y" if args.plus else "n"),

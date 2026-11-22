@@ -12,6 +12,14 @@
 #include "ui_screens.h"
 #include "fmt.h"
 #include "i18n.h"
+#if CONFIG_AIR_WATCH
+/* DDM32 Plus: the UI's air watch (ui_airwatch.inc; weak: a build without the watch screens has none). It can still
+ * be set for a moment after its ring stopped (until the UI ends it): the radio core refuses then too */
+bool ui_air_watch_on(void) __attribute__((weak));
+#define UI_AIR_ON()	(ui_air_watch_on != NULL && ui_air_watch_on())
+#else
+#define UI_AIR_ON()	false
+#endif
 #include "gfx.h"
 #include "radio/radio.h"
 #include "radio/p25search.h"
@@ -250,7 +258,7 @@ static void p25s_draw(void)
 static void restart(void)
 {
 	uint32_t lo, hi;
-	if (ui_view()->scan == 3 /* SCAN_DUAL: dual / multi-watch, the air watch */) {
+	if (ui_view()->scan == 3 /* SCAN_DUAL: dual / multi-watch, the air watch */ || UI_AIR_ON()) {
 		ui_toast(TR("Stop the scan or watch first"));	/* the radio core refuses it over a watch (hole hunt B3) */
 		return;
 	}

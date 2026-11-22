@@ -217,11 +217,18 @@ static bool __attribute__((noinline)) dual_dmr_tx(radio_sm_t *sm, uint8_t i)
 	bool am = sm->view.am;
 	sm->view.am = false;		// the receiver's letter's (an air band letter is refused by its frequency)
 #endif
+#if CONFIG_BCAST_FM
+	bool bcast = sm->view.bcast;
+	sm->view.bcast = false;		// the same (a broadcast band letter is refused by its frequency)
+#endif
 	uint8_t deny = radio_sm_tx_check(sm);
 	sm->view.ch = keep;
 	sm->view.vfo = vfo;
 #if CONFIG_AM_RX
 	sm->view.am = am;
+#endif
+#if CONFIG_BCAST_FM
+	sm->view.bcast = bcast;
 #endif
 	return deny == TXDENY_NONE;
 }

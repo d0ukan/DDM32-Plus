@@ -15,6 +15,12 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   DMR and P25 search are refused over a dual / multi-watch or the air watch. OK on a search find outside the amateur
   band plan makes the VFO receive only ("This channel is RX only") until its frequency changes. The radio name must
   look like a callsign for SSTV, the cross-band and CW IDs ("DM32UV", the factory name, is refused; TA2DOU/P works).
+- Transmit safety, second round: the VFO transmits only in the amateur bands (144-146 / 430-440 MHz, not PMR446, not
+  simplex on a repeater output; a repeater split works), whatever made it and after a restart ("VFO: outside the
+  amateur bands"); codeplug channels are unchanged. The CW beacon is refused during a scan or watch and outside the
+  band plan. A search find on a repeater says "Repeater: set the TX offset"; setting the offset ends a find's receive
+  only. Special-event callsigns (TC100A, TC1453, YM100TC) are accepted; an SFR repeater with its CW ID on and no
+  callsign does not start.
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
   radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
   that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved

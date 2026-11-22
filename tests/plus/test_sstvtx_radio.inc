@@ -305,9 +305,13 @@ static void test_sstvtx_core_checks(void)
 static void test_sstvtx_callsign(void)
 {
 	static const char *const good[] = { "TA2DOU", "TA2DOU/P", "YM2KDZ", "ta2dou-7", "W1AW", "N4ABC", "VE3ABC",
-					    "KD2ABCD", "2E0ABC", "9A1A", "4X6TT", "A61AB", "3DA0XY", "M0ABC" };
-	static const char *const bad[] = { "DM32UV", "BAOFENG", "12345", "RADIO1", "Dogan", "DM-32UV", "TA22DOU",
-					   "1A2BC3", "W1", "TA2DOU1", "ABCD1EF", "1234A" };
+					    "KD2ABCD", "2E0ABC", "9A1A", "4X6TT", "A61AB", "3DA0XY", "M0ABC",
+					    /* special-event calls: 2-4 digits */
+					    "TC100A", "TC1453", "YM100TC", "W100AW", "TC18MRT" };
+	static const char *const bad[] = { "DM32UV", "BAOFENG", "12345", "RADIO1", "Dogan", "DM-32UV", "1A2BC3", "W1",
+					   "TA2DOU1", "ABCD1EF", "1234A",
+					   /* radio model names */
+					   "AT878", "MD380", "UV82", "BF888" };
 	char cs[RADIO_CWID_CALL_MAX + 1];
 	for (unsigned i = 0; i < sizeof good / sizeof good[0]; i++) {
 		if (radio_cwid_callsign(good[i], cs, sizeof cs) == 0) {
@@ -331,6 +335,69 @@ static void test_sstvtx_callsign(void)
 	       (unsigned)(sizeof good / sizeof good[0]), (unsigned)(sizeof bad / sizeof bad[0]));
 }
 
+#if CONFIG_CW_BEACON
+#include "radio/cw_beacon.h"
+#endif
+/* Hole hunt, second round: the CW beacon checks the band plan in the radio core each time it keys (146.520, outside
+ * Region 1's 2 m band, refused; 145.500 keyed); an SFR repeater role with its CW ID on and the radio name no callsign
+ * is not started (no unidentified repeating), with a callsign it is */
+static void test_txsafe2(void)
+{
+#if CONFIG_CW_BEACON
+	cw_beacon_view_t bv;
+	st_hz = 146520000u;
+	st_begin(0);
+	int tx0 = hw.tx_calls;
+	radio_req_t rb = { .type = RREQ_CW_BEACON, .arg = CW_BEACON_CQ, .arg2 = 0 };
+	radio_sm_request(&sm, &rb, now);
+	for (int i = 0; i < 5; i++) {
+		now += 10;
+		radio_sm_tick(&sm, now);
+	}
+	cw_beacon_view(&bv);
+	CHECK(!bv.on && !bv.keying && bv.refused == TXDENY_BAND && hw.tx_calls == tx0);
+	st_hz = 145500000u;
+	st_begin(0);
+	tx0 = hw.tx_calls;
+	radio_sm_request(&sm, &rb, now);
+	now += 10;
+	radio_sm_tick(&sm, now);
+	cw_beacon_view(&bv);
+	CHECK(bv.keying && hw.tx_calls == tx0 + 1 && hw.tx_hz == 145500000u);
+	for (int i = 0; i < 6000 && bv.keying; i++) {
+		now += 10;
+		radio_sm_tick(&sm, now);
+		cw_beacon_view(&bv);
+	}
+	CHECK(!bv.keying && sm.view.state != RS_TX);
+	printf("Plus CW beacon radio core: the band plan before keying (146.520 refused, 145.500 keyed)\n");
+#endif
+#if CONFIG_SFR_CWID
+	setup_codeplug();
+	start();
+	poll_for(500);
+	dmr_start(true);
+	chans[4].sfr_flag1 = SFR_CHANNEL_FLAG1_ENABLED;
+	chans[4].sfr_a = SFR_ROLE_RPT_STANDARD;
+	strcpy(sm.radio_name, "DM32UV");
+	radio_settings_t set = sm.set;
+	set.sfr_cwid = 1;
+	radio_sm_set_settings(&sm, &set, now);
+	reload_channel();
+	CHECK(!sm.sfr_rpt && sm.view.dmr.sfr_nocall && !sm.dmr_keyed);
+	strcpy(sm.radio_name, "TA2DOU");
+	reload_channel();
+	CHECK(sm.sfr_rpt && !sm.view.dmr.sfr_nocall);
+	set.sfr_cwid = 0;
+	radio_sm_set_settings(&sm, &set, now);
+	chans[4].sfr_flag1 = 0;
+	chans[4].sfr_a = 0;
+	reload_channel();
+	CHECK(!sm.sfr_rpt);
+	printf("Plus SFR repeater: not started with its CW ID on and no callsign, started with one\n");
+#endif
+}
+
 int main(void)
 {
 	int prior = classic_radio_main();
@@ -340,6 +407,7 @@ int main(void)
 	test_sstvtx_stops();
 	test_sstvtx_core_checks();
 	test_sstvtx_callsign();
+	test_txsafe2();
 	printf("Plus SSTV send in the radio core: %d failures (upstream's and Classic's suites with it built in: %s)\n",
 	       failures - before, prior ? "FAILED" : "passed");
 	return prior != 0 || failures != before;
