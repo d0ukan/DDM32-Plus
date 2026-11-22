@@ -8,6 +8,36 @@
         TextOptions.TextFormattingMode="Display">
     <!-- main_window.py: the toolbar (help, disclaimer, about; here also the language), the pages as tabs, the status bar -->
     <DockPanel>
+        <Menu x:Name="MenuBar" DockPanel.Dock="Top" Background="{StaticResource Window}">
+            <MenuItem Header="{l:Tr Menu_File}">
+                <MenuItem Header="{l:Tr Tab_Home}" Tag="home" Click="OnMenuPage" />
+                <MenuItem Header="{l:Tr Menu_OpenBackups}" Click="OnOpenBackups" />
+                <MenuItem Header="{l:Tr Menu_OpenLogs}" Click="OnOpenLogs" />
+                <Separator />
+                <MenuItem Header="{l:Tr Menu_Exit}" Click="OnExit" />
+            </MenuItem>
+            <MenuItem Header="{l:Tr Menu_Radio}">
+                <MenuItem Header="{l:Tr Tab_Health}" Tag="health" Click="OnMenuPage" />
+                <MenuItem Header="{l:Tr Tab_Live}" Tag="live" Click="OnMenuPage" />
+                <MenuItem Header="{l:Tr Tab_SearchLog}" Tag="searchlog" Click="OnMenuPage" />
+                <Separator />
+                <MenuItem Header="{l:Tr Tab_Update}" Tag="update" Click="OnMenuPage" />
+                <MenuItem Header="{l:Tr Tab_Restore}" Tag="restore" Click="OnMenuPage" />
+            </MenuItem>
+            <MenuItem Header="{l:Tr Menu_Tools}">
+                <MenuItem Header="{l:Tr Tab_Channels}" Tag="channels" Click="OnMenuPage" />
+                <MenuItem Header="{l:Tr Tab_Packs}" Tag="packs" Click="OnMenuPage" />
+                <MenuItem Header="{l:Tr Tab_Versions}" Tag="versions" Click="OnMenuPage" />
+                <MenuItem x:Name="MenuLocal" Header="{l:Tr Menu_LocalRelease}" Click="OnLocalRelease" Visibility="Collapsed" />
+            </MenuItem>
+            <MenuItem Header="{l:Tr Menu_HelpMenu}">
+                <MenuItem Header="{l:Tr Menu_Guide}" Click="OnHelp" />
+                <MenuItem Header="{l:Tr Menu_Disclaimer}" Click="OnDisclaimer" />
+                <MenuItem Header="{l:Tr Menu_GitHub}" Click="OnGitHub" />
+                <Separator />
+                <MenuItem Header="{l:Tr Menu_About}" Click="OnAbout" />
+            </MenuItem>
+        </Menu>
         <ToolBarTray DockPanel.Dock="Top" Background="{StaticResource Window}" IsLocked="True">
             <ToolBar Background="{StaticResource Window}" Loaded="OnToolBarLoaded">
                 <Button Click="OnHelp" ToolTip="{l:Tr Menu_HelpTip}">

@@ -34,6 +34,15 @@ rust/
   packaging/make_app_zip.py  the update zip per platform (app_rs); packaging/art/ the logo and the icon
 ```
 
+## Menu bar
+
+A plain menu bar across the top of the window (every colour from the theme, light and dark): **Dosya / File** (Home,
+backups folder, logs folder, Settings, Exit), **Telsiz / Radio** (health, live, search log, update, backups and going
+back), **Araçlar / Tools** (my channels, data packs), **Yardım / Help** (user guide, GitHub page, About). It only
+navigates or opens folders and links, never starts a radio step; the radio entries are off while a radio step, the live
+panel or the search log holds the port (`App.menu-radio-locked`, `tests/menu.rs`). It is hidden on the first-start
+language screen. Menu bar: ui/menubar.slint.
+
 ## Radio access
 
 A serial port exists only in a build with the **`radio` feature** (off by default). Without it no code path can open a

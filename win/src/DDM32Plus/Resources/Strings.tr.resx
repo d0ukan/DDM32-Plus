@@ -1529,4 +1529,31 @@ Telsizdeki önceki paket hâlâ kullanımda.</value>
   <data name="SLog_Missed" xml:space="preserve">
     <value>({0} konuşma kaçmış olabilir: telsiz iki okuma arasında 8'den fazla buldu)</value>
   </data>
+  <data name="Menu_File" xml:space="preserve">
+    <value>_Dosya</value>
+  </data>
+  <data name="Menu_Radio" xml:space="preserve">
+    <value>_Telsiz</value>
+  </data>
+  <data name="Menu_Tools" xml:space="preserve">
+    <value>_Araçlar</value>
+  </data>
+  <data name="Menu_HelpMenu" xml:space="preserve">
+    <value>_Yardım</value>
+  </data>
+  <data name="Menu_OpenBackups" xml:space="preserve">
+    <value>_Yedekler klasörü</value>
+  </data>
+  <data name="Menu_OpenLogs" xml:space="preserve">
+    <value>_Kayıt klasörü</value>
+  </data>
+  <data name="Menu_Exit" xml:space="preserve">
+    <value>_Çıkış</value>
+  </data>
+  <data name="Menu_Guide" xml:space="preserve">
+    <value>_Kullanım kılavuzu</value>
+  </data>
+  <data name="Menu_GitHub" xml:space="preserve">
+    <value>_GitHub sayfası</value>
+  </data>
 </root>

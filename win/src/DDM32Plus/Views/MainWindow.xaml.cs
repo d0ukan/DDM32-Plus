@@ -44,6 +44,9 @@ public partial class MainWindow : Window
         Title = $"{AppInfo.Name} {AppState.ProgramVersion} - TA2DOU" + (!Core.Radio.BuildFlags.IsDeveloper ? "" :
             Core.Radio.RadioAccess.WritesOn ? Loc.T("Dev_TitleWrite") : Core.Radio.RadioAccess.IsOn ? Loc.T("Dev_Title") : "");
         LocalButton.Visibility = Core.Radio.BuildFlags.IsDeveloper ? Visibility.Visible : Visibility.Collapsed;
+        MenuLocal.Visibility = LocalButton.Visibility;
+        foreach (var m in PageMenuItems(MenuBar))
+            m.IsEnabled = MenuRules.PageEnabled((string)m.Tag, ToolRunner.AnyBusy);
         MenuTr.IsChecked = Loc.Instance.Language == "tr";
         MenuEn.IsChecked = Loc.Instance.Language == "en";
         StatusCable.Text = Loc.F("Status_Cable", CableScanner.Short(state.Cable, state.Port));
@@ -129,6 +132,38 @@ public partial class MainWindow : Window
             state.Settings.AcceptDisclaimer(AppState.DisclaimerVersion(), Core.Releases.ReleaseClient.NowUtc());
         RefreshAll();
     }
+
+    private static IEnumerable<MenuItem> PageMenuItems(ItemsControl parent)
+    {
+        foreach (var item in parent.Items.OfType<MenuItem>())
+        {
+            if (item.Tag is string)
+                yield return item;
+            foreach (var sub in PageMenuItems(item))
+                yield return sub;
+        }
+    }
+
+    private void OnMenuPage(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string key })
+            OpenPage(key);
+    }
+
+    private void OpenFolder(string folder)
+    {
+        Directory.CreateDirectory(folder);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(folder) { UseShellExecute = true });
+    }
+
+    private void OnOpenBackups(object sender, RoutedEventArgs e) => OpenFolder(state.Paths.Backups);
+
+    private void OnOpenLogs(object sender, RoutedEventArgs e) => OpenFolder(state.Paths.Logs);
+
+    private void OnExit(object sender, RoutedEventArgs e) => Close();
+
+    private void OnGitHub(object sender, RoutedEventArgs e) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppInfo.RepoUrl) { UseShellExecute = true });
 
     private void OnHelp(object sender, RoutedEventArgs e) => InfoDialog.ShowHelp(this, state);
 

@@ -1529,4 +1529,31 @@ The pack the radio had is still in force.</value>
   <data name="SLog_Missed" xml:space="preserve">
     <value>({0} calls may be missed: the radio found more than 8 between two reads)</value>
   </data>
+  <data name="Menu_File" xml:space="preserve">
+    <value>_File</value>
+  </data>
+  <data name="Menu_Radio" xml:space="preserve">
+    <value>_Radio</value>
+  </data>
+  <data name="Menu_Tools" xml:space="preserve">
+    <value>_Tools</value>
+  </data>
+  <data name="Menu_HelpMenu" xml:space="preserve">
+    <value>_Help</value>
+  </data>
+  <data name="Menu_OpenBackups" xml:space="preserve">
+    <value>_Backups folder</value>
+  </data>
+  <data name="Menu_OpenLogs" xml:space="preserve">
+    <value>_Logs folder</value>
+  </data>
+  <data name="Menu_Exit" xml:space="preserve">
+    <value>E_xit</value>
+  </data>
+  <data name="Menu_Guide" xml:space="preserve">
+    <value>_User guide</value>
+  </data>
+  <data name="Menu_GitHub" xml:space="preserve">
+    <value>_GitHub page</value>
+  </data>
 </root>

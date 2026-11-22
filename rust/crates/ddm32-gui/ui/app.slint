@@ -4,6 +4,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, Progress, PageHeader } from "widgets.slint";
+import { MenuBar } from "menubar.slint";
 import { Radio, Fact, TableRow, HealthPage, LivePage, ChannelsPage, SearchLogPage } from "radio_pages.slint";
 export { Theme, Tr, Radio, Fact, TableRow }
 
@@ -74,6 +75,10 @@ export global App {
     callback set-channel(int);
     callback set-auto-check(bool);
     callback open-backups-folder();
+    // an entry of the menu bar: "page:N", "backups-folder", "logs-folder", "guide", "github" or "exit"
+    callback menu-action(string);
+    // the menu bar: the radio entries are off while any radio step, the live panel or the search log holds the port
+    out property <bool> menu-radio-locked: root.busy || Radio.busy || Radio.live-running || Radio.slog-running;
     // the program's own update
     in property <string> app-update-text;
     in property <bool> app-update-available;
@@ -517,17 +522,29 @@ export component AppWindow inherits Window {
     background: Theme.window;
     default-font-size: Theme.font;
 
-    if App.page == 0 : Home {}
-    if App.page == 1 : Wizard {}
-    if App.page == 2 : Backups {}
-    if App.page == 3 : Packs {}
-    if App.page == 4 : Settings {}
-    if App.page == 5 : About {}
-    if App.page == 6 : FirstStart {}
-    if App.page == 7 : HealthPage {}
-    if App.page == 8 : LivePage {}
-    if App.page == 9 : ChannelsPage {}
-    if App.page == 10 : SearchLogPage { app-busy: App.busy; }
+    VerticalLayout {
+        padding: 0;
+        spacing: 0;
+        if App.page != 6 : MenuBar {
+            busy: App.busy || App.confirm-open;
+            radio-locked: App.menu-radio-locked || App.confirm-open;
+            action(a) => { App.menu-action(a); }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+        if App.page == 0 : Home {}
+        if App.page == 1 : Wizard {}
+        if App.page == 2 : Backups {}
+        if App.page == 3 : Packs {}
+        if App.page == 4 : Settings {}
+        if App.page == 5 : About {}
+        if App.page == 6 : FirstStart {}
+        if App.page == 7 : HealthPage {}
+        if App.page == 8 : LivePage {}
+        if App.page == 9 : ChannelsPage {}
+        if App.page == 10 : SearchLogPage { app-busy: App.busy; }
+        }
+    }
 
     // the second confirmation of the install without backup
     if App.confirm-open : Rectangle {

@@ -4,6 +4,15 @@
 
 pub const TEXTS: &[(&str, &str, &str)] = &[
     ("back_home", "Ana sayfa", "Home"),
+    ("m_file", "Dosya", "File"),
+    ("m_radio", "Telsiz", "Radio"),
+    ("m_tools", "Araçlar", "Tools"),
+    ("m_help", "Yardım", "Help"),
+    ("m_open_backups", "Yedekler klasörü", "Backups folder"),
+    ("m_open_logs", "Kayıt klasörü", "Logs folder"),
+    ("m_exit", "Çıkış", "Exit"),
+    ("m_guide", "Kullanım kılavuzu", "User guide"),
+    ("m_github", "GitHub sayfası", "GitHub page"),
     ("home_update", "Telsizi güncelle", "Update the radio"),
     ("home_backups", "Yedekler ve geri dönüş", "Backups and going back"),
     ("home_packs", "Veri paketleri", "Data packs"),

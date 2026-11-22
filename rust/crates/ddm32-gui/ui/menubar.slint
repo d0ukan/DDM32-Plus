@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The classic menu bar across the top of the window: File, Radio, Tools, Help. It only reaches what the window
+// already has (pages, folders, links); it never starts a radio step. Every colour from Theme, every text from Tr.
+import { Theme } from "theme.slint";
+import { Tr } from "widgets.slint";
+
+export struct MenuEntry { text: string, action: string, enabled: bool, separator: bool }
+
+// one menu: its name on the bar, its entries in a drop-down below it
+component MenuHead inherits Rectangle {
+    in property <string> text;
+    in property <[MenuEntry]> entries;
+    callback chosen(string);
+    min-height: 32px;
+    preferred-width: lbl.preferred-width + 24px;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { pop.show(); }
+    background: ta.has-hover || pop-open ? Theme.button-hover : transparent;
+    property <bool> pop-open;
+    lbl := Text {
+        text: root.text;
+        color: Theme.text;
+        font-size: Theme.font;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+    ta := TouchArea {
+        clicked => { root.pop-open = true; pop.show(); }
+    }
+    pop := PopupWindow {
+        x: 0px;
+        y: root.height;
+        width: 260px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+            VerticalLayout {
+                padding: 3px;
+                spacing: 0px;
+                for e in root.entries : Rectangle {
+                    min-height: e.separator ? 9px : 32px;
+                    if e.separator : Rectangle {
+                        height: 1px;
+                        background: Theme.border;
+                    }
+                    if !e.separator : Rectangle {
+                        background: row.has-hover && e.enabled ? Theme.button-hover : transparent;
+                        accessible-role: button;
+                        accessible-label: e.text;
+                        accessible-enabled: e.enabled;
+                        accessible-action-default => { if e.enabled { root.pop-open = false; pop.close(); root.chosen(e.action); } }
+                        Text {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            text: e.text;
+                            color: e.enabled ? Theme.text : Theme.disabled-text;
+                            font-size: Theme.font;
+                            vertical-alignment: center;
+                        }
+                        row := TouchArea {
+                            enabled: e.enabled;
+                            clicked => { root.pop-open = false; pop.close(); root.chosen(e.action); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component MenuBar inherits Rectangle {
+    // locked: a radio step (or the search log / live panel) holds the port; busy: an install, backup or program update
+    in property <bool> radio-locked;
+    in property <bool> busy;
+    callback action(string);
+    background: Theme.surface;
+    min-height: 33px;
+    max-height: 33px;
+    vertical-stretch: 0;
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-bottom: 1px;
+        alignment: start;
+        MenuHead {
+            text: Tr.t(Tr.lang, "m_file");
+            entries: [
+                { text: Tr.t(Tr.lang, "back_home"), action: "page:0", enabled: !root.busy },
+                { text: Tr.t(Tr.lang, "m_open_backups"), action: "backups-folder", enabled: true },
+                { text: Tr.t(Tr.lang, "m_open_logs"), action: "logs-folder", enabled: true },
+                { text: Tr.t(Tr.lang, "home_settings"), action: "page:4", enabled: !root.busy },
+                { separator: true },
+                { text: Tr.t(Tr.lang, "m_exit"), action: "exit", enabled: !root.busy },
+            ];
+            chosen(a) => { root.action(a); }
+        }
+        MenuHead {
+            text: Tr.t(Tr.lang, "m_radio");
+            entries: [
+                { text: Tr.t(Tr.lang, "home_health"), action: "page:7", enabled: !root.radio-locked },
+                { text: Tr.t(Tr.lang, "home_live"), action: "page:8", enabled: !root.radio-locked },
+                { text: Tr.t(Tr.lang, "home_slog"), action: "page:10", enabled: !root.radio-locked },
+                { separator: true },
+                { text: Tr.t(Tr.lang, "home_update"), action: "page:1", enabled: !root.radio-locked },
+                { text: Tr.t(Tr.lang, "home_backups"), action: "page:2", enabled: !root.radio-locked },
+            ];
+            chosen(a) => { root.action(a); }
+        }
+        MenuHead {
+            text: Tr.t(Tr.lang, "m_tools");
+            entries: [
+                { text: Tr.t(Tr.lang, "home_channels"), action: "page:9", enabled: !root.busy },
+                { text: Tr.t(Tr.lang, "home_packs"), action: "page:3", enabled: !root.radio-locked },
+            ];
+            chosen(a) => { root.action(a); }
+        }
+        MenuHead {
+            text: Tr.t(Tr.lang, "m_help");
+            entries: [
+                { text: Tr.t(Tr.lang, "m_guide"), action: "guide", enabled: true },
+                { text: Tr.t(Tr.lang, "m_github"), action: "github", enabled: true },
+                { separator: true },
+                { text: Tr.t(Tr.lang, "home_about"), action: "page:5", enabled: !root.busy },
+            ];
+            chosen(a) => { root.action(a); }
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}

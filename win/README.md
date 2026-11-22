@@ -108,6 +108,15 @@ python win/tests/DDM32Plus.Core.Tests/Fixtures/make_radio_fixtures.py
 It also writes `src/DDM32Plus.Core/Radio/Data/` (the RAM monitor image and the codec tables). Run it again when a
 radio tool in `pc/radiotools` changes; the replay tests then show where the C# port differs.
 
+## Menu bar
+
+A classic menu bar sits above the toolbar (the toolbar and the page tabs stay): **Dosya / File** (Home, backups folder,
+logs folder, Exit; Alt+D), **Telsiz / Radio** (health, live panel, search log, update, restore; Alt+T), **Araçlar /
+Tools** (my channels, data packs, versions; the local release folder in developer builds only; Alt+A), **Yardım /
+Help** (user guide, disclaimer, GitHub page, About; Alt+Y). In English the keys are Alt+F, R, T, H. The radio pages
+are off while any radio step holds the port (`ToolRunner.AnyBusy`), as the pages' own buttons are
+(`MenuRules`, tested in `MenuRulesTests`).
+
 ## Faster update paths (over an installed DDM32 Plus only)
 
 Owner's decision 2026-11-20 (AGENTS.md rule 4). On the Backup step, besides "Yedek al" (the default):

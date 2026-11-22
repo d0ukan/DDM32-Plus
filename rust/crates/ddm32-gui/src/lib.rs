@@ -301,10 +301,67 @@ fn wire(ui: &AppWindow) {
     });
     let w = ui.as_weak();
     app.on_app_update(move || app_update(&w.unwrap()));
+    let w = ui.as_weak();
+    app.on_menu_action(move |a| menu_action(&w.unwrap(), &a));
     app.on_open_backups_folder(move || {
         let dir = with(|s| s.paths.backups());
         open_folder(&dir);
     });
+}
+
+/// What an entry of the menu bar does (the strings the menu's `action` callback carries).
+#[derive(Debug, PartialEq, Eq)]
+pub enum MenuAction {
+    Page(i32),
+    BackupsFolder,
+    LogsFolder,
+    Guide,
+    GitHub,
+    Exit,
+}
+
+pub const GITHUB_URL: &str = "https://github.com/d0ukan/DDM32-Plus";
+
+pub fn parse_menu_action(a: &str) -> Option<MenuAction> {
+    Some(match a {
+        "backups-folder" => MenuAction::BackupsFolder,
+        "logs-folder" => MenuAction::LogsFolder,
+        "guide" => MenuAction::Guide,
+        "github" => MenuAction::GitHub,
+        "exit" => MenuAction::Exit,
+        _ => MenuAction::Page(a.strip_prefix("page:")?.parse().ok().filter(|p| (0..=10).contains(p) && *p != 6)?),
+    })
+}
+
+fn menu_action(ui: &AppWindow, a: &str) {
+    let Some(action) = parse_menu_action(a) else { return };
+    let app = ui.global::<App>();
+    match action {
+        MenuAction::Page(p) => {
+            // the same gates as the buttons: a radio page is not entered while a job holds the port
+            if (p == 1 || p == 2 || p == 3 || (7..=8).contains(&p) || p == 10) && app.get_menu_radio_locked() {
+                return;
+            }
+            navigate(ui, p);
+        }
+        MenuAction::BackupsFolder => {
+            let dir = with(|s| s.paths.backups());
+            let _ = std::fs::create_dir_all(&dir);
+            open_folder(&dir);
+        }
+        MenuAction::LogsFolder => {
+            let dir = with(|s| s.paths.logs());
+            let _ = std::fs::create_dir_all(&dir);
+            open_folder(&dir);
+        }
+        MenuAction::Guide => open_folder(Path::new(&format!("{GITHUB_URL}#readme"))),
+        MenuAction::GitHub => open_folder(Path::new(GITHUB_URL)),
+        MenuAction::Exit => {
+            if !app.get_busy() {
+                let _ = slint::quit_event_loop();
+            }
+        }
+    }
 }
 
 pub(crate) fn open_folder(dir: &Path) {

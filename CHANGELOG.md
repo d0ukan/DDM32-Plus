@@ -5,6 +5,7 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## v1.0.0-beta.7 (candidate, not released yet)
 
+- PC programmers (Windows C# and Rust): a classic menu bar (File, Radio, Tools, Help) on top of the window, reaching the existing pages, the backups and logs folders, the GitHub page and About; the radio entries are off while a radio job holds the port.
 - Transmit safety (pre-release hole hunt; docs/plus.md "Pre-release hole hunt: transmit safety"): SSTV send is
   refused while a scan, a dual / multi-watch, the air watch, a search, the spectrum or trunk following runs ("Stop the
   scan or watch first"), and the radio core checks the band plan itself before keying (before, a watch letter the page
