@@ -176,12 +176,22 @@ void sat_ui_idle(bool idle);
 /* An auto track runs (or is starting): a key ends it (sat_auto_cancel; PTT too, seen by the radio task) */
 bool sat_auto_on(void);
 void sat_auto_cancel(void);
+/* The same held, receive-only track started by the user (Tools > ISS's OK, OK on the AOS pop-up): satellite idx's pass
+ * under way or due within 10 minutes, on its downlink (mode SAT_AUTO_DOWN; the ISS: 145.800, SAT_AUTO_APRS 145.825),
+ * the radio back where it was 30 s after the set. A track running (by hand or held) is ended instead, as sat_track
+ * would. sat_auto_mode: the downlink of a held ISS track, switched while it runs */
+void sat_auto_start(uint8_t idx, uint8_t mode);
+void sat_auto_mode(uint8_t mode);
+/* ui_sat.c: the AOS pop-up's line under the banner's title ("OK: track") right after ui_sat_alarm gave a rise's text,
+ * else NULL */
+const char *ui_sat_pop_text(void);
 /* ui_sat.c, from ui_app_tick: an alarm due sounds its tone and returns its text ("ISS in 5 min, max 47°", a static
  * buffer) for the banner; NULL when none (none while transmitting: it waits). The first call arms the stored "Every
  * pass" alarm */
 const char *ui_sat_alarm(void);
 /* ui_sat.c also has ui_sat_auto_key (declared where ui_app_key calls it, hal_input.h's type): a key while an auto
- * track runs ends it, the radio back where it was (true: the key is used for that) */
+ * track runs ends it, the radio back where it was (true: the key is used for that); while the AOS pop-up shows, OK
+ * starts the held track (sat_auto_start) and any other key only hides it */
 
 /* Radio task, every radio poll: the VFO as it is now (to see a change by hand); light: the native receiver owns the
  * radio (a P25 channel), one propagation a poll at most */

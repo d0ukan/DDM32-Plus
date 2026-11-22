@@ -22,7 +22,11 @@
  * only once it does (radio_sat_held, within AUTO_WAIT_S) does the VFO move: the tracking above on the downlink alone
  * (the ISS: 145.800 voice / SSTV or 145.825 APRS), simplex, no tones. A key (sat_auto_cancel), PTT (the release
  * awaited), the set (30 s after), a hand change or the elements failing end it: the hold's end puts the radio back as
- * it was. */
+ * it was.
+ *
+ * The user's held track (sat_auto_start: Tools > ISS's OK, OK on the AOS pop-up) is the same, started from the request
+ * at once (a pass under way or due within 10 minutes; the UI's idle word not needed, the radio core's hold still is);
+ * sat_auto_mode switches a held ISS track between 145.800 and 145.825 while it runs. */
 #include "config.h"
 #if CONFIG_SATELLITES
 #include <string.h>
@@ -52,6 +56,7 @@ static volatile bool seen_any;
 static volatile uint8_t want_focus = SAT_NONE;
 static volatile uint8_t want_track;
 static volatile bool want_track_new, want_arm;
+static volatile uint8_t want_mode;	/* the user's held track: its SAT_AUTO_* downlink (0: tracking by hand) */
 /* The alarm asked for (UI) and the last one due (radio task); critical sections */
 static uint8_t want_al_target, want_al_lead, want_al_el, want_al_opts;
 static volatile bool want_al_new;
@@ -110,11 +115,22 @@ void sat_seen(uint8_t focus)
 	seen_any = true;
 }
 
-void sat_track(uint8_t idx)
+void sat_auto_start(uint8_t idx, uint8_t mode)
 {
 	want_track = idx;
 	want_arm = false;
+	want_mode = mode;
 	want_track_new = true;
+}
+
+void sat_track(uint8_t idx)
+{
+	sat_auto_start(idx, 0);
+}
+
+void sat_auto_mode(uint8_t mode)
+{
+	want_mode = mode;
 }
 
 void sat_arm(bool on)
@@ -448,40 +464,50 @@ static void auto_end(uint8_t why)
 
 /* At the alarm's rise (alarm_fire): auto track, when it is wanted and the UI says the radio is free; the radio core
  * is asked to hold the user's state, and nothing moves until it has (live block, AUTO_WAIT) */
+static void auto_go(uint8_t sat, int32_t los, int8_t max_el, uint8_t mode)
+{
+	e.track = sat;
+	e.track_los = los;
+	e.auto_el = max_el;
+	e.auto_wait = AUTO_WAIT_S + 1;
+	e.cancel = false;
+	e.setup = true;
+	e.arm = false;
+	want_cancel = false;
+	want_mode = mode;		/* (an earlier track's downlink switch forgotten) */
+	auto_st = (uint8_t)(AUTO_WAIT | mode << 2);
+	radio_req_sat_hold(true);
+}
+
 static void auto_begin(bool transmitting)
 {
 	uint8_t mode = (uint8_t)((view.alarm.opts & SAT_OPT_AUTO) >> SAT_OPT_AUTO_SHIFT);
 	if (mode == SAT_AUTO_OFF || !ui_idle || transmitting || e.track != SAT_NONE || want_track_new ||
 	    view.alarm.sat >= sat_count || al.best.state != SAT_PASS_OK)
 		return;
-	e.track = view.alarm.sat;
-	e.track_los = al.best.los;
-	e.auto_el = view.alarm.max_el;
-	e.auto_wait = AUTO_WAIT_S + 1;
-	e.cancel = false;
-	e.setup = true;
-	e.arm = false;
-	want_cancel = false;
-	auto_st = (uint8_t)(AUTO_WAIT | mode << 2);
-	radio_req_sat_hold(true);
+	auto_go(view.alarm.sat, al.best.los, view.alarm.max_el, mode);
 }
 
 static void track_request(int32_t now)
 {
-	uint8_t i = want_track;
+	uint8_t i = want_track, mode = want_mode;
 	want_track_new = false;
 	if (auto_phase() != AUTO_NONE) {
 		auto_end(SAT_TRK_OFF);	/* the screen's OK during an auto track: it ends, the radio back */
 		return;
 	}
-	if (i >= sat_count) {
+	if (i >= sat_count || (mode && e.track != SAT_NONE)) {
 		if (e.track != SAT_NONE)
-			track_end(SAT_TRK_OFF);
+			track_end(SAT_TRK_OFF);	/* (a held track asked for over one by hand: that one ends) */
 		return;
 	}
 	sat_pass_t p = view.pass[i];
 	if (p.state != SAT_PASS_OK || p.aos - now > SOON_S || now > p.los)
 		return;		/* nothing to follow now (the screen says so) */
+	if (mode) {
+		auto_go(i, p.los, p.max_el, mode);	/* the user's held track: as an auto track from here */
+		return;
+	}
 	e.track = i;
 	e.track_los = p.los;
 	e.setup = true;
@@ -543,6 +569,9 @@ static void track_service(int32_t now, const sat_look_t *l, bool vfo, uint32_t r
 		track_end(SAT_TRK_LOS);
 		return;
 	}
+	uint8_t m = want_mode;
+	if (autot && m && (auto_st >> 2) != m)
+		auto_st = (uint8_t)((auto_st & 3u) | m << 2);	/* the ISS page switched the downlink: the next tune */
 	uint32_t down = down_hz(s);
 	int32_t drx = sat_doppler_rx(down, l->rate_kms), dtx = sat_doppler_tx(s->up_hz, l->rate_kms);
 	if (e.setup) {

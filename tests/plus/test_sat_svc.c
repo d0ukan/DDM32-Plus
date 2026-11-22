@@ -766,6 +766,65 @@ static void auto_busy(uint8_t iss, int32_t start)
 	run_s(5);
 }
 
+/* The user's held track (Tools > ISS's OK, OK on the AOS pop-up: sat_auto_start): not more than 10 min before the
+ * rise; started there from a channel without the UI's idle word, the hold first, then 145.800 with Doppler, simplex;
+ * switched to 145.825 under way (sat_auto_mode); 30 s after the set the channel back exactly. Asked over a pass
+ * tracked by hand it ends that one instead */
+static void user_track(uint8_t iss, int32_t start)
+{
+	scenario("held track from Tools > ISS / the pop-up: 145.800, then 145.825, the channel back after the set", start);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	screen = true;			/* the ISS page draws: the passes are searched */
+	focus = iss;
+	poll_ms = 100;
+	sat_pass_t want = brute_next(iss, utc_now() + 1200, 0);
+	CHECK(want.state == SAT_PASS_OK);
+	run_s(want.aos - utc_now() - 900);
+	sat_view_t v = view_now();
+	CHECK(v.pass[iss].state == SAT_PASS_OK && abs(v.pass[iss].aos - want.aos) <= 3);
+	sat_auto_start(iss, SAT_AUTO_DOWN);	/* 15 min early: nothing */
+	run_s(5);
+	CHECK(nreq == 0 && !held && !sat_auto_on() && view_now().track == SAT_NONE);
+	run_s(want.aos - utc_now() - 300);
+	sat_ui_idle(false);		/* (not needed for the user's own track) */
+	sat_auto_start(iss, SAT_AUTO_DOWN);
+	run_s(4);
+	CHECK(held && sat_auto_on() && nreq >= 7 && reqs[0].k == 'H' && reqs[0].v == 1);
+	CHECK(abs((int32_t)(rx_hz - SAT_ISS_VOICE_HZ)) <= 4000 && tx_hz == rx_hz && vfo);
+	v = view_now();
+	CHECK(v.track == iss && v.track_state == SAT_TRK_ON);
+	CHECK(ngot == 1 && got[0].ev.kind == SAT_ALARM_TRACK && got[0].ev.sat == iss);
+	screen = false;			/* the user went Home */
+	int32_t worst;
+	auto_follow(iss, SAT_ISS_VOICE_HZ, want.aos + 120, &worst);
+	sat_auto_mode(SAT_AUTO_APRS);	/* the ISS page's 1: the other downlink */
+	run_s(2);
+	CHECK(held && abs((int32_t)(rx_hz - SAT_ISS_APRS_HZ)) <= 4000 && tx_hz == rx_hz);
+	auto_follow(iss, SAT_ISS_APRS_HZ, want.los, &worst);
+	run_s(want.los + 25 - utc_now());
+	CHECK(held && view_now().track == iss);
+	run_s(10);
+	v = view_now();
+	CHECK(!held && !vfo && rx_hz == 438500000u && tx_hz == 438500000u && !sat_auto_on());
+	CHECK(v.track == SAT_NONE && v.track_state == SAT_TRK_LOS && count('H', 0) == 2);
+	printf("    held track: the VFO off the true Doppler at most %d Hz, back on the channel\n", (int)worst);
+
+	scenario("held track asked over a pass tracked by hand: that one ends", want.los + 600);
+	want = brute_next(iss, utc_now() + 1200, 0);
+	screen = true;
+	focus = iss;
+	run_s(want.aos - utc_now() - 200);
+	sat_track(iss);
+	run_s(3);
+	CHECK(view_now().track == iss && !sat_auto_on());
+	sat_auto_start(iss, SAT_AUTO_DOWN);
+	run_s(3);
+	CHECK(view_now().track == SAT_NONE && !sat_auto_on() && !held && count('H', 0) == 0);
+	screen = false;
+	poll_ms = POLL_MS;
+}
+
 int main(void)
 {
 	uint8_t iss = sat_index(SAT_ISS_CATNUM);
@@ -789,6 +848,7 @@ int main(void)
 	auto_track(iss, SAT_AUTO_APRS, t0 + 420000);
 	auto_cancel(iss, t0 + 460000);
 	auto_busy(iss, t0 + 520000);
+	user_track(iss, t0 + 580000);
 	if (failures) {
 		printf("test_sat_svc: %d failures\n", failures);
 		return 1;

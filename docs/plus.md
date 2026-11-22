@@ -1136,6 +1136,58 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     options and the auto track's wait and top sit in what was padding); stacks unchanged (radio 728 B free, UI 184 B
     free, the deepest paths not these). Radio rows PA8-PA15.
 
+- [built] Tools > ISS and the AOS pop-up (part of `CONFIG_SATELLITES`; `tools/plus_satauto.py` `prepare_iss_tool` and
+  the pop-up hunk of `prepare_sat_auto`; `integration/radiofoundry/sat/` ui_sat.c `ui_iss_screen`, sat_svc.c
+  `sat_auto_start` / `sat_auto_mode`; owner's request 2026-11-22; branch issmenu). Reuses the satellites' code: the
+  pass search, the live look, the pass alarm page's rows and the auto track's hold and return; Tools > Satellites stays
+  for all satellites.
+  - **Tools > ISS** ("ISS" in both languages) is the tool after All digital search: only Battery (last by design) and
+    the zone offer's 0 move one on, every other tool keeps its number. One page (240 x 320, small font where a line
+    is long): "AOS in 1h05  47°" ("LOS in 5:12  47°" in the rx color under way), "AOS 14:27  LOS 14:38" (local time,
+    the Satellites screen's offset; "Above now, max 47°" under way), the live "Az 123°  El 23.4°", the two downlinks
+    "> 145.800 voice / SSTV" and "145.825 APRS" (the one in use marked), "RX 145.803 +2.6 kHz" (that one with the
+    Doppler of now; the tuned frequency during a held track), a line, then the pass alarm page's rows from Before AOS
+    on (Before AOS, Min. elevation, Every pass, Auto track) in the small font, and a status line ("Tracking, back at
+    LOS", "OK: track in the VFO", the alarm "Alarm 14:27: ISS 47°", or "Track from AOS-10 min"). Keys: Up / Down a
+    row, Left / Right its value: Every pass On arms the ISS's notifications at once (For the ISS, kept across power
+    cycles as on the alarm page), Off disarms them; a change of the other rows while Every pass is on arms it again
+    with the change; Auto track is the same stored setting. **OK**: within 10 min of AOS or during a pass, the held
+    track now (below); any track running: stop it ("Auto track off: radio back" or "Tracking off: VFO stays");
+    otherwise the toast "Track from AOS-10 min". **#**: APRS via ISS as on the Satellites screen (the same gates).
+    **1**: the other downlink (145.800 / 145.825), switched under a running held track too (the next second's tune).
+    Hint "OK track  # APRS  1 freq" ("OK stop ..." while tracking). While a held track runs, keys on this page stay
+    the page's (they do not end it as on other screens); PTT and monitor still do. The page counts as idle for the
+    automatic auto track (as Home and Satellites).
+  - **The held track** (`sat_auto_start(idx, mode)`, a new UI request in the service): the auto track's machinery
+    started by the user: the radio core asked to hold the user's state (refused while busy: nothing moves), then the
+    downlink alone (ISS 145.800, or 145.825), simplex, FM wide, no tones, Doppler corrected in the same steps, TX
+    refused; "ISS tracking, max 47°" once held; 30 s after the set (or a key off Tools > ISS, PTT, a hand change) the
+    radio back exactly where it was (`radio_sathold.inc`'s end). Only for a pass under way or due within 10 min (the
+    service checks again). Asked over a pass tracked by hand from Tools > Satellites it ends that one instead.
+    `sat_auto_mode` switches a held ISS track's downlink while it runs. The Satellites screen's own OK track (437.800 /
+    145.990 split, TX allowed) is unchanged.
+  - **The AOS pop-up**: with the pass alarm armed (notifications on: one pass or Every pass) and Auto track Off, the
+    rise's banner reads "ISS overhead, max 47°" ("ISS tepede, maks 47°") with "OK: track" ("OK: takip") under it,
+    the rise's beep as before, up 60 s instead of 8 (countdown in the banner). OK while it is up starts the held track
+    on that satellite's downlink (the ISS: the one chosen on Tools > ISS, 145.800 at power on) and hides it, toast
+    "Tracking, back at LOS"; Back or any other key only hides it (the key does nothing else). Not while transmitting (as every satellite banner: it waits for the end of TX); over a zone offer it is the
+    toast as before (not actionable). With Auto track On or APRS the rise's banner is "ISS AOS now, max 47°" as before
+    and the auto track starts by itself. Home's own hint row stays under the banner.
+  - **Fixed: the Satellites screen's hint without a GPS fix**: in the "Waiting for the GPS time / position" state the
+    hint was "Back" alone, so its left part (where every other state names OK) was empty although OK opens the pass
+    alarm page there (sat_key: nothing to track). It now reads "OK alarm  Back".
+  - Host tests (in `make test`): `tests/plus/test_sat_svc.c` adds the held track (15 min early refused; 5 min before
+    the rise from a channel without the UI's idle word: the hold, 145.800 with Doppler, simplex, "tracking"; switched
+    to 145.825 under way; the VFO within the hold plus a second's drift of the true Doppler; 30 s after the set the
+    channel back) and the held track asked over a pass tracked by hand; `tests/plus/test_ui_sat.c` (now built with
+    Turkish) adds Tools > ISS in English and Turkish (the page, layout checks: plain, a held track, above now, no GPS
+    time, Every pass on; OK tracks, 1 then OK on 145.825, too early, OK stops a held track with the keys not taken by
+    the auto track, Every pass on / changed / off stored, auto track row, # below the horizon) and the pop-up (shown
+    with its line and beep, OK tracks on 145.800 or 145.825 and Home stays, Back and another key dismiss, up 60 s and
+    gone after, held back during TX and actionable after, no pop-up with Auto track On), and the fixed hint.
+  - FLASH +2,872 B (857,584 -> 860,456), RAM +0 B (209,856: the three new bytes and the alarm text, moved out of its
+    function, fit in what was padding); stacks unchanged (radio 728 B free, UI 184 B free). Radio rows IS-1-IS-11.
+
 - [built] P25 Phase 1 trunk following (`CONFIG_P25_TRUNK`, `prepare_p25_trunk`; parallel job; receive only):
   Tools > P25 trunk (tool 24, before Battery) follows a trunked system from the **selected channel**: a P25 channel
   on the control channel's frequency with its NAC (or Any) and the talkgroup to follow (Any or Left / Right on the

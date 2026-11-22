@@ -4876,6 +4876,42 @@ msgstr "Uplink tonu: CTCSS"
 msgid "Uplink tone: arming"
 msgstr "Uplink tonu: aktivasyon"
 
+#: core/ui/ui_sat.c
+msgid "OK alarm  Back"
+msgstr "OK alarm  Geri"
+
+#: core/ui/ui_sat.c
+msgid " overhead, max "
+msgstr " tepede, maks "
+
+#: core/ui/ui_sat.c
+msgid "OK: track"
+msgstr "OK: takip"
+
+#: core/ui/ui_sat.c
+msgid "Tracking, back at LOS"
+msgstr "Takipte, LOS'ta geri"
+
+#: core/ui/ui_sat.c
+msgid "Above now, max "
+msgstr "Şu an tepede, maks "
+
+#: core/ui/ui_sat.c
+msgid "145.800 voice / SSTV"
+msgstr "145.800 ses / SSTV"
+
+#: core/ui/ui_sat.c
+msgid "Track from AOS-10 min"
+msgstr "AOS-10 dk'dan takip"
+
+#: core/ui/ui_sat.c
+msgid "OK stop  # APRS  1 freq"
+msgstr "OK durdur  # APRS  1 frek"
+
+#: core/ui/ui_sat.c
+msgid "OK track  # APRS  1 freq"
+msgstr "OK takip  # APRS  1 frek"
+
 #: core/ui/ui_scanx.c
 msgid "Priority channel off"
 msgstr "Öncelikli kanal kapalı"

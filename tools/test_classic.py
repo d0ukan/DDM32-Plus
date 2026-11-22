@@ -402,11 +402,13 @@ def main():
     run(['clang',*flags,'-DCONFIG_SATELLITES=1',ROOT/'tests/plus/test_sat_doppler.c',APP/'core/radio/sgp4.c',
          APP/'core/radio/sat.c',APP/'core/radio/sat_data.c','-lm','-o',OUT/'test_sat_doppler'],cwd=ROOT)
     run(['python3',ROOT/'tests/plus/sat_doppler_ref.py',OUT/'test_sat_doppler'],cwd=ROOT)
+    # (Tools > ISS and the AOS pop-up in English and Turkish: the tables made from tr.po)
+    run(['make','out/gen/lang_tables.h'],cwd=host,stdout=subprocess.DEVNULL)
     command=run(['make','-Bn','uiFlowTest','SANITIZE=1'],cwd=host,capture_output=True,text=True).stdout
     satui=shlex.split(next(line for line in command.splitlines() if ' -o uiFlowTest ' in line))
     satui[satui.index('uiFlowTest.c')]=str(ROOT/'tests/plus/test_ui_sat.c')
     satui[satui.index('-o')+1]=str(OUT/'test_ui_sat')
-    run([*satui,'-I'+str(host),'-DCONFIG_P25_CHANNELS=1','-DCONFIG_SATELLITES=1',str(APP/'core/radio/sat.c'),
+    run([*satui,'-I'+str(host),'-DCONFIG_P25_CHANNELS=1','-DCONFIG_SATELLITES=1','-DCONFIG_LANG_TR=1',str(APP/'core/radio/sat.c'),
          str(APP/'core/radio/sgp4.c'),str(APP/'core/radio/sat_data.c'),'-lm'],cwd=host)
     run([OUT/'test_ui_sat'],cwd=host)
     # DM32 Plus NXDN48 receive core (docs/nxdn.md; the MMDVMHost cross-check is tools/test_nxdn_ref.sh)

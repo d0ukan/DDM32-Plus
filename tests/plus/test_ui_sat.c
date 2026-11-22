@@ -3,7 +3,9 @@
  * live lines (range rate, Doppler in kHz, "Tracking"), OK tracking and stopping, the pass alarm page (open from a
  * satellite with nothing to track or with 0, each row's values, arm, change while armed, off, Back to the list), the
  * alarm's banner and tone on another screen (Home) and its toast over a banner that waits for the user, the screen
- * without the GPS time, and the layout check on the list and the page.
+ * without the GPS time (its hint names OK), and the layout check on the list and the page. Tools > ISS and the AOS
+ * pop-up in English and Turkish (iss_checks): the page, its keys and settings, the held track asked for, the pop-up's
+ * OK / Back / other keys, its 60 s, no pop-up during TX or with auto track on, layout checks.
  *
  * ui_sat.c is included here (its statics start each flow afresh); the radio task's service (sat_svc.c) is a fake
  * with sat.h's contract: a view the test sets, the requests recorded, an armed alarm due 2 s later (its warning) and
@@ -101,6 +103,17 @@ void sat_ui_idle(bool idle) { fake_idle = idle; }
 bool sat_auto_on(void) { return fake_auto; }
 void sat_auto_cancel(void) { cancels++; fake_auto = false; }
 
+/* The user's held track (Tools > ISS, the AOS pop-up): recorded */
+static int starts;
+static uint8_t start_sat = SAT_NONE, start_mode, mode_now;
+void sat_auto_start(uint8_t idx, uint8_t mode)
+{
+	starts++;
+	start_sat = idx;
+	start_mode = mode;
+}
+void sat_auto_mode(uint8_t mode) { mode_now = mode; }
+
 uint8_t aprs_iss_send(uint32_t hz) { return APRS_OK; }
 
 void radio_req_beep(uint8_t beep)
@@ -151,6 +164,11 @@ static void fake_reset(bool clock)
 	al_opts = 0;
 	fake_auto = fake_idle = false;
 	cancels = 0;
+	starts = 0;
+	start_sat = SAT_NONE;
+	start_mode = mode_now = 0;
+	pop = SAT_NONE;
+	iss_aprs = false;
 	ui_svc_setting_set(UI_SET_SAT_NOTE, 0);
 	ui_svc_setting_set(UI_SET_SAT_AUTO, 0);
 }
@@ -260,6 +278,163 @@ static int auto_checks(void)
 	return bad;
 }
 
+/* --- Tools > ISS and the AOS pop-up, in English and in Turkish (ASCII parts of the translations) --- */
+static bool turkish;
+#define T(en, tr) (turkish ? (tr) : (en))
+#define ISSP "ok 6 up up ok "	/* Tools > ISS (after All digital search, before Battery) */
+#define ARMED SATS "0 ok long:back "	/* the ISS's pass alarm armed (one pass, auto track off), Home */
+
+/* One flow: a fresh fake and language, the setup, prep (between setup and script, may be NULL), the script, the
+ * expectations; layout: the screen checked for clipped or overlapping text too */
+static int iss_flow(const char *name, const char *setup, void (*prep)(void), const char *script, const char *expect,
+		    bool layout)
+{
+	char err[300], exp[400], issues[SIM_LAYOUT_MAX][160];
+	int bad = 0;
+	fake_reset(true);
+	sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_M);
+	if (!lang_set(lang_find(turkish ? 't' << 8 | 'r' : 'e' << 8 | 'n'))) {
+		printf("FAIL %s: no such language in this build\n", name);
+		return 1;
+	}
+	flows_run++;
+	if (!sim_run(setup, err, sizeof err)) {
+		printf("FAIL %s (%s) setup: %s\n", name, T("en", "tr"), err);
+		return 1;
+	}
+	if (prep)
+		prep();
+	if (!sim_run(script, err, sizeof err)) {
+		printf("FAIL %s (%s): %s\n", name, T("en", "tr"), err);
+		return 1;
+	}
+	char *o = exp;
+	for (const char *p = expect; *p && o < exp + sizeof exp - 16;) {
+		while (*p == ' ')
+			p++;
+		if (!*p)
+			break;
+		memcpy(o, "expect:", 7);
+		o += 7;
+		while (*p && *p != ' ' && o < exp + sizeof exp - 2)
+			*o++ = *p++;
+		*o++ = ' ';
+	}
+	*o = 0;
+	if (!sim_run(exp, err, sizeof err)) {
+		printf("FAIL %s (%s): %s\n", name, T("en", "tr"), err);
+		bad++;
+	}
+	if (layout) {
+		int n = sim_layout_issues(issues, SIM_LAYOUT_MAX);
+		for (int k = 0; k < n; k++)
+			printf("FAIL %s (%s): layout: %s\n", name, T("en", "tr"), issues[k]);
+		bad += n != 0;
+	}
+	return bad;
+}
+
+static void prep_late(void) { fv.pass[iss] = (sat_pass_t){ t0 + 7200, t0 + 7800, 35, SAT_PASS_OK }; }
+static void prep_held(void) { fv.track = iss; fv.track_state = SAT_TRK_ON; fv.rx_hz = 145803000u; fake_auto = true; }
+static void prep_up(void)
+{
+	fv.pass[iss] = (sat_pass_t){ t0 - 120, t0 + 420, 47, SAT_PASS_OK };
+	fv.el10 = 234;
+	fv.rate_ms = -4000;
+}
+static void prep_no_clock(void) { fv.clock = SAT_CLOCK_NONE; }
+static void prep_aprs(void) { iss_aprs = true; }
+
+static int iss_checks(void)
+{
+	int bad = 0;
+	const char *n;
+#define ISS_CHECK(c, name) do { if (!(c)) { printf("FAIL %s (%s): %s\n", name, T("en", "tr"), #c); bad++; } } while (0)
+	/* The page: the next pass, AOS / LOS, the downlinks, the rows from Before AOS on, the hint */
+	bad += iss_flow("ISS page", ISSP, NULL, "",
+			T("screen=iss shows=AOS_in_5:00__47 shows=AOS_ shows=LOS_ shows=145.800_voice_/_SSTV "
+			  "shows=145.825_APRS shows=Before_AOS shows=Auto_track shows=Every_pass hides=For "
+			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80",
+			  "screen=iss shows=AOS'a_5:00 shows=AOS_ shows=145.800_ses_/_SSTV shows=145.825_APRS "
+			  "shows=OK_takip__#_APRS__1_frek"), true);
+	/* OK within 10 min of AOS: the held track on 145.800 */
+	bad += iss_flow(n = "ISS OK tracks", ISSP, NULL, "ok",
+			T("toast=Tracking,_back_at_LOS", "toast=Takipte,_LOS'ta_geri"), false);
+	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
+	/* 1: 145.825 (marked, and the hint names 145.800), OK tracks that */
+	bad += iss_flow(n = "ISS 1: the APRS downlink", ISSP, NULL, "1 ok",
+			"shows=>_145.825_APRS", true);
+	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_APRS && mode_now == SAT_AUTO_APRS, n);
+	/* Too early: it says when, nothing started */
+	bad += iss_flow(n = "ISS OK too early", ISSP, prep_late, "ok",
+			T("toast=Track_from_AOS-10_min", "toast=AOS-10_dk'dan_takip"), false);
+	ISS_CHECK(starts == 0, n);
+	/* A held track: the keys are the page's (not the auto track's any-key end); OK stops it, the radio back */
+	bad += iss_flow(n = "ISS OK stops a held track", ISSP, prep_held, "wait:1200",
+			T("shows=Tracking,_back_at_LOS shows=OK_stop__#_APRS shows=RX_145.803",
+			  "shows=Takipte shows=OK_durdur__#_APRS"), true);
+	bad += iss_flow(n = "ISS OK stops a held track", ISSP, prep_held, "1 ok",
+			T("screen=iss toast=Auto_track_off:_radio_back", "screen=iss"), false);
+	ISS_CHECK(cancels == 0 && track_calls == 1 && fv.track == SAT_NONE && mode_now == SAT_AUTO_APRS, n);
+	/* Above now: "Above now, LOS in", the live azimuth / elevation, the Doppler */
+	bad += iss_flow("ISS above now", ISSP, prep_up, "wait:1200",
+			T("shows=LOS_in_7:00 shows=Above_now,_max_47 shows=Az_123 shows=El_23.4 shows=+1.9_kHz",
+			  "shows=LOS'a_7:00 shows=tepede,_maks_47 shows=Az_123 shows=El_23.4"), true);
+	bad += iss_flow("ISS without the GPS time", ISSP, prep_no_clock, "wait:1200",
+			T("shows=Waiting_for_the_GPS_time shows=Before_AOS", "screen=iss shows=GPS"), true);
+	/* Every pass on: the ISS armed for every pass and kept; off again: off and forgotten */
+	bad += iss_flow(n = "ISS every pass on", ISSP, NULL, "down down right", "screen=iss", true);
+	ISS_CHECK(fv.alarm.target == iss && (al_opts & SAT_OPT_EVERY) && al_lead == 5 && al_el == 0, n);
+	ISS_CHECK(ui_svc_setting_get(UI_SET_SAT_NOTE) == 1, n);
+	bad += iss_flow(n = "ISS every pass changed", ISSP, NULL, "down down right up up right", "shows=10", false);
+	ISS_CHECK(fv.alarm.target == iss && al_lead == 10 && ui_svc_setting_get(UI_SET_SAT_NOTE) == (1 | 5 << 2), n);
+	bad += iss_flow(n = "ISS every pass off", ISSP, NULL, "down down right left", "screen=iss", false);
+	ISS_CHECK(fv.alarm.target == SAT_NONE && ui_svc_setting_get(UI_SET_SAT_NOTE) == 0, n);
+	/* Auto track (Up from Before AOS wraps to it): On, stored */
+	bad += iss_flow(n = "ISS auto track row", ISSP, NULL, "up right", "screen=iss", false);
+	ISS_CHECK(ui_svc_setting_get(UI_SET_SAT_AUTO) == SAT_AUTO_DOWN, n);
+	/* #: APRS via ISS, its gates (below the horizon here) */
+	bad += iss_flow("ISS # below the horizon", ISSP, NULL, "ctx",
+			T("toast=ISS_below_the_horizon", "toast=ISS"), false);
+
+	/* The AOS pop-up (auto track Off): "ISS overhead, max 23°", "OK: track"; OK tracks (145.800), Home stays */
+	bad += iss_flow(n = "Pop-up at AOS", ARMED, NULL, "wait:10500",
+			T("screen=home banner=ISS_overhead,_max_23" GLYPH_DEGREE " shows=OK:_track",
+			  "screen=home banner=ISS_tepede,_maks_23" GLYPH_DEGREE " shows=OK:_takip"), true);
+	ISS_CHECK(beeps_aos == 1, n);
+	bad += iss_flow(n = "Pop-up OK tracks", ARMED, NULL, "wait:10500 ok",
+			T("screen=home banner=none toast=Tracking,_back_at_LOS", "screen=home banner=none toast=Takipte"),
+			false);
+	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
+	bad += iss_flow(n = "Pop-up OK tracks 145.825", ARMED, prep_aprs, "wait:10500 ok", "screen=home banner=none", false);
+	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_APRS, n);
+	bad += iss_flow(n = "Pop-up Back dismisses", ARMED, NULL, "wait:10500 back", "screen=home banner=none toast=none",
+			false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Pop-up another key dismisses", ARMED, NULL, "wait:10500 down wait:300",
+			"screen=home banner=none", false);
+	ISS_CHECK(starts == 0, n);
+	/* Up for 60 s, then gone; OK after that is Home's again */
+	bad += iss_flow("Pop-up up for 60 s", ARMED, NULL, "wait:40000",
+			T("banner=ISS_overhead", "banner=ISS_tepede"), false);
+	bad += iss_flow(n = "Pop-up gone after 60 s", ARMED, NULL, "wait:72000 ok", "banner=none", false);
+	ISS_CHECK(starts == 0, n);
+	/* Not while transmitting: no tone, no pop-up; after the release it comes, and OK tracks */
+	bad += iss_flow(n = "Pop-up waits for TX", ARMED, NULL, "pttdown wait:11000", "banner=none", false);
+	ISS_CHECK(beeps_aos == 0 && starts == 0, n);
+	bad += iss_flow(n = "Pop-up after TX", ARMED, NULL, "pttdown wait:11000 pttup wait:300 ok",
+			T("screen=home toast=Tracking", "screen=home toast=Takipte"), false);
+	ISS_CHECK(beeps_aos == 1 && starts == 1 && start_sat == iss, n);
+	/* Auto track On: the rise's banner as before (it starts by itself), OK is Home's */
+	bad += iss_flow(n = "No pop-up with auto track on", SATS "0 up right ok long:back ", NULL, "wait:10500",
+			T("banner=ISS_AOS_now,_max_23" GLYPH_DEGREE " hides=OK:_track", "hides=OK:_takip"), false);
+	bad += iss_flow(n = "No pop-up with auto track on: OK", SATS "0 up right ok long:back ", NULL, "wait:10500 ok",
+			"hides=OK:_track", false);
+	ISS_CHECK(starts == 0, n);
+#undef ISS_CHECK
+	return bad;
+}
+
 int main(int argc, char **argv)
 {
 	iss = index_of(25544u);
@@ -328,13 +503,13 @@ int main(int argc, char **argv)
 		{ { "Sat alarm on Home: the warning", PAGE "ok long:back", "wait:2500",
 		    "screen=home banner=SO-50_in_5_min,_max_23" GLYPH_DEGREE, 0, false },
 		  true, -1, 1, 5, 0, 1, 0 },
-		{ { "Sat alarm on Home: the rise", PAGE "ok long:back", "wait:10500",
-		    "screen=home banner=SO-50_AOS_now,_max_23" GLYPH_DEGREE, 0, false },
+		{ { "Sat alarm on Home: the rise, a pop-up", PAGE "ok long:back", "wait:10500",
+		    "screen=home banner=SO-50_overhead,_max_23" GLYPH_DEGREE " shows=OK:_track", 0, false },
 		  true, -1, SAT_NONE, 5, 0, 1, 1 },
 		{ { "Sat alarm over a zone offer: a toast", "zoneoffer:3101234 " PAGE "ok long:back", "wait:2500",
 		    "shows=Zone_from toast=SO-50_in_5_min", 0, false },
 		  true, -1, 1, 5, 0, 1, 0 },
-		{ { "Sat without the GPS time", SATS, "", "shows=Waiting_for_the_GPS_time", 0, false },
+		{ { "Sat without the GPS time: OK named", SATS, "", "shows=Waiting_for_the_GPS_time shows=OK_alarm", 0, false },
 		  false, -1, SAT_NONE, 0, 0, -1, -1 },
 		{ { "Sat without the GPS time: alarm armed", SATS, "0 ok", "shows=Armed:_waits_for_GPS", 2, false },
 		  false, -1, 0, 5, 0, -1, -1 },
@@ -362,6 +537,12 @@ int main(int argc, char **argv)
 		sat_fails += fails != before;
 	}
 	fails += auto_checks();
+	for (int l = 0; l < 2; l++) {
+		turkish = l == 1;
+		fails += iss_checks();
+	}
+	turkish = false;
+	lang_set(lang_find('e' << 8 | 'n'));
 	/* The layout check on the list (tracking, alarm armed) and on the page (Every pass, auto track APRS) */
 	static const char *const layouts[] = { SATS "ok wait:2500", PAGE "ok wait:2500", PAGE "left left ok wait:2500",
 					       SATS "down down down", PAGE "down down down right up left ok wait:2500" };

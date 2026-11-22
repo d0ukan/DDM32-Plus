@@ -150,4 +150,34 @@ def prepare_sat_auto(transform, install):
          '\tif (ui_sat_auto_key(ev))\n'
          '\t\treturn;\t// DDM32 Plus: the key ended a satellite\'s auto track (PTT and monitor go on below)\n'
          '#endif\n'),
+        # The AOS pop-up (auto track Off): "OK: track" under the rise's title (ui_sat_pop_text; ui_sat_auto_key acts)
+        ('\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, NULL);\n',
+         '\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, ui_sat_pop_text());\t// DDM32 Plus: the AOS pop-up\'s OK\n'),
+    ])
+    prepare_iss_tool(transform)
+
+
+def prepare_iss_tool(transform):
+    """Tools > ISS (docs/plus.md "Tools > ISS and the AOS pop-up"): the ISS on one page (ui_sat.c ui_iss_screen). It
+    takes the number after All digital search, so only Battery (last by design, the one a radio may not have) and the
+    zone offer's 0 move; every other tool keeps its number."""
+    transform('core/ui/ui_nav.h', [
+        ('\tSCR_SATELLITES,\t\t\t// DM32 Plus: Tools > Satellites (CONFIG_SATELLITES)\n',
+         '\tSCR_SATELLITES,\t\t\t// DM32 Plus: Tools > Satellites (CONFIG_SATELLITES)\n'
+         '\tSCR_ISS,\t\t\t// DDM32 Plus: Tools > ISS (CONFIG_SATELLITES)\n'),
+    ])
+    transform('core/ui/ui_menus.c', [
+        ('extern const ui_scr_def_t ui_sat_screen;\t// ui_sat.c (DM32 Plus)\n',
+         'extern const ui_scr_def_t ui_sat_screen;\t// ui_sat.c (DM32 Plus)\n'
+         'extern const ui_scr_def_t ui_iss_screen;\t// ui_sat.c (DDM32 Plus)\n'),
+        ('#if CONFIG_SATELLITES\n\t[SCR_SATELLITES] = &ui_sat_screen,\n#endif\n',
+         '#if CONFIG_SATELLITES\n\t[SCR_SATELLITES] = &ui_sat_screen,\n\t[SCR_ISS] = &ui_iss_screen,\n#endif\n'),
+        ('T_ALLSEARCH, T_BATTERY,', 'T_ALLSEARCH, T_ISS, T_BATTERY,'),
+        ('(i != T_ALLSEARCH || CONFIG_ALL_SEARCH) &&', '(i != T_ALLSEARCH || CONFIG_ALL_SEARCH) && (i != T_ISS || CONFIG_SATELLITES) &&'),
+        ('TRN("All digital search"), TRN("Battery"),', 'TRN("All digital search"), "ISS", TRN("Battery"),'),
+        ('\tcase T_ALLSEARCH: ui_push(SCR_ALLSEARCH, 0); break;\n',
+         '\tcase T_ALLSEARCH: ui_push(SCR_ALLSEARCH, 0); break;\n'
+         '#if CONFIG_SATELLITES\n\tcase T_ISS: ui_push(SCR_ISS, 0); break;\n#endif\n'),
+        ('\t\t[T_ALLSEARCH] = ART_ICON_P25SEARCH + 1,',
+         '\t\t[T_ISS] = ART_ICON_ALMANAC + 1,\t// the sky, as Satellites\n\t\t[T_ALLSEARCH] = ART_ICON_P25SEARCH + 1,'),
     ])
