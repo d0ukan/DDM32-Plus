@@ -11,8 +11,11 @@
  *      channel saves without a TX contact; Direct mode on says what it does;
  *   3. digital monitor: a channel with RX list Any shows AllTG, not DMon; the monitor key's toggle shows and hides DMon
  *      and says what it does (on: every call; off on such a channel: the channel still hears all TGs);
- *   6. a new channel (Channels > New from current, the editor's Save as new channel) joins Home's zone at its end and
- *      Home steps onto it (the owner's "only up to 26"). */
+ *   6. a channel made on the radio (Channels > New from current, the editor's Save as new channel) goes into "All
+ *      channels" and Home's zone (not a Find & save zone, not on the VFO; dual watch: the selected letter's zone), Home
+ *      steps onto it (the owner's "only up to 26"); All channels renamed is an ordinary zone; All channels full: said
+ *      to be in no zone; Zone options > Add unzoned channels adds it, the count said, then "Every channel is in a
+ *      zone". */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +27,7 @@
 #include "ui/i18n.h"
 #include "ui/ui_svc.h"
 #include "codeplug/codeplug.h"
+#include "radio/radio.h"
 
 static int fails;
 static const char *name;
@@ -293,27 +297,55 @@ static bool home_reaches(uint16_t pos)
 	return false;
 }
 
-/* The owner's case: a channel made after the zones were stored was in no zone, so Home stopped at the zone's old last
- * channel. Channels > New from current, saved: it is the zone's last channel and Home steps onto it */
-static void case_new_joins(void)
+static uint16_t zone_count_of(uint16_t zi)
 {
-	start("new channel: joins Home's zone, Home steps onto it");
 	zone_t z;
-	uint16_t zi = ui_view()->zone_index;
+	return codeplug_zone(zi, &z) ? z.count : 0xFFFFu;
+}
+
+/* zone zi holds want channels, the last one last (0: any) */
+static bool zone_is(uint16_t zi, uint16_t want, uint16_t last)
+{
+	zone_t z;
+	if (codeplug_zone(zi, &z) && z.count == want && (last == 0 || z.channels[z.count - 1u] == last))
+		return true;
+	printf("FAIL %s (%s): zone %u has %u channels (last %u), want %u (last %u)\n", name, turkish ? "tr" : "en", zi,
+	       z.count, z.count ? z.channels[z.count - 1u] : 0, want, last);
+	fails++;
+	return false;
+}
+
+/* Zone zi renamed (the simulator's zones become stored copies) */
+static void zone_name(uint16_t zi, const char *zname)
+{
+	zone_t z;
 	codeplug_zone(zi, &z);
-	uint16_t before = z.count;
+	memset(z.name, 0, sizeof z.name);
+	strcpy(z.name, zname);
+	codeplug_set_zone(zi, &z);
+}
+
+/* Menu > Channels > New from current, held OK: the new channel's number (the free one it took) */
+static uint16_t new_from_current(void)
+{
+	uint16_t num = codeplug_free_channel();
 	run("ok 5");
 	row(T("New from current", "Mevcuttan yeni"), "up");
 	run("ok long:ok wait:200");
+	return num;
+}
+
+/* The owner's case: a channel made after the zones were stored was in no zone, so Home stopped at the zone's old last
+ * channel. Channels > New from current, saved: it is Home's zone's last channel and Home steps onto it (here no zone
+ * is named "All channels") */
+static void case_new_joins(void)
+{
+	start("new channel: joins Home's zone, Home steps onto it");
+	uint16_t zi = ui_view()->zone_index, before = zone_count_of(zi);
+	uint16_t num = new_from_current();
 	expect(T("toast=Saved_as_channel", "toast=Kaydedildi,_yeni_kanal"));
-	codeplug_zone(zi, &z);
-	if (z.count != before + 1u) {
-		printf("FAIL %s (%s): zone %u has %u channels, want %u\n", name, turkish ? "tr" : "en", zi, z.count,
-		       before + 1u);
-		fails++;
+	if (!zone_is(zi, (uint16_t)(before + 1u), num))
 		return;
-	}
-	uint16_t num = z.channels[z.count - 1u];
 	channel_t c;
 	if (!codeplug_channel(num, &c)) {
 		printf("FAIL %s (%s): the new channel %u can't be read\n", name, turkish ? "tr" : "en", num);
@@ -321,26 +353,121 @@ static void case_new_joins(void)
 	}
 	run("back back back wait:200");
 	expect("screen=home");
-	if (home_reaches(z.count) && ui_view()->channel_number != num) {
+	if (home_reaches((uint16_t)(before + 1u)) && ui_view()->channel_number != num) {
 		printf("FAIL %s (%s): Home's last position is channel %u, want %u\n", name, turkish ? "tr" : "en",
 		       ui_view()->channel_number, num);
 		fails++;
 	}
 	layout();
 	start("Save as new channel: joins Home's zone too");
-	codeplug_zone(zi, &z);
-	before = z.count;
+	before = zone_count_of(zi);
 	run("ok 5 ok");
 	row(T("Save as new channel", "Yeni kanal olarak kaydet"), "up");
 	run("ok wait:200");
-	codeplug_zone(zi, &z);
-	if (z.count != before + 1u) {
-		printf("FAIL %s (%s): Save as new: zone %u has %u channels, want %u\n", name, turkish ? "tr" : "en", zi,
-		       z.count, before + 1u);
-		fails++;
-	}
+	zone_is(zi, (uint16_t)(before + 1u), 0);
 }
 
+/* "All channels" (zone 0) and the zone it was made for: another zone, a Find & save zone, the VFO, a watch letter */
+static void case_all_channels(void)
+{
+	start("All channels and Home's other zone");
+	zone_name(0, "All channels");
+	radio_req_zone(1);
+	run("wait:200");
+	uint16_t a = zone_count_of(0), h = zone_count_of(1);
+	uint16_t num = new_from_current();
+	zone_is(0, (uint16_t)(a + 1u), num);
+	zone_is(1, (uint16_t)(h + 1u), num);
+	expect(T("toast=Saved_as_channel", "toast=Kaydedildi,_yeni_kanal"));
+	start("Home on a Find & save zone: All channels only");
+	zone_name(0, "All channels");
+	zone_name(1, "Bulunanlar 1");
+	radio_req_zone(1);
+	run("wait:200");
+	a = zone_count_of(0), h = zone_count_of(1);
+	num = new_from_current();
+	zone_is(0, (uint16_t)(a + 1u), num);
+	zone_is(1, h, 0);
+	start("the VFO: All channels only");
+	zone_name(0, "All channels");
+	radio_req_zone(1);
+	radio_req_vfo(true);
+	run("wait:200");
+	a = zone_count_of(0), h = zone_count_of(1);
+	num = new_from_current();
+	zone_is(0, (uint16_t)(a + 1u), num);
+	zone_is(1, h, 0);
+	start("dual watch, B selected on another zone: B's zone and All channels");
+	zone_name(0, "All channels");
+	run("quick 7 ctx 1 zone+ wait:200");
+	expect("dual=1 sel=B bzone=1");
+	a = zone_count_of(0), h = zone_count_of(1);
+	num = new_from_current();
+	zone_is(0, (uint16_t)(a + 1u), num);
+	zone_is(1, (uint16_t)(h + 1u), num);
+	start("All channels renamed: an ordinary zone, Home's zone only");
+	zone_name(0, "Mine");
+	radio_req_zone(1);
+	run("wait:200");
+	a = zone_count_of(0), h = zone_count_of(1);
+	num = new_from_current();
+	zone_is(0, a, 0);
+	zone_is(1, (uint16_t)(h + 1u), num);
+}
+
+/* All channels full on the VFO: saved, said to be in no zone; Zone options > Add unzoned channels takes it */
+static void case_all_full(void)
+{
+	start("All channels full: in no zone, said; Add unzoned channels");
+	zone_t z;
+	codeplug_zone(0, &z);
+	strcpy(z.name, "All channels");
+	z.count = CODEPLUG_ZONE_MAX;
+	for (uint16_t i = 0; i < z.count; i++)
+		z.channels[i] = (uint16_t)(i < 40u ? i + 1u : i + 61u);	/* not the free numbers from 41 */
+	codeplug_set_zone(0, &z);
+	radio_req_vfo(true);
+	run("wait:200");
+	uint16_t num = new_from_current();
+	run("wait:100");
+	expect(T("toast=All_channels_full,_in_no_zone:_ch", "toast=T\374m_kanallar_dolu,_b\366lgesiz:_kanal"));
+	layout();
+	zone_is(0, CODEPLUG_ZONE_MAX, 140);
+	zone_is(1, 12, 0);
+	if (num != 41)
+		printf("FAIL %s (%s): the new channel is %u, want 41\n", name, turkish ? "tr" : "en", num), fails++;
+}
+
+/* Zone > Zone options > Add unzoned channels: a channel in no zone at the zone's end, the count said; then none left */
+static void zone_options(void)
+{
+	run("ok 4 ctx");
+	row(T("Zone options", "B\366lge se\347enekleri"), "up");
+	run("ok");
+	expect("screen=zoneedit");
+	row(T("Add unzoned channels", "B\366lgesiz kanallar\375 ekle"), "down");
+}
+
+static void case_unzoned(void)
+{
+	start("Zone options: Add unzoned channels");
+	channel_t c;
+	codeplug_channel(17, &c);
+	strcpy(c.name, "Stranded");
+	ui_svc_write_channel(41, &c);	/* written alone, in no zone (the owner's channel 27) */
+	uint16_t before = zone_count_of(0);
+	zone_options();
+	layout();
+	run("ok wait:200");
+	expect(T("toast=Added_to_the_zone:_1", "toast=B\366lgeye_eklendi:_1"));
+	zone_is(0, (uint16_t)(before + 1u), 41);
+	layout();
+	run("wait:3000 back back back back wait:200");
+	zone_options();
+	run("ok wait:200");
+	expect(T("toast=Every_channel_is_in_a_zone", "toast=Her_kanal_bir_b\366lgede"));
+	zone_is(0, (uint16_t)(before + 1u), 41);
+}
 /* ---------------- 5. P25 NAC in decimal ---------------- */
 
 /* COUNTY DMR made P25 (NAC $293), on its RX NAC row */
@@ -408,7 +535,7 @@ static int run_case(case_fn fn)
 int main(void)
 {
 	static const case_fn cases[] = { case_zone_counts, case_zone_full, case_zone_unreadable, case_dmr_rows, case_dmon, case_delete, case_nac,
-					 case_new_joins };
+					 case_new_joins, case_all_channels, case_all_full, case_unzoned };
 	int bad = 0, n = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		turkish = lang == 1;

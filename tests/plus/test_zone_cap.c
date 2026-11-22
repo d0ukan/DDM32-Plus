@@ -112,10 +112,29 @@ static void test_drop_channel(void)
 	CHECK(holds(0, (const uint16_t[]){ 1, 2, 3, 6, 7, 8, 10, 11 }, 8) && codeplug_zone_count() == 4);
 }
 
+static uint8_t last_note(uint16_t *n)
+{
+	*n = 0;
+	return zone_edit_note(n);
+}
+
+/* n is used and in no zone */
+static bool unzoned(uint16_t n)
+{
+	channel_t c;
+	if (!codeplug_channel(n, &c))
+		return false;
+	for (uint16_t zi = 0; zi < codeplug_zone_count(); zi++) {
+		zone_t z;
+		if (codeplug_zone(zi, &z) && zone_list_find(&z, n) >= 0)
+			return false;
+	}
+	return true;
+}
+
 /* The owner's codeplug (backup of 2026-11-21, its structure only): 26 channels (FM, DMR, P25, some receive only),
  * then a find zone made ("Bulunanlar 1", empty), which stores "All channels" as zone 0 with channels 1-26; channel 27
- * made after it. Before the fix the new channel was written alone: in no zone, so Home stepped 1-26. ZONE_POS_JOIN
- * puts a new channel at the end of the zone it names (Home's), alone when the zone is full or the zones are virtual */
+ * made after it was in no zone, so Home stepped 1-26. zone_edit_add_join: All channels and the zone it was made for */
 static void test_new_joins(void)
 {
 	fresh();
@@ -124,47 +143,109 @@ static void test_new_joins(void)
 		c.rx_only = n % 5u == 0u;
 		CHECK(codeplug_set_channel(n, &c));
 	}
-	/* Virtual "All channels": a new channel is in it without a zone write, nothing gets stored */
-	channel_t c = kind_of(27);
-	CHECK(!codeplug_zones_stored());
-	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 27, &c) == ZONE_EDIT_OK && !codeplug_zones_stored());
+	uint16_t n;
 	zone_t z;
-	CHECK(codeplug_zone(0, &z) && z.count == 27 && z.channels[26] == 27);
+	channel_t c = kind_of(27), r;
+	/* Virtual "All channels": it shows the new one, nothing stored, nothing to say */
+	CHECK(zone_edit_add_join(ZONE_NONE, ZONE_POS_JOIN, 27, &c) == ZONE_EDIT_OK && !codeplug_zones_stored());
+	CHECK(codeplug_zone(0, &z) && z.count == 27 && last_note(&n) == ZONE_NOTE_IDLE);
 	CHECK(zone_edit_drop_channel(27) == ZONE_EDIT_OK);
 	uint16_t at;
 	CHECK(zone_edit_new("Bulunanlar 1", &at) == ZONE_EDIT_OK && at == 1 && codeplug_zone_count() == 2);
-	CHECK(codeplug_zone(0, &z) && z.count == 26 && strcmp(z.name, "All channels") == 0);
-	CHECK(holds(1, NULL, 0));
-	/* The old path (the channel written alone): in no zone, Home's zone still ends at 26 */
-	CHECK(codeplug_set_channel(27, &c));
-	CHECK(codeplug_zone(0, &z) && z.count == 26 && zone_list_find(&z, 27) < 0);
-	/* The new one: channel 28 joins zone 0 at its end, every one of the 27 entries readable */
-	channel_t p = kind_of(29);	/* P25 */
+	CHECK(codeplug_zone(0, &z) && z.count == 26 && strcmp(z.name, "All channels") == 0 && holds(1, NULL, 0));
+	/* The old path (written alone): the owner's 27th, in no zone */
+	CHECK(codeplug_set_channel(27, &c) && unzoned(27));
+	/* Home on the find zone: All channels only (entry 27, readable), the find zone keeps its finds only */
+	channel_t p = kind_of(29);	/* P25, receive only */
 	p.rx_only = true;
-	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 28, &p) == ZONE_EDIT_OK);
-	CHECK(codeplug_zone(0, &z) && z.count == 27 && z.channels[26] == 28);
-	for (uint16_t i = 0; i < z.count; i++) {
-		channel_t r;
+	CHECK(zone_edit_add_join(1, ZONE_POS_JOIN, 28, &p) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_IDLE);
+	CHECK(codeplug_zone(0, &z) && z.count == 27 && z.channels[26] == 28 && holds(1, NULL, 0));
+	for (uint16_t i = 0; i < z.count; i++)
 		CHECK(codeplug_channel(z.channels[i], &r));
+	/* Home on another zone: both, at the ends */
+	zone_t b = zone_of("B", (const uint16_t[]){ 1, 2 }, 2);
+	CHECK(zone_edit_create(&b, &at) == ZONE_EDIT_OK && at == 2);
+	CHECK(zone_edit_add_join(2, ZONE_POS_JOIN, 29, &c) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_IDLE);
+	CHECK(holds(2, (const uint16_t[]){ 1, 2, 29 }, 3) && codeplug_zone(0, &z) && z.channels[z.count - 1u] == 29);
+	/* Home on All channels: once */
+	CHECK(zone_edit_add_join(0, ZONE_POS_JOIN, 30, &c) == ZONE_EDIT_OK && codeplug_zone(0, &z) && z.count == 29);
+	/* The VFO (no zone): All channels */
+	CHECK(zone_edit_add_join(ZONE_NONE, ZONE_POS_JOIN, 31, &c) == ZONE_EDIT_OK && codeplug_zone(0, &z) &&
+	      z.channels[z.count - 1u] == 31 && holds(2, (const uint16_t[]){ 1, 2, 29 }, 3));
+	/* Copy here (Save as new from its editor too): its zone at its position, and All channels */
+	CHECK(zone_edit_add_join(2, 1, 32, &c) == ZONE_EDIT_OK && holds(2, (const uint16_t[]){ 1, 32, 2, 29 }, 4));
+	CHECK(codeplug_zone(0, &z) && z.count == 31 && z.channels[30] == 32);
+	/* A taken number: refused, nothing written */
+	CHECK(zone_edit_add_join(2, ZONE_POS_JOIN, 32, &c) == ZONE_EDIT_NO_FREE && holds(2, (const uint16_t[]){ 1, 32, 2, 29 }, 4));
+	/* Repair: the owner's stranded 27 into All channels, the count said; then nothing left */
+	CHECK(zone_edit_add_unzoned(0) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_ADDED && n == 1);
+	CHECK(codeplug_zone(0, &z) && z.count == 32 && z.channels[31] == 27 && !unzoned(27));
+	CHECK(zone_edit_add_unzoned(0) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_NO_UNZONED && n == 0);
+	/* Home's zone full: in All channels only, said */
+	for (uint16_t k = 33; k <= 108; k++) {
+		channel_t f = kind_of(k);
+		CHECK(codeplug_set_channel(k, &f) && zone_edit_insert(2, 4u + (k - 33u), k) == ZONE_EDIT_OK);
 	}
-	CHECK(holds(1, NULL, 0));
-	/* Into the empty find zone too; a taken number refused, nothing changed */
-	CHECK(zone_edit_add_new(1, ZONE_POS_JOIN, 30, &c) == ZONE_EDIT_OK && holds(1, (const uint16_t[]){ 30 }, 1));
-	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 28, &c) == ZONE_EDIT_NO_FREE && codeplug_zone(0, &z) && z.count == 27);
-	/* A full zone: the channel is written alone (it is not lost), the zone unchanged */
-	for (uint16_t n = 31; n <= 83; n++) {
-		channel_t f = kind_of(n);
-		CHECK(codeplug_set_channel(n, &f) && zone_edit_insert(0, z.count, n) == ZONE_EDIT_OK);
-		CHECK(codeplug_zone(0, &z));
+	CHECK(codeplug_zone(2, &z) && z.count == 80);
+	CHECK(zone_edit_add_join(2, ZONE_POS_JOIN, 109, &c) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_ONLY_ALL && n == 109);
+	CHECK(codeplug_zone(0, &z) && z.channels[z.count - 1u] == 109);
+	/* All channels full: Home's zone takes it (said); with no other zone it stays in no zone (said), never silently */
+	for (uint16_t k = 115; k <= 162; k++) {
+		channel_t f = kind_of(k);
+		CHECK(codeplug_set_channel(k, &f));	/* 48 channels in no zone (written alone) */
 	}
-	CHECK(z.count == 80);
-	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 84, &c) == ZONE_EDIT_OK);
-	channel_t r;
-	CHECK(codeplug_channel(84, &r) && codeplug_zone(0, &z) && z.count == 80 && zone_list_find(&z, 84) < 0);
-	/* A zone that is gone: written alone */
-	CHECK(zone_edit_add_new(9, ZONE_POS_JOIN, 85, &c) == ZONE_EDIT_OK && codeplug_channel(85, &r));
+	CHECK(zone_edit_add_unzoned(0) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_ADDED_FULL && n == 47);
+	CHECK(codeplug_zone(0, &z) && z.count == 80 && z.channels[79] == 161 && unzoned(162));
+	zone_t d = zone_of("D", (const uint16_t[]){ 3 }, 1);
+	CHECK(zone_edit_create(&d, &at) == ZONE_EDIT_OK && at == 3);
+	CHECK(zone_edit_add_join(3, ZONE_POS_JOIN, 110, &c) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_NOT_ALL && n == 110);
+	CHECK(holds(3, (const uint16_t[]){ 3, 110 }, 2));
+	CHECK(zone_edit_add_join(ZONE_NONE, ZONE_POS_JOIN, 111, &c) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_ALL_FULL);
+	CHECK(n == 111 && unzoned(111));
+	/* Repair into D: every channel in no zone (111, 162) in number order */
+	CHECK(zone_edit_add_unzoned(3) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_ADDED && n == 2);
+	CHECK(holds(3, (const uint16_t[]){ 3, 110, 111, 162 }, 4));
+	/* All channels renamed: an ordinary zone; Home's zone only, or in no zone (said) */
+	CHECK(zone_edit_rename(0, "Mine") == ZONE_EDIT_OK);
+	CHECK(zone_edit_add_join(3, ZONE_POS_JOIN, 112, &c) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_IDLE);
+	CHECK(holds(3, (const uint16_t[]){ 3, 110, 111, 162, 112 }, 5));
+	CHECK(zone_edit_add_join(1, ZONE_POS_JOIN, 113, &c) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_NO_ZONE);
+	CHECK(n == 113 && unzoned(113) && holds(1, NULL, 0));
+	/* Rollback: the zone write fails with the channel in no zone: the channel is deleted (the UI says not saved) */
+	CHECK(zone_edit_rename(0, "All channels") == ZONE_EDIT_OK && zone_edit_drop_channel(113) == ZONE_EDIT_OK);
+	CHECK(zone_edit_remove(0, 79) == ZONE_EDIT_OK);
+	sim_flash_bad_range(EE + 0x8000u, 0x3000u);
+	CHECK(zone_edit_add_join(ZONE_NONE, ZONE_POS_JOIN, 114, &c) == ZONE_EDIT_FAILED && !codeplug_channel(114, &r));
+	sim_flash_bad_range(0, 0);
 	boot_again();
-	CHECK(codeplug_zone(0, &z) && z.count == 80 && z.channels[26] == 28 && holds(1, (const uint16_t[]){ 30 }, 1));
+	/* Still gone after a power cycle (the worn zone sector itself is the flash's loss, not this path's) */
+	CHECK(!codeplug_channel(114, &r));
+}
+
+/* A codeplug with the old 16-channel zone records (layout byte past 4): All channels holds 16, then it is full */
+static void test_legacy16(void)
+{
+	fresh();
+	for (uint16_t n = 1; n <= 16; n++) {
+		channel_t c = kind_of(n);
+		CHECK(codeplug_set_channel(n, &c));
+	}
+	uint8_t *ee = sim_flash_data + EE;
+	ee[0x8010] = 0x01;			/* zone slot 0 in use */
+	memset(ee + 0x8030, 0xFF, 0x30 * 2);
+	memcpy(ee + 0x8030, "All channels", 12);
+	for (uint16_t i = 0; i < 16; i++) {
+		ee[0x8040 + 2 * i] = (uint8_t)(i + 1u);
+		ee[0x8041 + 2 * i] = 0;
+	}
+	boot_again();				/* 0x806F, record 1's last name byte: 0xFF, the old layout */
+	CHECK(codeplug_zone_capacity() == 16 && codeplug_zones_stored() && codeplug_zone_count() == 1);
+	CHECK(holds(0, (const uint16_t[]){ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, 16));
+	channel_t c = kind_of(17);
+	uint16_t n;
+	CHECK(zone_edit_add_join(0, ZONE_POS_JOIN, 17, &c) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_ALL_FULL && n == 17);
+	CHECK(unzoned(17));
+	CHECK(zone_edit_add_unzoned(0) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_ADDED_FULL && n == 0);
 }
 
 int main(void)
@@ -175,6 +256,7 @@ int main(void)
 	test_zone_grows();
 	test_drop_channel();
 	test_new_joins();
+	test_legacy16();
 	printf("Plus zone capacity and Delete channel: %s\n", failures ? "FAILED" : "all passed");
 	return failures != 0;
 }

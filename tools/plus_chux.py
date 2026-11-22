@@ -35,47 +35,107 @@ def prepare_chux(transform, install):
     prepare_dmr_rows(transform)
     prepare_dmon(transform)
     prepare_drop(transform)
-    prepare_new_joins(transform)
+    prepare_new_joins(transform, install)
 
 
-def prepare_new_joins(transform):
-    """6. A new channel joins the zone Home is on (the real cause of "I can add a 27th channel, but on Home I can only go
-    up to 26", docs/plus.md "Zone size: the real cause"). Without stored zones the radio shows the virtual "All
+def prepare_new_joins(transform, install):
+    """6. Channels made on the radio go into zones (the real cause of "I can add a 27th channel, but on Home I can only
+    go up to 26", docs/plus.md "Zone size: the real cause"). Without stored zones the radio shows the virtual "All
     channels" zone, every used channel; the first zone the radio makes (Create New Zone, Find & save's "Bulunanlar N")
-    stores "All channels" as zone 0, a copy of the channels of that moment. A channel made after it (Channels > New
-    channel, the VFO's or the editor's Save as new channel) was written in no zone, so Home, which steps the zone's own
-    list, stopped at the last channel of the copy (the owner's backup: 27 channels, "All channels" 1-26). Now such a
-    channel is written and put at the end of Home's zone in one job (ZONE_OP_ADD_NEW, pos ZONE_POS_JOIN); alone, as
-    before, when that zone is full or the zones are still the virtual one (which holds it anyway)."""
+    stores "All channels" as zone 0, a copy of the channels of that moment, and a channel made after it (Channels > New
+    from current, the VFO's or the editor's Save as new channel) was written in no zone: Home stopped at the copy's end
+    (the owner's backup: 27 channels, "All channels" 1-26). Now (integration/radiofoundry/codeplug/zone_join.inc):
+      - such a channel goes into "All channels" (zone 0 while it keeps that name) and into the zone it was made for:
+        Copy here's zone at its position, else the zone Home (the selected watch letter) is on, unless Home is on the
+        VFO or a Find & save zone; one storage job (ZONE_OP_ADD_JOIN); a zone write that fails deletes the channel when
+        it is in no zone then (the toast: not saved);
+      - never silently in no zone: a toast says it (All channels full, no zone to take it), or that only one of the two
+        took it;
+      - Zone options > "Add unzoned channels": every channel in no zone at the zone's end (ZONE_OP_UNZONED), the count
+        said; user-triggered only."""
+    install('core/codeplug/zone_join.inc', 'integration/radiofoundry/codeplug/zone_join.inc')
     transform('core/codeplug/zone_edit.h', [
+        ('\tZONE_OP_DROP,\t// DDM32 Plus: Delete channel (op->channel), zone_edit_drop_channel\n',
+         '\tZONE_OP_DROP,\t// DDM32 Plus: Delete channel (op->channel), zone_edit_drop_channel\n'
+         '\tZONE_OP_ADD_JOIN,\t// DDM32 Plus: a channel made on the radio (op->channel, op->ch) into All channels and\n'
+         '\t\t\t\t// op->zone (ZONE_NONE: none) at op->pos (ZONE_POS_JOIN: Home\'s, at the end)\n'
+         '\tZONE_OP_UNZONED,\t// DDM32 Plus: every channel in no zone into op->zone\n'),
         ('zone_edit_result_t zone_edit_drop_channel(uint16_t number);\n#endif\n',
          'zone_edit_result_t zone_edit_drop_channel(uint16_t number);\n'
-         '// DDM32 Plus: zone_edit_add_new\'s pos for a new channel made outside a zone: the zone\'s end when the zones are\n'
-         '// stored and it has room, else the channel is written alone (OK)\n'
-         '#define ZONE_POS_JOIN\t0xFFFFu\n#endif\n'),
+         '// DDM32 Plus (zone_join.inc): pos for Home\'s zone (at its end; a Find & save zone does not take it); no zone\n'
+         '#define ZONE_POS_JOIN\t0xFFFFu\n#define ZONE_NONE\t0xFFFFu\n'
+         '// A channel made on the radio: written as number, into All channels (zone 0 while it has that name) and zone\n'
+         '// at pos. OK unless the channel was not saved (NO_FREE, FAILED: a zone write failed with it in no zone)\n'
+         'zone_edit_result_t zone_edit_add_join(uint16_t zone, uint16_t pos, uint16_t number, const channel_t *ch);\n'
+         '// Every channel in no zone at the end of zone, while it has room\n'
+         'zone_edit_result_t zone_edit_add_unzoned(uint16_t zone);\n'
+         '// What the last of those two did (ZONE_NOTE_IDLE: nothing to say), once; n: the channel, or how many added\n'
+         'enum { ZONE_NOTE_IDLE, ZONE_NOTE_NO_ZONE, ZONE_NOTE_ALL_FULL, ZONE_NOTE_NOT_ALL, ZONE_NOTE_ONLY_ALL,\n'
+         '       ZONE_NOTE_ADDED, ZONE_NOTE_ADDED_FULL, ZONE_NOTE_NO_UNZONED };\n'
+         'uint8_t zone_edit_note(uint16_t *n);\n#endif\n'),
     ])
     transform('core/codeplug/zone_edit.c', [
-        ('\t\tr = ZONE_EDIT_NO_FREE;\t\t// not a free number: never overwrite a channel\n\t}\n',
-         '\t\tr = ZONE_EDIT_NO_FREE;\t\t// not a free number: never overwrite a channel\n\t}\n'
-         + _if('\tif (pos == ZONE_POS_JOIN) {\n'
-               '\t\tbool join = r == ZONE_EDIT_OK && codeplug_zones_stored() && work.count < codeplug_zone_capacity();\n'
-               '\t\tpos = work.count;\n'
-               '\t\tif (!join && r != ZONE_EDIT_NO_FREE) {\n'
-               '\t\t\tr = number == 0 || codeplug_channel(number, &probe) ? ZONE_EDIT_NO_FREE :\n'
-               '\t\t\t    codeplug_set_channel(number, ch) ? ZONE_EDIT_OK : ZONE_EDIT_FAILED;\n'
-               '\t\t\tstorage_unlock();\n\t\t\treturn r;\n\t\t}\n\t}\n')),
+        ('static uint32_t applied;\nstatic uint8_t last_result;\n',
+         _if('#include "codeplug/zone_join.inc"\n\n') + 'static uint32_t applied;\nstatic uint8_t last_result;\n'),
+        ('\tcase ZONE_OP_DROP: return zone_edit_drop_channel(op->channel);\n',
+         '\tcase ZONE_OP_DROP: return zone_edit_drop_channel(op->channel);\n'
+         '\tcase ZONE_OP_ADD_JOIN: return zone_edit_add_join(op->zone, op->pos, op->channel, &op->ch);\n'
+         '\tcase ZONE_OP_UNZONED: return zone_edit_add_unzoned(op->zone);\n'),
+    ])
+    transform('core/ui/ui_nav.h', [
+        ('void ui_menus_save_failed(void);\n',
+         'void ui_menus_save_failed(void);\n'
+         + _if('void ui_menus_zone_note(void);\t// DDM32 Plus: the zone editor\'s note (zone_edit_note) as a toast\n')),
+    ])
+    transform('core/ui/ui_app.c', [
+        ('\tui_svc_zone_poll();\n', '\tui_svc_zone_poll();\n' + _if('\tui_menus_zone_note();\n')),
     ])
     transform('core/ui/ui_menus.c', [
-        ('\t\tzone_focus_num = num;\t// the zone\'s list shows it when the editor closes\n\t\treturn true;\n\t}\n#endif\n'
-         '\t(void)as_new;\n\treturn ui_svc_write_channel(num, &ced_ch);\n',
-         '\t\tzone_focus_num = num;\t// the zone\'s list shows it when the editor closes\n\t\treturn true;\n\t}\n'
-         + _if('\t// DDM32 Plus: a new channel joins the zone Home is on, at its end (zone_edit ZONE_POS_JOIN)\n'
-               '\tif (ced_new || as_new) {\n'
-               '\t\tze_op_new(ZONE_OP_ADD_NEW, ZONE_POS_JOIN)->channel = num;\n'
-               '\t\tze_op.zone = ui_view()->zone_index;\n'
-               '\t\tze_op.ch = ced_ch;\n'
-               '\t\treturn ui_svc_zone_edit(&ze_op);\n\t}\n')
-         + '#endif\n\t(void)as_new;\n\treturn ui_svc_write_channel(num, &ced_ch);\n'),
+        # The editor's save: All channels and the zone it was made for, in one job
+        ('#if CONFIG_ZONE_EDIT\n\tif (ced_into && ced_new && !as_new) {\n',
+         '#if CONFIG_ZONE_EDIT && CONFIG_CHAN_EXTRAS\n'
+         '\t// DDM32 Plus: into All channels and Copy here\'s zone at its position, else the zone Home (the selected\n'
+         '\t// watch letter) is on, not on the VFO (zone_edit_add_join)\n'
+         '\tif (ced_new || as_new) {\n'
+         '\t\tconst radio_view_t *v = ui_view();\n'
+         '\t\tbool into = ced_into;\n'
+         '\t\tze_op_new(ZONE_OP_ADD_JOIN, into ? ced_into_pos : ZONE_POS_JOIN)->channel = num;\n'
+         '\t\tif (!into)\n\t\t\tze_op.zone = v->vfo ? ZONE_NONE : v->zone_index;\n'
+         '\t\tze_op.ch = ced_ch;\n'
+         '\t\tif (!ui_svc_zone_edit(&ze_op))\n\t\t\treturn false;\n'
+         '\t\tif (into) {\n\t\t\tced_into = false;\n\t\t\tzone_focus_num = num;\n\t\t}\n'
+         '\t\treturn true;\n\t}\n'
+         '#elif CONFIG_ZONE_EDIT\n\tif (ced_into && ced_new && !as_new) {\n'),
+        # The note, in the editor's toast buffer
+        ('static void ze_full_toast(void)\n{',
+         '// DDM32 Plus: what the last channel into zones or Add unzoned channels did (zone_edit_note)\n'
+         'void ui_menus_zone_note(void)\n{\n'
+         '\tstatic const char *const text[] = {\n'
+         '\t\t[ZONE_NOTE_NO_ZONE] = TRN("In no zone: channel "),\n'
+         '\t\t[ZONE_NOTE_ALL_FULL] = TRN("All channels full, in no zone: ch "),\n'
+         '\t\t[ZONE_NOTE_NOT_ALL] = TRN("All channels full, not in it: ch "),\n'
+         '\t\t[ZONE_NOTE_ONLY_ALL] = TRN("Zone full, only in All channels: "),\n'
+         '\t\t[ZONE_NOTE_ADDED] = TRN("Added to the zone: "),\n'
+         '\t\t[ZONE_NOTE_ADDED_FULL] = TRN("Zone full, added: "),\n'
+         '\t\t[ZONE_NOTE_NO_UNZONED] = TRN("Every channel is in a zone") };\n'
+         '\tuint16_t n;\n\tuint8_t k = zone_edit_note(&n);\n'
+         '\tif (k == ZONE_NOTE_IDLE || k >= sizeof text / sizeof text[0])\n\t\treturn;\n'
+         '\tsbuf_t b;\n\tsb_init(&b, ze_msg, sizeof ze_msg);\n\tsb_str(&b, tr(text[k]));\n'
+         '\tif (k != ZONE_NOTE_NO_UNZONED)\n\t\tsb_u32(&b, n, 1);\n'
+         '\tui_toast(ze_msg);\n}\n\n'
+         'static void ze_full_toast(void)\n{'),
+        # Zone options > Add unzoned channels
+        ('\tZO_DELETE, ZO_COUNT };\n', _if('\tZO_UNZONED,\t// DDM32 Plus: every channel in no zone into this one\n')
+         + '\tZO_DELETE, ZO_COUNT };\n'),
+        ('\t\t[ZO_DELETE] = TRN("Delete zone") };\n',
+         _if('\t\t[ZO_UNZONED] = TRN("Add unzoned channels"),\n') + '\t\t[ZO_DELETE] = TRN("Delete zone") };\n'),
+        ('\t} else if (!codeplug_zones_stored()) {\n\t\tui_toast(TR("It holds every channel: it stays"));\n',
+         ON + '\t} else if (i == ZO_UNZONED) {\n\t\tze_op_new(ZONE_OP_UNZONED, 0);\n\t\tif (ze_post())\n\t\t\tui_pop();\n'
+         '#endif\n'
+         '\t} else if (!codeplug_zones_stored()) {\n\t\tui_toast(TR("It holds every channel: it stays"));\n'),
+        ('\t.hint = CONFIG_ZONE_SHARE ? TRN("1-4 pick  Back") : TRN("1-3 pick  Back"),\n',
+         _if('\t.hint = CONFIG_ZONE_SHARE ? TRN("1-5 pick  Back") : TRN("1-4 pick  Back"),\n',
+             '\t.hint = CONFIG_ZONE_SHARE ? TRN("1-4 pick  Back") : TRN("1-3 pick  Back"),\n')),
     ])
 
 

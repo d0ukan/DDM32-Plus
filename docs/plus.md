@@ -3203,17 +3203,41 @@ saw: a **copy of the channels of that moment** (here 1-26). From then on a chann
 the channel list counted 27. Only Copy here and Find & save put the new channel in a zone. Dual / multi-watch step a
 letter's zone list the same way, so they stopped at 26 too.
 
-Fix (`tools/plus_chux.py prepare_new_joins`, `CONFIG_CHAN_EXTRAS`): a new channel made outside a zone is written and
-put at the **end of the zone Home is on** in one storage job (`ZONE_OP_ADD_NEW` with pos `ZONE_POS_JOIN`, the Copy here
-path); written alone as before when that zone is full (80), gone, or the zones are still the virtual one (which shows
-it anyway, and is not stored by this). Cost: FLASH +120 B (861,392 B, 95.59 %), RAM 0 (1,584 B free), no new stack
-buffer (the zone check runs in the storage job, which already holds its `work` zone). The owner's existing channel 27
-stays out of the zones: add it once with Zones > All channels > Add channel. Tests: `tests/plus/test_zone_cap.c
-test_new_joins` (the owner's zone shape on the real codeplug and `zone_edit.c`: 26 mixed channels, a find zone made,
-"All channels" stored with 26, the old path leaves the 27th out, `ZONE_POS_JOIN` adds it as entry 27 readable, full
-zone / zone gone / virtual zones write it alone, after a reboot too), `tests/plus/test_ui_chux.c case_new_joins` (the
-real screens in the simulator, English and Turkish: New from current and Save as new channel join Home's zone and Home
-steps onto the new last position). Radio test row Z-1b.
+The rule since the fix (`tools/plus_chux.py prepare_new_joins`, `integration/radiofoundry/codeplug/zone_join.inc`,
+`CONFIG_CHAN_EXTRAS`): a channel made on the radio (Menu > Channels > New from current, the VFO's Save as new channel,
+the editor's Save as new channel, Copy here) is written and put into zones in **one storage job** (`ZONE_OP_ADD_JOIN`;
+the zone work runs in the storage job on its `work` zone, nothing new on the UI task's stack):
+
+- **"All channels"**, at its end, always. It is zone 0 while it has the name `make_room` stored it with ("All
+  channels"; "Tüm kanallar" typed on the radio counts too). **Renamed**, it is an ordinary zone: new channels then go
+  only into the zone they were made for. While the zones are still the virtual one, nothing is written to zones (the
+  virtual zone shows every channel).
+- **and the zone it was made for**: Copy here's zone at its position; otherwise the zone Home is on, at its end; in
+  dual / multi-watch the selected letter's zone (`ui_view()` is the selected letter's view). Not when Home (the letter)
+  is on the VFO, and not a Find & save zone ("Bulunanlar N": it holds the finds only). Home on All channels: once.
+- **never silently in no zone**: a toast after "Saved as channel N" says what happened when a zone did not take it:
+  "All channels full, in no zone: ch N" (TR "Tüm kanallar dolu, bölgesiz: kanal N"), "In no zone: channel N" (no All
+  channels zone and no zone to take it; TR "Bölgesiz: kanal N"), "All channels full, not in it: ch N" (Home's zone took
+  it; TR "Tüm kanallar dolu, dışında: kanal N"), "Zone full, only in All channels: N" (TR "Bölge dolu, yalnız Tüm
+  kanallarda: N"). Full is 80, or 16 on a codeplug with the old 16-channel zone records.
+- **a zone write that fails** while the channel is in no zone deletes the channel again, and the toast says "Couldn't
+  write the codeplug: not saved"; when All channels took it and only Home's zone write failed, the channel stays and
+  the toast says "Zone full, only in All channels".
+- **Repair, user-triggered only** (no boot-time writes): Zones > a zone > Zone options > **"Add unzoned channels"**
+  (TR "Bölgesiz kanalları ekle") appends every used channel that is in no zone, in number order, while the zone has
+  room, in one write (one per 256 channel numbers that have such channels), and says "Added to the zone: N" (TR
+  "Bölgeye eklendi: N"), "Zone full, added: N" (some left) or "Every channel is in a zone" (TR "Her kanal bir
+  bölgede"). This is how the owner's channel 27 gets into All channels.
+
+Cost (zone27 over ddm25 3e1119a): FLASH 862,788 B (95.75 %, +1,516 B), RAM unchanged 209,872 B (1,584 B free), no new
+zone buffer. Tests: `tests/plus/test_zone_cap.c` `test_new_joins` and `test_legacy16` on the real codeplug and
+`zone_edit.c` with the owner's zone shape (26 mixed channels, a find zone made, "All channels" stored with 26, the old
+write leaves the 27th out; Home on the find zone, on another zone, on All channels, the VFO, Copy here's position, a
+taken number, Home's zone full, All channels full with and without another zone, the repair with the count, All
+channels renamed, the rollback on a failing zone write, the 16-channel layout), `tests/plus/test_ui_chux.c`
+`case_new_joins`, `case_all_channels`, `case_all_full`, `case_unzoned` (the real screens, English and Turkish: Home
+steps onto the new channel; another zone, a Find & save zone, the VFO, dual watch with B selected on another zone, All
+channels renamed; All channels full said; the Zone options row). Radio test rows Z-1b..Z-1d.
 
 #### Above 80 channels a zone? (owner's question; not changed)
 

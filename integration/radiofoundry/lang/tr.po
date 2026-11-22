@@ -6259,6 +6259,39 @@ msgstr "Çapraz bant kapalı: reddedildi"
 msgid "Zone full: max "
 msgstr "Bölge dolu: en çok "
 
+# DDM32 Plus branch zone27: channels made on the radio go into zones, Add unzoned channels (tools/plus_chux.py)
+#: core/ui/ui_menus.c
+msgid "In no zone: channel "
+msgstr "Bölgesiz: kanal "
+
+#: core/ui/ui_menus.c
+msgid "All channels full, in no zone: ch "
+msgstr "Tüm kanallar dolu, bölgesiz: kanal "
+
+#: core/ui/ui_menus.c
+msgid "All channels full, not in it: ch "
+msgstr "Tüm kanallar dolu, dışında: kanal "
+
+#: core/ui/ui_menus.c
+msgid "Zone full, only in All channels: "
+msgstr "Bölge dolu, yalnız Tüm kanallarda: "
+
+#: core/ui/ui_menus.c
+msgid "Added to the zone: "
+msgstr "Bölgeye eklendi: "
+
+#: core/ui/ui_menus.c
+msgid "Zone full, added: "
+msgstr "Bölge dolu, eklenen: "
+
+#: core/ui/ui_menus.c
+msgid "Every channel is in a zone"
+msgstr "Her kanal bir bölgede"
+
+#: core/ui/ui_menus.c
+msgid "Add unzoned channels"
+msgstr "Bölgesiz kanalları ekle"
+
 #: core/ui/ui_menus.c
 msgid "Can't be read"
 msgstr "Okunamıyor"

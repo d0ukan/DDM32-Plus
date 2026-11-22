@@ -189,6 +189,7 @@ __pycache__/
 /tests/protocol/results.json
 !/tools/classic_standard.py
 !/integration/radiofoundry/codeplug/classic_standard.inc
+!/integration/radiofoundry/codeplug/zone_join.inc
 !/third_party/rf_codeplug/README.md
 !/third_party/rf_codeplug/UPSTREAM.json
 !/third_party/rf_codeplug/core/codeplug/codeplug_kv.c
