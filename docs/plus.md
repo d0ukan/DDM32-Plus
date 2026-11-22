@@ -1356,8 +1356,10 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     during an ACTIVE emergency; the watchdog waiting while PTT is held; the emergency and SOS keys' down / long / up
     not taken; SK1 hold Emergency during a hold reaches the emergency key (outside a hold on FM it does not); no pop-up
     and not idle during an emergency; the auto track after the radio's own frame across the rise.
-  - FLASH +484 B on `ddm25` 3118a86 (867,536 -> 868,020), RAM +8 B (208,576 -> 208,584); zero warnings, forced
-    rebuild identical, stack check passed. Radio rows IS-12-IS-16; IS-8 / IS-9 now 30 s.
+  - FLASH +484 B on `ddm25` 3118a86 (867,536 -> 868,020), RAM +8 B (208,576 -> 208,584) after the first verifier
+    round. Rebased on `ddm25` 6d4ae56 with the second round: FLASH 869,172 B (96.45 %), RAM 208,592 B (the base itself
+    not measured on that commit); zero warnings, forced rebuild identical, stack check passed. Radio rows
+    IS-12-IS-16; IS-8 / IS-9 now 30 s.
 
 - [built] P25 Phase 1 trunk following (`CONFIG_P25_TRUNK`, `prepare_p25_trunk`; parallel job; receive only):
   Tools > P25 trunk (tool 24, before Battery) follows a trunked system from the **selected channel**: a P25 channel
