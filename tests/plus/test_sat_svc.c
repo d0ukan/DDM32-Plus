@@ -958,6 +958,24 @@ static void auto_after_own_frame(uint8_t iss, int32_t start)
 	sat_auto_cancel();
 	run_s(2);
 	CHECK(!held && !vfo && rx_hz == 438500000u);
+	/* the same, but the user turns Auto track off (the alarm set again without it) during the frame: nothing after */
+	sat_pass_t later = brute_next(iss, utc_now() + 1200, 10);
+	scenario("auto track: Auto track turned off during the frame: no track after it", later.aos - 3600);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	sat_ui_idle(true);
+	sat_alarm_set(iss, 2, 10, SAT_AUTO_DOWN << SAT_OPT_AUTO_SHIFT);
+	run_until_found();
+	poll_ms = 100;
+	v = view_now();
+	run_s(v.alarm.aos - utc_now() - 3);
+	ptt = SAT_TX_OWN;
+	run_s(6);
+	sat_alarm_set(iss, 2, 10, 0);	/* Auto track Off (notifications kept) */
+	run_s(2);
+	ptt = SAT_TX_NONE;
+	run_s(5);
+	CHECK(!held && !sat_auto_on() && nreq == 0 && !vfo);
 	poll_ms = POLL_MS;
 }
 

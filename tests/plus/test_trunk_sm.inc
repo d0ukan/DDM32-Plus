@@ -114,6 +114,9 @@ static void test_plus_trunk_sm(void)
         if(dmr_emergency_state()==DMR_EMERGENCY_FAILED)tk_failed=now-tk_t0;
     }
     CHECK(tk_failed!=0 && tk_failed<=1000u && !p25tk_on() && hw.tx_calls==tx0);
+    /* (satfix) the following ended through its own stop, which tunes the channel at once: no retune left waiting for
+     * the trim to settle (RREQ_RETUNE) */
+    CHECK(!sm.retune_due);
     printf("Plus P25 trunk: an emergency while following: following ended, the emergency failed (P25 channel) after %u ms\n",
            (unsigned)tk_failed);
     dmr_emergency_cancel();

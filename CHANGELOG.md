@@ -5,8 +5,6 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
-- An emergency (the key, the lone worker, SOS) also ends P25 trunk following, the P25 search and the DMR / all
-  digital search at once instead of waiting for them; one pressed while transmitting in a watch waits 10 s at most.
 - Transmit safety (pre-release hole hunt; docs/plus.md "Pre-release hole hunt: transmit safety"): SSTV send is
   refused while a scan, a dual / multi-watch, the air watch, a search, the spectrum or trunk following runs ("Stop the
   scan or watch first"), and the radio core checks the band plan itself before keying (before, a watch letter the page
@@ -15,8 +13,6 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   DMR and P25 search are refused over a dual / multi-watch or the air watch. OK on a search find outside the amateur
   band plan makes the VFO receive only ("This channel is RX only") until its frequency changes. The radio name must
   look like a callsign for SSTV, the cross-band and CW IDs ("DM32UV", the factory name, is refused; TA2DOU/P works).
-  digital search at once instead of waiting for them (the channel tuned again before the emergency goes out); one
-  pressed while transmitting in a watch waits 10 s at most.
 - An emergency (the key, the lone worker, SOS) also ends P25 and DMR trunk following, the P25 search and the DMR /
   all digital search instead of waiting for them: within about 0.3 s the channel is tuned again and the emergency goes
   out there (before this fix it usually failed while a search ran and the search went on). One pressed while

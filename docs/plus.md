@@ -1348,7 +1348,10 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
       the auto track for the whole pass: `auto_begin` now notes it (`auto_retry`, the mode) and starts the track once
       the frame is over, if the radio is still idle and the pass not over; PTT across the rise still skips the pass;
     - `sat_hold_watch` waits while anything is on air or an APRS frame waits (`radio_sat_txk() != SAT_TX_NONE`);
-    - the emergency / search order race and DMR trunk following: see the multi-watch fifth review's "order race".
+    - the emergency / search order race and DMR trunk following: see the multi-watch fifth review's "order race"
+      (and its second-verifier paragraph: the native probes and P25 trunk following);
+    - second verifier: the retry after the radio's own frame reads Auto track / the alarm options again (turned off
+      during the frame: no track), with a test.
     Host tests: the emergency keyed on the channel's own frequency and color code (never 145.802); a hold refused
     during an ACTIVE emergency; the watchdog waiting while PTT is held; the emergency and SOS keys' down / long / up
     not taken; SK1 hold Emergency during a hold reaches the emergency key (outside a hold on FM it does not); no pop-up
@@ -4034,6 +4037,18 @@ the radio tick first: the DMR search (DMR channel: HOT_MIC on CC 2 at 438.5 MHz;
 search off; both orders), the all digital sweep and DMR probe (FM: FAILED, channel again), the P25 sweep
 (`tests/classic/test_scan.inc`: FAILED within 200 ms, channel again) and DMR trunk following
 (`tests/plus/test_dmrtrunk_sm.inc`: following ended, keyed on the channel).
+
+Second satfix verifier: when the native receiver held the search's receiver (the all digital search's P25 / YSF
+probe, the P25 search's probe) or P25 trunk following's, `channel_service` stopped the search / following directly,
+so the radio tick stopped holding the start back, while the give back went through `restore_channel`'s RREQ_RETUNE
+(it waits 400 ms for the trim, more than the 200 ms cap): the tick took the start with the board still in the probe's
+set-up (a DMR channel's emergency FAILED). Now the search / following stays on while its receiver is let go
+(`search_let_go`; trunk following released as its own stop does), and the give back (`give_back`) ends it through its
+own stop request (RREQ_DMR_SEARCH / RREQ_P25_SEARCH / RREQ_P25_TRUNK, arg 0), which tunes the channel at once; a
+following the native side does not hold yet is stopped the same way at once. Host tests: during the all digital
+search's native P25 probe on a DMR channel the hot mic keys on CC 2 at 438.5 MHz; on an FM channel the channel again
+and FAILED (`tests/plus/test_allsearch_sm.inc`); P25 trunk following leaves no RREQ_RETUNE waiting
+(`tests/plus/test_trunk_sm.inc`).
 
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free (720 after the review round, 716 after the second), UI 184 B: the radio task's deepest path is still the P25 search's give back):

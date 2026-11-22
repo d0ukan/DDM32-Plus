@@ -81,7 +81,7 @@ static struct {
 	sat_obs_t obs;
 	uint8_t search_sat;
 	uint8_t auto_wait;	/* auto track: seconds left for the radio core's hold */
-	uint8_t auto_retry;	/* ... its SAT_AUTO_* mode when the rise came during the radio's own frame (0: none) */
+	uint8_t auto_retry;	/* ... the rise came during the radio's own frame (its mode then; read again at the retry) */
 	int8_t auto_el;		/* ... the pass's top (the banner) */
 	sat_search_t search;
 	/* tracking */
@@ -724,10 +724,12 @@ void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, uint8_t txk, bool lig
 		taskEXIT_CRITICAL();
 		alarm_check(now, txk);
 		if (e.auto_retry && !transmitting) {
-			/* the rise came during the radio's own frame: the auto track now, if still free and the pass not over */
-			uint8_t m = e.auto_retry;
+			/* the rise came during the radio's own frame: the auto track now, if still wanted (the setting as it is
+			 * now: Auto track or the alarm turned off meanwhile is respected), free and the pass not over */
+			uint8_t m = (uint8_t)((view.alarm.opts & SAT_OPT_AUTO) >> SAT_OPT_AUTO_SHIFT);
 			e.auto_retry = 0;
-			if (ui_idle && e.track == SAT_NONE && !want_track_new && e.rise_sat < sat_count && now < e.rise_los)
+			if (m != SAT_AUTO_OFF && ui_idle && e.track == SAT_NONE && !want_track_new && e.rise_sat < sat_count &&
+			    now < e.rise_los)
 				auto_go(e.rise_sat, e.rise_los, e.rise_el, m, false);
 		}
 		if (!busy && e.track == SAT_NONE)

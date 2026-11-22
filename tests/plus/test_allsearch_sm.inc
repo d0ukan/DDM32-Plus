@@ -185,6 +185,51 @@ static void test_plus_allsearch_sm(void)
     as_wait(200);
     printf("Plus all digital search: an emergency during the sweep or the DMR probe, tick first: ended, the channel "
            "tuned again (FM: failed)\n");
+    /* (satfix, second verifier) during the native receiver's P25 probe (search_owned, native_lab_owns): the search
+     * stays on while the receiver is let go (the radio tick keeps holding the start back), its give back ends it
+     * through its own stop, which tunes the channel at once: on a DMR channel the hot mic keyed there (CC 2,
+     * 438.5 MHz), on an FM channel the channel again and the emergency failed */
+    for (int k = 0; k < 2; k++) {
+        setup_codeplug();
+        start();
+        native_lab_init();
+        req(RREQ_ZONE_POS, k == 0 ? 3 : 0);
+        run(50);
+        {
+            dmr_emergency_settings_t es;
+            dmr_emergency_settings_default(&es);
+            es.mode = DMR_EMERGENCY_MODE_CALL;
+            es.hot_mic_s = 1;
+            dmr_emergency_set_settings(&es);
+        }
+        run(20);
+        CHECK(native_lab_request(&sm, &r) == 0);
+        radio_sm_request(&sm, &r, now);
+        as_to_probe();
+        classic_pump(); classic_pump();
+        CHECK(dmrs_on() && dmrs_mode() == DMRS_MODE_P25 && native_lab_owns() && hw.rx_hz == 433500000u);
+        int ptx = hw.tx_calls;
+        CHECK(dmr_emergency_start());
+        uint32_t pt0 = now, at = 0;
+        for (int i = 0; i < 60 && !at; i++) {
+            as_step();
+            if (dmr_emergency_state() != DMR_EMERGENCY_IDLE)
+                at = now - pt0;
+        }
+        CHECK(!dmrs_on() && at != 0 && at < 500u);
+        if (k == 0) {
+            CHECK(dmr_emergency_state() == DMR_EMERGENCY_HOT_MIC && sm.view.state == RS_TX && hw.tx_calls == ptx + 1 &&
+                  hw.tx_hz == 438500000u && sim.cc_filter == 2);
+        } else {
+            CHECK(dmr_emergency_state() == DMR_EMERGENCY_FAILED && hw.tx_calls == ptx && hw.rx_hz == 146520000u &&
+                  hw_mode == RADIO_MODE_FM);
+        }
+        printf("Plus all digital search: an emergency during the native P25 probe (%s channel): %s after %u ms\n",
+               k == 0 ? "DMR" : "FM", k == 0 ? "keyed on CC 2" : "failed", (unsigned)at);
+        as_wait(1500);
+        dmr_emergency_cancel();
+        as_wait(500);
+    }
 #endif
     hw.st.rssi_dbm = 0;
     printf("Plus all digital search in the state machine: FM sweep, native P25 probe found/played/hang/give back, "
