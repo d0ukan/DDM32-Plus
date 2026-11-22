@@ -14,6 +14,10 @@
 #include "aprsRadioTest.c"
 #undef main
 #include "aprs/aprs_fmt.h"
+#include "radio/sat.h"
+
+// The hold's owner (sat_svc.c, not built here): a held track runs (radio_sathold.inc's watchdog leaves the hold)
+bool sat_auto_on(void) { return true; }
 
 #define ISS_HZ		145825000u
 #define ISS_DOPPLER	145828000u	// a rising pass: +3 kHz on the uplink
@@ -141,6 +145,17 @@ static void test_iss_held(void)
 	CHECK(!wait_start(1, 8000));
 	CHECK(hw.tx_calls == 0);
 	CHECK(aprs_iss_send(ISS_DOPPLER) == APRS_OK);
+	// Holehunt B8: while the frame waits for a clear channel (not keyed yet) the satellites' service is told the
+	// radio's own TX (radio_sat_txk): no Doppler step meanwhile, which would abort the frame
+	bool waited = false, own = true;
+	for (uint32_t t = 0; t < 6000 && hw.starts < 1; t += RADIO_POLL_MS) {
+		run(RADIO_POLL_MS);
+		if (sm.aprs_phase != 0 && !hw.keyed) {
+			waited = true;
+			own = own && radio_sat_txk(&sm) == SAT_TX_OWN;
+		}
+	}
+	CHECK(waited && own);
 	CHECK(wait_start(1, 6000));
 	CHECK(hw.tx_hz == ISS_DOPPLER && nframes == 1 && strstr(frames[0], ",ARISS:") != NULL);
 	wait_idle();

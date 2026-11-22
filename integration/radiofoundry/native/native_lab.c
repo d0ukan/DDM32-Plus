@@ -22,6 +22,9 @@
 #if CONFIG_P25_TRUNK
 #include "radio/p25trunk.h"
 #endif
+#if CONFIG_DMR_TRUNK
+#include "radio/dmrtrunk.h"
+#endif
 #if CONFIG_YSF_TX
 #include "radio/radio_cwid.h"
 #endif
@@ -77,6 +80,7 @@ static void channel_view(radio_sm_t *sm)
     }
 }
 static void restore_channel(radio_sm_t *sm);
+static void give_back(radio_sm_t *sm, bool on, uint8_t stop_type);
 static int channel_let_go(radio_sm_t *sm);
 #if CONFIG_P25_SCAN
 /* P25 scan (docs/plus.md): the scan finds a P25 channel's carrier on the FM path and holds there; the native
@@ -330,6 +334,10 @@ static void search_service(radio_sm_t *sm)
         channel_selected=channel_handoff=false;
         live_restore_pending=false;channel_denial=0;
         sm->audio_out=sm->green_out=sm->red_out=-1;
+#if CONFIG_DMR_EMERGENCY
+        if(dmrs_on() && dmr_emergency_start_pending())give_back(sm,true,RREQ_DMR_SEARCH);  /* an emergency: it ends */
+        else
+#endif
         if(dmrs_on())dmrs_regained();     /* the radio core sets the receiver up for what comes next */
         else restore_channel(sm);         /* stopped meanwhile: the channel again */
         return;
@@ -359,7 +367,7 @@ static void search_service(radio_sm_t *sm)
     channel_selected=channel_handoff=false;
     live_restore_pending=false;channel_denial=0;
     p25s_probe_done(search_was_p25,hal_millis());
-    restore_channel(sm);    /* the radio task tunes the sweep's next step (p25s_epoch changed) */
+    give_back(sm,p25s_on(),RREQ_P25_SEARCH);    /* the radio task tunes the sweep's next step (p25s_epoch changed) */
 }
 #endif
 #if CONFIG_P25_TRUNK
@@ -473,20 +481,43 @@ static void channel_service(radio_sm_t *sm)
 {
 #if CONFIG_DMR_EMERGENCY
     /* DDM32 Plus: an emergency asked for (the key, the lone worker, SOS) never waits for the receiver: the DMR / all
-     * digital search, the P25 search and P25 trunk following end at once (as PTT ends them) and their receiver is let
-     * go below; a P25 channel or letter it holds is let go further down. A native transmission ends first (PTT) */
+     * digital search, the P25 search, P25 and DMR trunk following end at once (as PTT ends them) and their receiver is
+     * let go below; a P25 channel or letter it holds is let go further down. A native transmission ends first (PTT).
+     * The radio tick holds the start back meanwhile (emergency_tick, 200 ms at most): it usually sees it first */
     bool emergency=dmr_emergency_start_pending();
     if(emergency && !native_ptt && !live_owner()) {
+        /* A search the radio core runs (the sweep's frequency, the DMR stack hearing every color code and slot) ends
+         * through its own stop request, which tunes the channel at once (RREQ_RETUNE would wait for the trim to settle,
+         * after the radio tick took the start). One whose receiver the native side holds (a probe, the following) stays
+         * on while its receiver is let go, so the radio tick keeps holding the start back; its give back then ends it
+         * through the same stop request (give_back) */
+        bool owned=false,stop=false;
+        radio_req_t r={.type=RREQ_PTT};     /* (its type set below when used; arg 0: the stop) */
+#if CONFIG_P25_SEARCH
+        owned=search_owned;
+#endif
 #if CONFIG_DMR_SEARCH
-        if(dmrs_on())dmrs_stop();
+        if(dmrs_on() && !owned){stop=true;r.type=RREQ_DMR_SEARCH;}
 #endif
 #if CONFIG_P25_SEARCH
-        if(p25s_on())p25s_stop();
+        if(p25s_on() && !owned){stop=true;r.type=RREQ_P25_SEARCH;}
         if(search_owned && !search_release)search_let_go();
 #endif
 #if CONFIG_P25_TRUNK
-        if(p25tk_on())p25tk_stop();
+        if(p25tk_on()) {
+            if(!trunk_owned){stop=true;r.type=RREQ_P25_TRUNK;}
+            else if(!trunk_release) {
+                trunk_release=channel_handoff=true;     /* as trunk_service's own stop, the following still on */
+                live_enabled=live_rx_pending=live_tx_pending=false;
+                trunk_stop_worker();
+            }
+        }
 #endif
+#if CONFIG_DMR_TRUNK
+        if(dmrtk_on()){stop=true;r.type=RREQ_DMR_TRUNK;}  /* (receive only: it refused the emergency's TX) */
+#endif
+        (void)owned;
+        if(stop)radio_sm_request(sm,&r,hal_millis());
     }
 #else
     bool emergency=false;
@@ -514,7 +545,7 @@ static void channel_service(radio_sm_t *sm)
 #endif
 #if CONFIG_P25_TRUNK
     if(trunk_owned || p25tk_on()) {
-        if(trunk_service(sm))restore_channel(sm);
+        if(trunk_service(sm))give_back(sm,p25tk_on(),RREQ_P25_TRUNK);
         return;
     }
 #endif
@@ -756,6 +787,24 @@ static void restore_channel(radio_sm_t *sm)
     sm->audio_out=sm->green_out=sm->red_out=-1;
     radio_req_t r={.type=RREQ_RETUNE};
     radio_sm_request(sm,&r,hal_millis());
+}
+/* DDM32 Plus: a search's or trunk following's receiver handed back. With an emergency asked for and the search /
+ * following still on (on), it ends through its own stop request (stop_type, arg 0), which tunes the channel at once,
+ * before the radio tick takes the start (it holds it back while they run: emergency_tick); otherwise as before */
+static void __attribute__((unused)) give_back(radio_sm_t *sm, bool on, uint8_t stop_type)
+{
+#if CONFIG_DMR_EMERGENCY
+    if(on && dmr_emergency_start_pending()) {
+        native_view_clear(sm);
+        sm->audio_out=sm->green_out=sm->red_out=-1;
+        radio_req_t r={.type=stop_type};
+        radio_sm_request(sm,&r,hal_millis());
+        return;
+    }
+#else
+    (void)on;(void)stop_type;
+#endif
+    restore_channel(sm);
 }
 #if CONFIG_DEV_TX && CONFIG_P25_CHANNELS
 /* A request (or PTT on another letter of the ring) takes the channel from the native receiver: 0 once it is let go,

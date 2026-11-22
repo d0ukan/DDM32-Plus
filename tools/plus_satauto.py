@@ -13,7 +13,9 @@ upstream files change only through the hunks below.
     through the UI storage service (UI_SET_SAT_NOTE / UI_SET_SAT_AUTO).
   - The radio core holds the user's state for an auto track (RREQ_SAT_HOLD, radio_sathold.inc): noted as a power off
     notes it, nothing noted meanwhile (persist), TX refused (receive only), put back at the end.
-  - ui_app_key: a key while an auto track runs ends it (ui_sat_auto_key) before anything else.
+  - ui_app_key: a key while an auto track runs ends it (ui_sat_auto_key) before anything else; the emergency key goes
+    on (the radio core ends the hold for the emergency itself, emergency_tick). A hold left without its track ends by
+    itself after 2 s (sat_hold_watch).
 """
 
 SAT = 'integration/radiofoundry/sat/'
@@ -74,6 +76,11 @@ def prepare_sat_auto(transform, install):
          '\t// A beep or a vibration is an alert, not the user doing something; the volume changes nothing on air or on the\n'),
     ])
     transform('core/radio/radio_sm.h', [
+        ('uint8_t radio_sm_tx_check(const radio_sm_t *sm);\n',
+         'uint8_t radio_sm_tx_check(const radio_sm_t *sm);\n'
+         '#if CONFIG_SATELLITES\n'
+         'uint8_t radio_sat_txk(const radio_sm_t *sm);\t// DDM32 Plus: sat_service\'s SAT_TX_* (radio_sathold.inc)\n'
+         '#endif\n'),
         ('\tRREQ_XBAND,\t\t// DDM32 Plus: arg 1 = a cross-band session starts (xband.h), 0 = it stops\n',
          '\tRREQ_XBAND,\t\t// DDM32 Plus: arg 1 = a cross-band session starts (xband.h), 0 = it stops\n'
          '#if CONFIG_SATELLITES\n'
@@ -143,6 +150,7 @@ def prepare_sat_auto(transform, install):
          '\toff_warned = false;\n',
          '#if CONFIG_SATELLITES\n'
          'bool ui_sat_auto_key(const input_event_t *ev);\t// ui_sat.c (DDM32 Plus)\n'
+         'bool radio_sat_held(void);\t// radio_sathold.inc (DDM32 Plus)\n'
          '#endif\n'
          'void ui_app_key(const input_event_t *ev)\n{\n\tdirty = true;\n\tlast_key_ms = now;\n\tlast_use_ms = now;\n'
          '\toff_warned = false;\n'
@@ -150,6 +158,14 @@ def prepare_sat_auto(transform, install):
          '\tif (ui_sat_auto_key(ev))\n'
          '\t\treturn;\t// DDM32 Plus: the key ended a satellite\'s auto track (PTT and monitor go on below)\n'
          '#endif\n'),
+        # A side key's hold function runs on DMR only (on FM holding the key is the squelch break); during a satellite
+        # hold the radio sits on the FM satellite VFO, so an emergency / SOS hold function goes on (holehunt verifier)
+        ('\tif (ev->gesture == GESTURE_LONG && ev->value != 0 && view->ch.mode != RADIO_MODE_DMR)\n\t\treturn;\n',
+         '\tif (ev->gesture == GESTURE_LONG && ev->value != 0 && view->ch.mode != RADIO_MODE_DMR\n'
+         '#if CONFIG_SATELLITES\n'
+         '\t    && !((ev->action == ACT_EMERGENCY || ev->action == ACT_SOS) && radio_sat_held())\n'
+         '#endif\n'
+         '\t    )\n\t\treturn;\n'),
         # The AOS pop-up (auto track Off): "OK: track" under the rise's title (ui_sat_pop_text; ui_sat_auto_key acts)
         ('\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, NULL);\n',
          '\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, ui_sat_pop_text());\t// DDM32 Plus: the AOS pop-up\'s OK\n'),
@@ -166,14 +182,13 @@ def prepare_sat_auto(transform, install):
          '#endif\n'),
     ])
     # The service learns PTT apart from the radio's own transmissions: an APRS frame (the user's # APRS via ISS) never
-    # ends a held track, PTT does (sat.h SAT_TX_*)
+    # ends a held track, PTT does (sat.h SAT_TX_*); the frame counts from its wait for a clear channel on, so no Doppler
+    # step aborts it (radio_sathold.inc radio_sat_txk, holehunt B8)
     transform('core/radio/radio_task.c', [
         ('\t\t\tsat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz, sm.view.state == RS_TX || sm.ptt, false,\n',
-         '\t\t\tsat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz,\n'
-         '\t\t\t\t    sm.ptt ? SAT_TX_PTT : sm.view.state == RS_TX ? SAT_TX_OWN : SAT_TX_NONE, false,\n'),
+         '\t\t\tsat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz, radio_sat_txk(&sm), false,\n'),
         ('                sat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz, sm.view.state == RS_TX || sm.ptt, true,\n',
-         '                sat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz,\n'
-         '                            sm.ptt ? SAT_TX_PTT : sm.view.state == RS_TX ? SAT_TX_OWN : SAT_TX_NONE, true,\n'),
+         '                sat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz, radio_sat_txk(&sm), true,\n'),
     ])
     # While a held (auto) track holds the radio, no APRS frame keys (beacons, SOS, digipeats wait for its end) but the
     # one the user asked for with # APRS via ISS, at the head of the queue
@@ -223,6 +238,24 @@ def prepare_sat_auto(transform, install):
          '#if CONFIG_SATELLITES\n'
          '\tif (sat_held && !aprs_rf_next_iss())\n'
          '\t\treturn false;\t// DDM32 Plus: a satellite track holds the radio: only the user\'s # APRS via ISS frame\n'
+         '#endif\n'),
+        # An emergency (the key, the lone worker, SOS) ends a held / auto track at once, before the emergency module
+        # takes the start: the user's channel back, then the emergency on it (holehunt B1)
+        ('static void emergency_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n',
+         '#if CONFIG_SATELLITES\n'
+         'static void sat_hold_end(radio_sm_t *sm, uint32_t now_ms);\t// radio_sathold.inc (DDM32 Plus)\n'
+         '#endif\n'
+         'static void emergency_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n'
+         '#if CONFIG_SATELLITES\n'
+         '\tif (sat_held && dmr_emergency_start_pending()) {\n'
+         '\t\tsat_hold_end(sm, now_ms);\t// DDM32 Plus: the satellite track gives the radio back for the emergency\n'
+         '\t}\n'
+         '#endif\n'),
+        # A hold left without its track ends by itself (radio_sathold.inc sat_hold_watch, holehunt B6)
+        ('void radio_sm_poll(radio_sm_t *sm, uint32_t now_ms)\n{\n',
+         'void radio_sm_poll(radio_sm_t *sm, uint32_t now_ms)\n{\n'
+         '#if CONFIG_SATELLITES\n'
+         '\tsat_hold_watch(sm, now_ms);\t// DDM32 Plus\n'
          '#endif\n'),
     ])
     prepare_iss_tool(transform)

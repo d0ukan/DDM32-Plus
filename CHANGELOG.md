@@ -5,8 +5,6 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
-- An emergency (the key, the lone worker, SOS) also ends P25 trunk following, the P25 search and the DMR / all
-  digital search at once instead of waiting for them; one pressed while transmitting in a watch waits 10 s at most.
 - Transmit safety (pre-release hole hunt; docs/plus.md "Pre-release hole hunt: transmit safety"): SSTV send is
   refused while a scan, a dual / multi-watch, the air watch, a search, the spectrum or trunk following runs ("Stop the
   scan or watch first"), and the radio core checks the band plan itself before keying (before, a watch letter the page
@@ -21,6 +19,18 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   band plan. A search find on a repeater says "Repeater: set the TX offset"; setting the offset ends a find's receive
   only. Special-event callsigns (TC100A, TC1453, YM100TC) are accepted; an SFR repeater with its CW ID on and no
   callsign does not start.
+- An emergency (the key, the lone worker, SOS) also ends P25 and DMR trunk following, the P25 search and the DMR /
+  all digital search instead of waiting for them: within about 0.3 s the channel is tuned again and the emergency goes
+  out there (before this fix it usually failed while a search ran and the search went on). One pressed while
+  transmitting in a watch waits 10 s at most. Host-tested; radio row IS-16.
+- Satellite tracks (ISS auto track and the held track from Tools > ISS / the pop-up): the emergency key, the lone
+  worker and SOS now end the track at once and go on from the user's channel (a DMR channel transmits the emergency;
+  before, the key only ended the track and SOS / the lone worker failed on the receive-only satellite frequency). A
+  track whose end got lost can no longer leave the radio receive only and not saving until a power cycle: it ends by
+  itself within 2 s. A Doppler step no longer aborts the "# APRS via ISS" frame while it waits for a clear channel.
+  No track takes the radio while an emergency runs (and no AOS pop-up then); an Emergency or SOS key (also as SK1's
+  hold function) always reaches the emergency during a track. A rise during the radio's own APRS frame no longer
+  skips the auto track for the pass. The AOS pop-up stays 30 s instead of 60 s. Host-tested; radio rows IS-12 to IS-15.
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
   radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
   that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved
@@ -51,7 +61,7 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   notification and auto track settings; OK tracks now (within 10 min of AOS or during the pass: receive only, the
   radio back to the previous channel 30 s after LOS), # APRS via ISS, 1 switches the downlink (also during a track).
   The new tool comes after All digital search; only Battery's number moves. With notifications on and auto track Off
-  the AOS banner on Home is now a pop-up for 60 s, "ISS overhead, max 47°, OK: track": OK starts that track (the
+  the AOS banner on Home is now a pop-up for 30 s, "ISS overhead, max 47°, OK: track": OK starts that track (the
   radio says "ISS tracking" once it holds, or why it can't), Back hides it, none while transmitting. During such a
   track only the "# APRS via ISS" frame is sent; beacons wait for its end. Fixed: Tools > Satellites without a GPS fix showed only "Back" in the hint row
   although OK opens the pass alarm page ("OK alarm  Back").

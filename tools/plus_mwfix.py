@@ -278,3 +278,24 @@ def prepare_mwfix(transform, install):
          '\theld_ms = 0;\n'
          '#endif\n'),
     ])
+    # ---- Sixth round (branch satfix, verifier): the UI task sets the start while the radio task waits in its queue,
+    # so the radio tick (not the native service, which stops the searches: native_lab.c channel_service) nearly always
+    # saw it first and took it in the search's set-up (FAILED, the search going on). While a search or trunk following
+    # the radio core runs, the start waits for that stop, 200 ms at most (then taken as it is) ----
+    transform('core/radio/radio_sm.c', [
+        ('static void emergency_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n',
+         'static void emergency_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n'
+         '\tstatic uint32_t search_ms;\t// DDM32 Plus: since when a pending start waits for a search\'s stop (0: not)\n'
+         '\tbool searching = false;\n'
+         '#if CONFIG_DMR_SEARCH\n\tsearching = searching || dmrs_on();\n#endif\n'
+         '#if CONFIG_P25_SEARCH\n\tsearching = searching || p25s_on();\n#endif\n'
+         '#if CONFIG_P25_TRUNK\n\tsearching = searching || p25tk_on();\n#endif\n'
+         '#if CONFIG_DMR_TRUNK\n\tsearching = searching || dmrtk_on();\n#endif\n'
+         '\tif (searching && dmr_emergency_start_pending()) {\n'
+         '\t\tif (search_ms == 0) {\n\t\t\tsearch_ms = now_ms | 1u;\n\t\t}\n'
+         '\t\tif ((int32_t)(now_ms - search_ms) < 200) {\n'
+         '\t\t\treturn;\t// the native service stops it and tunes the channel; then the start is taken there\n'
+         '\t\t}\n'
+         '\t}\n'
+         '\tsearch_ms = 0;\n'),
+    ])

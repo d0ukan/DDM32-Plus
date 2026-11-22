@@ -892,6 +892,93 @@ static void popup_track(uint8_t iss, int32_t start)
 	poll_ms = POLL_MS;
 }
 
+/* Holehunt B8 and B1 on a held ISS APRS track: the radio's own frame waiting for a clear channel (the radio task says
+ * SAT_TX_OWN from the wait on, radio_sat_txk) for 30 s mid pass: no Doppler step (a VFO request would abort the frame),
+ * the Doppler caught up after it; then the radio core ending the hold itself (an emergency): the track ends at the
+ * next poll and nothing moves the radio again */
+static void own_frame_and_hold_gone(uint8_t iss, int32_t start)
+{
+	scenario("held APRS track: no Doppler step while the frame waits; the hold ended by the radio core", start);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	screen = true;
+	focus = iss;
+	poll_ms = 100;
+	sat_pass_t want = brute_next(iss, utc_now() + 1200, 0);
+	CHECK(want.state == SAT_PASS_OK);
+	run_s(want.aos - utc_now() - 300);
+	sat_auto_start(iss, SAT_AUTO_APRS);
+	run_s(4);
+	screen = false;
+	CHECK(held && sat_auto_on());
+	run_s((want.aos + want.los) / 2 - 15 - utc_now());
+	int before = nreq;
+	ptt = SAT_TX_OWN;
+	run_s(30);
+	CHECK(count('S', before) == 0 && count('T', before) == 0 && held && sat_auto_on());
+	ptt = SAT_TX_NONE;
+	run_s(2);
+	int32_t worst;
+	auto_follow(iss, SAT_ISS_APRS_HZ, utc_now() + 10, &worst);
+	CHECK(held && sat_auto_on() && view_now().track == iss);
+	/* the radio core ends the hold itself (emergency_tick): the user's channel back there */
+	held = false;
+	vfo = user.vfo;
+	rx_hz = user.rx;
+	tx_hz = user.tx;
+	before = nreq;
+	poll_once();
+	sat_view_t v = view_now();
+	CHECK(!sat_auto_on() && v.track == SAT_NONE && v.track_state == SAT_TRK_OFF);
+	run_s(10);
+	CHECK(count('S', before) == 0 && count('T', before) == 0 && count('M', before) == 0 && count('C', before) == 0);
+	CHECK(!held && !vfo && rx_hz == 438500000u && tx_hz == 438500000u);
+	poll_ms = POLL_MS;
+}
+
+/* Verifier: the rise during the radio's own frame (an APRS beacon waiting for a clear channel, SAT_TX_OWN for up to
+ * 10 s): the auto track starts after it instead of skipping the pass (PTT across the rise still skips it: auto_busy) */
+static void auto_after_own_frame(uint8_t iss, int32_t start)
+{
+	scenario("auto track: the rise during the radio's own frame: it starts after the frame", start);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	sat_ui_idle(true);
+	sat_alarm_set(iss, 2, 10, SAT_AUTO_DOWN << SAT_OPT_AUTO_SHIFT);	/* one pass */
+	run_until_found();
+	poll_ms = 100;
+	sat_view_t v = view_now();
+	run_s(v.alarm.aos - utc_now() - 3);
+	ptt = SAT_TX_OWN;
+	run_s(8);
+	CHECK(!held && nreq == 0 && !sat_auto_on());
+	ptt = SAT_TX_NONE;
+	run_s(5);
+	CHECK(held && sat_auto_on() && vfo && abs((int32_t)(rx_hz - SAT_ISS_VOICE_HZ)) <= 4000);
+	sat_auto_cancel();
+	run_s(2);
+	CHECK(!held && !vfo && rx_hz == 438500000u);
+	/* the same, but the user turns Auto track off (the alarm set again without it) during the frame: nothing after */
+	sat_pass_t later = brute_next(iss, utc_now() + 1200, 10);
+	scenario("auto track: Auto track turned off during the frame: no track after it", later.aos - 3600);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	sat_ui_idle(true);
+	sat_alarm_set(iss, 2, 10, SAT_AUTO_DOWN << SAT_OPT_AUTO_SHIFT);
+	run_until_found();
+	poll_ms = 100;
+	v = view_now();
+	run_s(v.alarm.aos - utc_now() - 3);
+	ptt = SAT_TX_OWN;
+	run_s(6);
+	sat_alarm_set(iss, 2, 10, 0);	/* Auto track Off (notifications kept) */
+	run_s(2);
+	ptt = SAT_TX_NONE;
+	run_s(5);
+	CHECK(!held && !sat_auto_on() && nreq == 0 && !vfo);
+	poll_ms = POLL_MS;
+}
+
 int main(void)
 {
 	uint8_t iss = sat_index(SAT_ISS_CATNUM);
@@ -917,6 +1004,8 @@ int main(void)
 	auto_busy(iss, t0 + 520000);
 	user_track(iss, t0 + 580000);
 	popup_track(iss, t0 + 640000);
+	own_frame_and_hold_gone(iss, t0 + 700000);
+	auto_after_own_frame(iss, t0 + 760000);
 	if (failures) {
 		printf("test_sat_svc: %d failures\n", failures);
 		return 1;

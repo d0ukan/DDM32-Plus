@@ -328,6 +328,30 @@ static void test_plus_p25search_sm(void)
         for(int i=0;i<20;i++){ now+=10;classic_pump();if(!native_lab_owns())radio_sm_tick(&sm,now); }
     }
 #endif
+#if CONFIG_DMR_EMERGENCY
+    /* DDM32 Plus (satfix, the verifier's race): an emergency during the sweep (the radio core's), set while the radio
+     * task waits in its queue, so the radio tick sees it before the native service: the start waits (200 ms at most)
+     * for the native service to stop the search and tune the channel; on this FM channel it then fails there */
+    {
+        radio_sm_request(&sm,&r,now);
+        ps_step();
+        CHECK(p25s_on() && p25s_phase()==P25S_SWEEP && !native_lab_owns() && hw.rx_hz>=433000000u);
+        uint32_t ch_hz=sm.view.ch.rx_hz;
+        CHECK(dmr_emergency_start());
+        radio_sm_tick(&sm,now);	/* the tick first */
+        uint32_t et0=now,failed=0;
+        for(int i=0;i<60 && !failed;i++) {
+            now+=10;classic_pump();
+            if(!native_lab_owns())radio_sm_tick(&sm,now);
+            if(dmr_emergency_state()==DMR_EMERGENCY_FAILED)failed=now-et0;
+        }
+        CHECK(failed!=0 && failed<200u && !p25s_on() && hw.rx_hz==ch_hz && hw.tx_calls==tx0);
+        dmr_emergency_cancel();
+        for(int i=0;i<20;i++){ now+=10;classic_pump();if(!native_lab_owns())radio_sm_tick(&sm,now); }
+        printf("Plus P25 search: an emergency during the sweep, tick first: search ended, the channel again, failed after %u ms\n",
+               (unsigned)failed);
+    }
+#endif
     hw.st.rssi_dbm=0;
     printf("Plus P25 search in the state machine: sweep, any-NAC probe, found list, give back, skip, PTT never keys\n");
 }

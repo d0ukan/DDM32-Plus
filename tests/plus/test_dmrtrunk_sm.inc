@@ -180,6 +180,35 @@ static void test_plus_dmrtrunk_sm(void)
     radio_sm_request(&sm, &r, now);
     run(50);
     CHECK(!dmrtk_on() && hw_mode == RADIO_MODE_FM && hw.rx_hz == 146520000u && hw.tx_calls == tx0);
+#if CONFIG_DMR_EMERGENCY && CONFIG_P25_CHANNELS
+    /* DDM32 Plus (satfix): an emergency while following (receive only: TX refused) ends the following through its own
+     * stop (native_lab.c channel_service; the start waits for it, emergency_tick, here with the radio tick first):
+     * the channel tuned again and the hot mic keyed on it */
+    req(RREQ_ZONE_POS, 3);
+    run(50);
+    {
+        dmr_emergency_settings_t es;
+        dmr_emergency_settings_default(&es);
+        es.mode = DMR_EMERGENCY_MODE_CALL;
+        es.hot_mic_s = 1;
+        dmr_emergency_set_settings(&es);
+    }
+    run(20);
+    radio_sm_request(&sm, &r, now);
+    dt_poll();
+    CHECK(dmrtk_on());
+    int etx = hw.tx_calls;
+    CHECK(dmr_emergency_start());
+    run(10);
+    for (int i = 0; i < 30; i++) { classic_pump(); run(10); }
+    CHECK(!dmrtk_on() && dmr_emergency_state() == DMR_EMERGENCY_HOT_MIC && sm.view.state == RS_TX &&
+          hw.tx_calls == etx + 1 && hw.tx_hz == 438500000u && sim.cc_filter == 2);
+    run(1500);
+    dmr_emergency_cancel();
+    run(500);
+    CHECK(sm.view.state != RS_TX && !dmrtk_on());
+    printf("Plus DMR trunk: an emergency while following ends it, keyed on the channel\n");
+#endif
     printf("Plus DMR trunk in the state machine: TSCC both slots, CSBKs to the follower, grant > payload slot locked > "
            "call played, PTT denied, terminator / P_CLEAR > back, nothing keyed, stops\n");
 }

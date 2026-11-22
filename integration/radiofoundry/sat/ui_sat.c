@@ -12,7 +12,7 @@
  * or any satellite; Auto track: Off, On (the downlink; the ISS 145.800) or APRS (the ISS 145.825), receive only, from
  * the rise to the set; a change while armed arms it again), OK arms it or turns it off, Back the list. When it is due
  * (ui_sat_alarm, every UI tick on any screen): a tone and a banner; a key ends an auto track (ui_sat_auto_key). With
- * auto track Off the rise's banner on Home is a pop-up for 60 s: "ISS overhead, max 47°", "OK: track", Home's hint
+ * auto track Off the rise's banner on Home is a pop-up for 30 s: "ISS overhead, max 47°", "OK: track", Home's hint
  * "OK track  Back"; OK asks for the held, receive-only track on its downlink (sat_auto_start: the radio back where it
  * was 30 s after the set; "ISS tracking" once the radio holds, else a toast says why not), Back hides it, other keys
  * are Home's. Elsewhere it is the plain 8 s banner.
@@ -54,7 +54,7 @@ static const uint8_t min_el[] = { 0, 10, 20, 30, 45 };
 static bool iss_aprs;
 static uint8_t pop = SAT_NONE;
 static char al_text[40];
-#define POP_MORE_MS	52000u	/* the pop-up's banner: 60 s instead of 8 */
+#define POP_MORE_MS	22000u	/* the pop-up's banner: 30 s instead of 8 (an OK out of habit tracks less long) */
 /* UI_SET_SAT_NOTE: bits 0-1 for whom (0 off, 1 the ISS, 2 any), bits 2-5 the lead and elevation, 0 = 5 min, 0 deg */
 enum { NOTE_OFF, NOTE_ISS, NOTE_ANY };
 
@@ -580,12 +580,13 @@ const char *ui_sat_alarm(void)
 	if (pop != SAT_NONE && (pop & 0x80u)) {
 		pop &= 0x7Fu;
 		if (pop_up())
-			ui_st.banner.until_ms += POP_MORE_MS;	/* the banner went up a tick ago: up for 60 s */
+			ui_st.banner.until_ms += POP_MORE_MS;	/* the banner went up a tick ago: up for 30 s */
 	}
 	const radio_view_t *rv = ui_view();
 	bool tx = rv->state == RS_TX || rv->state == RS_TX_DENIED;
 	uint8_t scr = ui_depth() == 0 ? SCR_HOME : ui_frame()->scr;
-	sat_ui_idle(rv->state == RS_IDLE && rv->scan == 0 && !rv->hotspot &&
+	bool em = ui_svc_emergency_active();	/* an emergency runs: no track takes the radio, no pop-up offers one */
+	sat_ui_idle(rv->state == RS_IDLE && rv->scan == 0 && !rv->hotspot && !em &&
 		    (scr == SCR_HOME || scr == SCR_SATELLITES || scr == SCR_ISS));
 	if (tx || !sat_alarm_take(&ev) || ev.sat >= sat_count)
 		return NULL;
@@ -604,7 +605,7 @@ const char *ui_sat_alarm(void)
 		sb_str(&b, TR(" min, max "));
 	} else if (ev.kind == SAT_ALARM_TRACK) {
 		sb_str(&b, TR(" tracking, max "));	/* the rise's tone sounded a second ago */
-	} else if (a_auto == SAT_AUTO_OFF && !ui_st.banner.hold && scr == SCR_HOME && !ui_st.entry) {
+	} else if (a_auto == SAT_AUTO_OFF && !ui_st.banner.hold && scr == SCR_HOME && !ui_st.entry && !em) {
 		sb_str(&b, TR(" overhead, max "));	/* the pop-up: OK tracks it (ui_sat_auto_key) */
 		pop = (uint8_t)(ev.sat | 0x80u);
 	} else {
@@ -632,10 +633,13 @@ const char *ui_sat_pop_hint(void)
 /* From ui_app_key before anything else. The AOS pop-up up: OK starts the held track, any other key hides it; either
  * way the key is used for that. While an auto track runs, a key press (or PTT / monitor down, which go on to the
  * radio: it refuses TX meanwhile) ends it, the radio back where it was; the key is used for that (on Tools > ISS the
- * keys stay the page's: its OK stops it) */
+ * keys stay the page's: its OK stops it). The emergency and SOS keys are never taken: the radio core ends the hold
+ * for the emergency itself (emergency_tick), the service follows */
 bool ui_sat_auto_key(const input_event_t *ev)
 {
 	bool pass = ev->action == ACT_PTT || ev->action == ACT_MONITOR;
+	if (ev->action == ACT_EMERGENCY || ev->action == ACT_SOS)
+		return false;
 	if (ui_sat_pop_hint() != NULL && ev->gesture == GESTURE_PRESS &&
 	    (ev->action == ACT_SELECT || ev->action == ACT_BACK)) {
 		uint8_t i = pop & 0x7Fu;

@@ -253,6 +253,51 @@ static void test_plus_dmrsearch_sm(void)
     classic_pump();
     classic_pump();
     CHECK(native_lab_owns());                       /* the P25 channel's receiver again */
+#if CONFIG_DMR_EMERGENCY
+    /* An emergency during the search (the radio core's, not the native receiver's): native_lab.c's channel_service
+     * stops it and tunes the channel again before the radio tick takes the start (as radio_task.c runs them): on a
+     * DMR channel the stack back on color code 2 and the hot mic keyed there, on an FM channel the channel again and
+     * the emergency failed (SOS / the lone worker fall back). Both orders: the native service first, and the radio
+     * tick first (the usual case on the radio: the UI task sets the start while the radio task waits in its queue;
+     * the start then waits for the search's stop, emergency_tick) */
+    for (int kk = 0; kk < 4; kk++) {
+        int k = kk & 1;
+        bool tick_first = kk >= 2;
+        setup_codeplug();
+        start();
+        native_lab_init();
+        req(RREQ_ZONE_POS, k == 0 ? 3 : 0);
+        run(50);
+        dmr_emergency_settings_t es;
+        dmr_emergency_settings_default(&es);
+        es.mode = DMR_EMERGENCY_MODE_CALL;
+        es.hot_mic_s = 1;
+        dmr_emergency_set_settings(&es);
+        run(20);
+        r.arg = 433000000;
+        radio_sm_request(&sm, &r, now);
+        ds_poll();
+        CHECK(dmrs_on() && sim.started && sim.cc_filter == -1 && hw.rx_hz >= 433000000u && hw.rx_hz < 434000000u);
+        int etx = hw.tx_calls;
+        CHECK(dmr_emergency_start());
+        if (tick_first)
+            run(10);
+        for (int i = 0; i < 30; i++) { classic_pump(); run(10); }
+        CHECK(!dmrs_on());
+        if (k == 0) {
+            CHECK(dmr_emergency_state() == DMR_EMERGENCY_HOT_MIC && sm.view.state == RS_TX && hw.tx_calls == etx + 1 &&
+                  hw.tx_hz == 438500000u && sim.started && sim.cc_filter == 2);
+        } else {
+            CHECK(dmr_emergency_state() == DMR_EMERGENCY_FAILED && hw.tx_calls == etx && hw.rx_hz == 146520000u &&
+                  hw_mode == RADIO_MODE_FM && !sim.started);
+        }
+        run(1500);
+        dmr_emergency_cancel();
+        run(500);
+        CHECK(sm.view.state != RS_TX && (k == 1 || (sim.cc_filter == 2 && hw.rx_hz == 438500000u)));
+    }
+    printf("Plus DMR search: an emergency ends it and tunes the channel again, native or tick first (DMR keyed on CC 2, FM failed)\n");
+#endif
     hw.st.rssi_dbm = 0;
     printf("Plus DMR search in the state machine: hear-all stack, sweep, found list, call played, hang, resume, "
            "PTT never keys, stops, P25 channel kept off\n");
