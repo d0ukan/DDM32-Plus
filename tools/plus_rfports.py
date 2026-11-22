@@ -332,6 +332,8 @@ def prepare_rfports(transform, install):
          '\t\tput_x(&o, m.last_l2_status, 8);\n' + ON + '\t\tput_kv(&o, " k", m.sys_stuck);\t// stuck requests dropped\n#endif\n'),
     ])
     prepare_rfports_tests(transform)
+    prepare_rfports_cc_any(transform)  # d1a7ae4 (branch dmrs3)
+    prepare_rfports_bs_direct(transform)  # 2093f64 (branch dmrs3)
     prepare_rfports2(transform)
 
 
@@ -1146,3 +1148,406 @@ def prepare_text_c1(transform):
 #endif
 '''),
     ])
+
+
+# --- d1a7ae4 (#583, Spencer Fowler): any color code is LOCAL_CC cc_opt 1, not a scan (branch dmrs3) ---
+def prepare_rfports_cc_any(transform):
+    """RadioFoundry d1a7ae40e (#583), the HR_C7000 driver part. Our pin has no color code filter mode for "any": with
+    cc_filter -1 the driver stepped LOCAL_CC through the 16 codes (cc_opt 0, one code deframed at a time), one step
+    every 4 receive slot interrupts (120 ms) with nothing deframed. Upstream found on the SDR bench that this scan
+    hears nothing: it steps on slot interrupts, and those stop while the chip hears a code it doesn't deframe, so it
+    sits on a wrong code for as long as the sender is on air. cc_opt 1 deframes every code (RX_TYPE_INFO names it);
+    it needs the fixed sync threshold, so RF_MODE b12 (dynamic) is cleared before cc_opt goes to 1 and set after it
+    goes back to 0. The stale timing restart (rx_resync) no longer waits for a filter.
+
+    DDM32 Plus: the DMR search, the all digital search's DMR probe and "Any" color code channels configure the call
+    stack with any_cc (radio_sm.c dmr_configure while dmrs_on; CONFIG_DMR_ANY), so the modem ran that scan exactly
+    while a search probed a carrier (docs/plus.md "DMR search: the color code scan"). Not ported: the call layer and
+    view parts of #583 (digital monitor's any_cc / both_ts, rx_cc / rx_ts). Ours in addition: the dynamic threshold
+    goes back on when the engine halts (FM, the native P25 / YSF receiver: the chip as Classic leaves it)."""
+    transform('drivers/modem/hrc7000/hrc7000_dmr.c', [
+        ('static void chip_rx_restart(hrc7000_dmr_t *e)\n{\n',
+         ON + 'static void set_cc(hrc7000_dmr_t *e, uint8_t cc);\n#endif\n'
+         'static void chip_rx_restart(hrc7000_dmr_t *e)\n{\n'),
+        ('\tclear_requests(e);\t// the restart discards what they would report; a stale one keeps its source dead\n#endif\n',
+         '\tclear_requests(e);\t// the restart discards what they would report; a stale one keeps its source dead\n'
+         '\t// RadioFoundry d1a7ae4: the receive code and cc_opt / b12 as the filter says, as upstream\'s restart does. A filter\n'
+         '\t// set while transmitting (set_cc_filter waits for TXS_IDLE) takes effect at the restart that ends the TX\n'
+         '\tif (e->tx_state == TXS_IDLE && !BS_ACTIVE(e)) {\n'
+         '\t\tset_cc(e, e->cc_filter >= 0 ? (uint8_t)e->cc_filter : e->cc_cur);\n\t}\n#endif\n'),
+        ('#define CC_HOLD_TICKS\t\t167u\t// ... held 5 s after the last burst\n',
+         '#define CC_HOLD_TICKS\t\t167u\t// ... held 5 s after the last burst\n' + ON +
+         '// RadioFoundry d1a7ae4 (#583): no filter is LOCAL_CC cc_opt 1 (the two scan figures above go unused)\n'
+         '#define LOCAL_CC_ANY\t\t(1u << 8)\t// cc_opt 1: deframe a burst of any color code\n'
+         '#define RF_MODE_SYNC_AUTO\t(1u << 12)\t// adjustsyncmax: dynamic sync threshold; must be 0 with cc_opt 1\n'
+         '#endif\n'),
+        ('static void set_cc(hrc7000_dmr_t *e, uint8_t cc)\n{\n\te->cc_cur = cc & 0xFu;\n'
+         '\tw(e, C7_LOCAL_CC, e->cc_cur);\t// cc_opt 0: deframe only this color code\n}\n',
+         ON +
+         '// RadioFoundry d1a7ae4 (#583): LOCAL_CC, the code we send, and with a filter the only one deframed (cc_opt 0).\n'
+         '// Without a filter cc_opt 1 deframes every code. A scan through the codes heard nothing on air: it stepped on\n'
+         '// timeslot interrupts, which stop while the chip hears a code it doesn\'t deframe. cc_opt 1 needs the fixed sync\n'
+         '// threshold, so RF_MODE b12 follows it, cleared before cc_opt goes to 1 and set after it goes back to 0\n'
+         '#endif\n'
+         'static void set_cc(hrc7000_dmr_t *e, uint8_t cc)\n{\n\te->cc_cur = cc & 0xFu;\n'
+         + ON +
+         '\tbool any = e->cc_filter < 0;\n'
+         '\tuint32_t mode = r(e, C7_RF_MODE);\n'
+         '\tuint32_t want = any ? mode & ~RF_MODE_SYNC_AUTO : mode | RF_MODE_SYNC_AUTO;\n'
+         '\tif (any && want != mode) {\n\t\tw(e, C7_RF_MODE, want);\n\t}\n'
+         '\tw(e, C7_LOCAL_CC, e->cc_cur | (any ? LOCAL_CC_ANY : 0u));\n'
+         '\tif (!any && want != mode) {\n\t\tw(e, C7_RF_MODE, want);\n\t}\n'
+         '#else\n'
+         '\tw(e, C7_LOCAL_CC, e->cc_cur);\t// cc_opt 0: deframe only this color code\n'
+         '#endif\n}\n'),
+        # rx_resync (the RF fixes' wall-time version): also without a filter, as upstream
+        ('\tif (e->cc_filter < 0 || !e->resync_pending) {\n',
+         '\tif (!e->resync_pending) {\t// RadioFoundry d1a7ae4: also with no filter (cc_opt 1; no scan restarts it)\n'),
+        ('\t// Color code scan when no filter is set: step through the codes while nothing is heard\n'
+         '\tif (e->cc_filter < 0 && ',
+         '#if !CONFIG_RF_FIXES\t// RadioFoundry d1a7ae4: no scan (cc_opt 1 hears every code)\n'
+         '\t// Color code scan when no filter is set: step through the codes while nothing is heard\n'
+         '\tif (e->cc_filter < 0 && '),
+        ('\t\te->st.cc_scan_steps++;\n\t}\n}\n',
+         '\t\te->st.cc_scan_steps++;\n\t}\n#endif\n}\n'),
+        ('\te->running = false;\n\tif (was_tx) {\n\t\tev_simple(e, DMR_EV_TX_DONE, e->tx_ts, tick_arg(e));\n\t}\n\tunlock(e);\n',
+         '\te->running = false;\n' + ON +
+         '\t// DDM32 Plus: out of DMR the chip is left as Classic leaves it: LOCAL_CC cc_opt 0, then the dynamic sync threshold\n'
+         '\t// (set_cc\'s order: never cc_opt 1 with b12 set). The native P25 / YSF receiver saves and restores RF_MODE but\n'
+         '\t// never touches LOCAL_CC\n'
+         '\tw(e, C7_LOCAL_CC, e->cc_cur);\n'
+         '\tif (!(r(e, C7_RF_MODE) & RF_MODE_SYNC_AUTO)) {\n\t\tw(e, C7_RF_MODE, r(e, C7_RF_MODE) | RF_MODE_SYNC_AUTO);\n\t}\n'
+         '#endif\n'
+         '\tif (was_tx) {\n\t\tev_simple(e, DMR_EV_TX_DONE, e->tx_ts, tick_arg(e));\n\t}\n\tunlock(e);\n'),
+        ('\te->cc_filter = cc;\n\te->cfg.cc = cc;\n'
+         '\tif (e->running && cc >= 0 && (uint8_t)cc != e->cc_cur && e->tx_state == TXS_IDLE && !BS_ACTIVE(e)) {\n'
+         '\t\tset_cc(e, (uint8_t)cc);\n\t\tchip_rx_restart(e);\n\t}\n',
+         '\te->cc_filter = cc;\n\te->cfg.cc = cc;\n' + ON +
+         '\tif (e->running && e->tx_state == TXS_IDLE && !BS_ACTIVE(e)) {\n'
+         '\t\tif (cc >= 0 && (uint8_t)cc != e->cc_cur) {\n\t\t\tset_cc(e, (uint8_t)cc);\n\t\t\tchip_rx_restart(e);\n'
+         '\t\t} else {\n\t\t\tset_cc(e, e->cc_cur);\t// RadioFoundry d1a7ae4: cc_opt on or off; a call on this code goes on\n'
+         '\t\t}\n\t}\n'
+         '#else\n'
+         '\tif (e->running && cc >= 0 && (uint8_t)cc != e->cc_cur && e->tx_state == TXS_IDLE && !BS_ACTIVE(e)) {\n'
+         '\t\tset_cc(e, (uint8_t)cc);\n\t\tchip_rx_restart(e);\n\t}\n'
+         '#endif\n'),
+    ])
+    transform('tests/host/hrc7000DmrTest.c', [
+        ('#define REG(off)\tregs[(off) / 4]\n',
+         '#define REG(off)\tregs[(off) / 4]\n'
+         '#define LOCAL_CC_ANY\t0x100u\t\t// LOCAL_CC cc_opt 1: every color code deframed (RF fixes, d1a7ae4)\n'
+         '#define SYNC_AUTO\t(1u << 12)\t// RF_MODE dynamic sync threshold, off with cc_opt 1\n'),
+        ('\tCHECK(REG(C7_VOICE_EMB_CTRL) == 0x02 && REG(C7_LOCAL_CC) == 1);\n',
+         ON + '\tCHECK(REG(C7_VOICE_EMB_CTRL) == 0x02 && REG(C7_LOCAL_CC) == (LOCAL_CC_ANY | 1u));\n#else\n'
+         '\tCHECK(REG(C7_VOICE_EMB_CTRL) == 0x02 && REG(C7_LOCAL_CC) == 1);\n#endif\n'),
+        ('static void test_cc_scan(void)\n{\n', CC_TESTS + '#if !CONFIG_RF_FIXES\nstatic void test_cc_scan(void)\n{\n'),
+        ('\tCHECK(REG(C7_LOCAL_CC) == 7);\n\tcount_kind(0xFF, NULL);\n}\n',
+         '\tCHECK(REG(C7_LOCAL_CC) == 7);\n\tcount_kind(0xFF, NULL);\n}\n#endif\n'),
+        ('\ttest_cc_scan();\n',
+         ON + '\ttest_cc_any();\n\ttest_native_after_search();\n\ttest_cc_filter_after_tx();\n#else\n\ttest_cc_scan();\n'
+         '#endif\n\ttest_search_probe_cc1();\n'),
+    ])
+
+
+CC_TESTS = ON + r'''// RadioFoundry d1a7ae4 (#583): no filter is cc_opt 1 with the fixed sync threshold; nothing steps through the codes
+static void test_cc_any(void)
+{
+	setup();
+	REG(C7_RF_MODE) = 0x03269860u;
+	hrc7000_dmr_run(&eng);
+	CHECK(REG(C7_LOCAL_CC) == (LOCAL_CC_ANY | 1u) && REG(C7_RF_MODE) == (0x03269860u & ~SYNC_AUTO));
+	for (int i = 0; i < 300; i++) {
+		tick(false);
+	}
+	CHECK(REG(C7_LOCAL_CC) == (LOCAL_CC_ANY | 1u) && eng.st.cc_scan_steps == 0);
+	count_kind(0xFF, NULL);
+	tick(false);
+	deframe(rti(0, DMR_BURST_IDLE, 9, 0, 0, 0));
+	dmr_burst_t b;
+	CHECK(count_kind(DMR_EV_BURST_RX, &b) == 1 && b.cc == 9);
+	// The end of that reception restarts the receiver, as with a filter (5.2)
+	uint32_t lost = eng.st.rx_lost;
+	for (int i = 0; i < 20; i++) {
+		tick(false);
+	}
+	CHECK(eng.st.rx_lost == lost + 1 && REG(C7_LOCAL_CC) == (LOCAL_CC_ANY | 1u));
+	count_kind(0xFF, NULL);
+	// A filter: only its code, dynamic threshold back. Off again: no restart, a call on that code goes on
+	hrc7000_dmr_set_cc_filter(&eng, 7);
+	CHECK(REG(C7_LOCAL_CC) == 7 && REG(C7_RF_MODE) == 0x03269860u);
+	for (int i = 0; i < 300; i++) {
+		tick(false);
+	}
+	CHECK(REG(C7_LOCAL_CC) == 7);
+	uint32_t rs = eng.st.rx_restarts;
+	hrc7000_dmr_set_cc_filter(&eng, -1);
+	CHECK(REG(C7_LOCAL_CC) == (LOCAL_CC_ANY | 7u) && !(REG(C7_RF_MODE) & SYNC_AUTO) && eng.st.rx_restarts == rs);
+	hrc7000_dmr_set_cc_filter(&eng, 7);
+	CHECK(REG(C7_LOCAL_CC) == 7 && (REG(C7_RF_MODE) & SYNC_AUTO) && eng.st.rx_restarts == rs);
+	// Halted (FM, the native receiver): the dynamic threshold back, as Classic's init leaves it
+	hrc7000_dmr_set_cc_filter(&eng, -1);
+	CHECK(!(REG(C7_RF_MODE) & SYNC_AUTO));
+	hrc7000_dmr_halt(&eng);
+	CHECK(REG(C7_RF_MODE) == 0x03269860u && REG(C7_LOCAL_CC) == 7u);	// cc_opt 0 too (never cc_opt 1 with b12)
+	count_kind(0xFF, NULL);
+}
+
+// The native P25 / YSF entry after a DMR search (dm32_native.inc: set_mode(DMR) runs the engine, hrc_dmr_leave halts
+// it; the native receiver saves / restores RF_MODE, never LOCAL_CC): the chip as Classic leaves it, cc_opt 0 and b12 set
+static void test_native_after_search(void)
+{
+	setup();
+	REG(C7_RF_MODE) = 0x03269860u;
+	hrc7000_dmr_run(&eng);			// the search's stack: no filter
+	hrc7000_dmr_set_cc_filter(&eng, -1);
+	CHECK((REG(C7_LOCAL_CC) & LOCAL_CC_ANY) && !(REG(C7_RF_MODE) & SYNC_AUTO));
+	hrc7000_dmr_halt(&eng);			// hrc_dmr_leave
+	CHECK(!(REG(C7_LOCAL_CC) & LOCAL_CC_ANY) && REG(C7_RF_MODE) == 0x03269860u);
+	hrc7000_dmr_run(&eng);			// back to DMR, still no filter: cc_opt 1 again
+	CHECK((REG(C7_LOCAL_CC) & LOCAL_CC_ANY) && !(REG(C7_RF_MODE) & SYNC_AUTO));
+	count_kind(0xFF, NULL);
+}
+
+// A change from no filter to one while transmitting (set_cc_filter waits for TXS_IDLE): the filter, cc_opt 0 and the
+// dynamic threshold come with the restart that ends the transmission
+static void test_cc_filter_after_tx(void)
+{
+	setup();
+	REG(C7_RF_MODE) = 0x03269860u;
+	hrc7000_dmr_run(&eng);
+	hrc7000_dmr_set_cc_filter(&eng, -1);
+	CHECK(hrc7000_dmr_tx_begin(&eng, DMR_TIMING_OWN, 1, DMR_ACCESS_IMPOLITE));
+	hrc7000_dmr_set_cc_filter(&eng, 7);
+	CHECK(REG(C7_LOCAL_CC) & LOCAL_CC_ANY);	// not while keyed
+	hrc7000_dmr_tx_abort(&eng);
+	for (int i = 0; i < 6 && hrc7000_dmr_is_transmitting(&eng); i++) {
+		tick(true);
+	}
+	CHECK(!hrc7000_dmr_is_transmitting(&eng));
+	CHECK(REG(C7_LOCAL_CC) == 7u && REG(C7_RF_MODE) == 0x03269860u);
+	count_kind(0xFF, NULL);
+}
+#endif
+
+// DDM32 Plus (branch dmrs3): the DMR search's probe, as the radio runs it. The call stack hears every color code
+// (radio_sm.c dmr_configure while dmrs_on: any_cc), so the modem has no filter (cc_filter -1). The chip modelled as
+// RadioFoundry describes it (modem-hrc7000.md "Any color code", d1a7ae4): it deframes, and gives the receive slot
+// interrupts, only for a code LOCAL_CC lets through (its own with cc_opt 0, every code with cc_opt 1). Before the
+// probe: slot timing with nothing usable deframed, standing for what the sweep met around a strong carrier (its skirt
+// steps; the scan's step timer is not reset by the sweep's retunes, so the 270 ms here add up over several 75-100 ms
+// steps), which moved the pin's scan off CC1. Then the probe's retune and 1.1 s (DMRS_PROBE_LONG_MS) of a CC1 direct
+// mode sender, one burst every other slot. The pin hears nothing of it; with the RF fixes every burst.
+// Honestly: a regression test of the hypothesis (a code scan stuck off the sender's code; with the port cc_opt 1
+// survives the probe's rx_restart) on a chip model taken from upstream's description, not a reproduction of the
+// radio's failure: that the scan stood on a wrong code during the owner's probes is not measured (docs/plus.md, the
+// read-only live sample)
+static bool chip_passes(uint8_t cc)
+{
+	uint32_t l = REG(C7_LOCAL_CC);
+	return (l & LOCAL_CC_ANY) != 0 || (l & 0xFu) == cc;
+}
+
+static void test_search_probe_cc1(void)
+{
+	setup();
+	REG(C7_RF_MODE) = 0x03269860u;
+	hrc7000_dmr_run(&eng);		// a DMR channel on CC1 before (cc_cur 1), then the search's stack: no filter
+	hrc7000_dmr_set_cc_filter(&eng, 1);
+	hrc7000_dmr_set_cc_filter(&eng, -1);
+	for (int i = 0; i < 9; i++) {	// timing, unusable slots only (the skirt steps, added up)
+		tick(false);
+		deframe((rti(0, 0, 1, 0, 0, 0) & ~3u) | 1u);
+	}
+	hrc7000_dmr_rx_restart(&eng);	// dmrs_tune: the probe's frequency
+	count_kind(0xFF, NULL);
+	int heard = 0;
+	for (int slot = 0; slot < 37; slot++) {	// 1.1 s
+		if (!chip_passes(1)) {
+			now += 30000;		// a code it doesn't deframe: no slot interrupt either
+			continue;
+		}
+		tick(false);
+		if (slot & 1) {
+			deframe(rti(slot == 1 ? 0 : (uint8_t)((slot / 2 - 1) % 6 + 1),
+				    slot == 1 ? DMR_BURST_VOICE_LC_HEADER : 0, 1, 0, 1, 0));
+			dmr_burst_t b = { 0 };
+			if (count_kind(DMR_EV_BURST_RX, &b) == 1 && b.cc == 1 && b.crc_ok)
+				heard++;
+		}
+		count_kind(0xFF, NULL);
+	}
+#if CONFIG_RF_FIXES
+	CHECK(heard >= 17 && eng.st.cc_scan_steps == 0 && (REG(C7_LOCAL_CC) & LOCAL_CC_ANY));
+#else
+	CHECK(heard == 0 && eng.st.cc_scan_steps >= 2 && (REG(C7_LOCAL_CC) & 0xFu) != 1);	// the miss the owner saw
+#endif
+}
+
+'''
+
+
+# --- 2093f64 (#933, Spencer Fowler): no BS slot labels without a CACH (branch dmrs3) ---
+def prepare_rfports_bs_direct(transform):
+    """RadioFoundry 2093f64 (#933, fixes #928), the HR_C7000 driver part, on our pin (slot ticks for the TC lock, no
+    short LC read, no direct mode hold). A direct mode sender that frames its bursts with BS sync (one burst every other
+    slot, no CACH: a simplex hotspot may send this) had each burst numbered from its CACH TC, which is junk with no
+    CACH on air: a TS1 call was labelled TS2 and dropped as the other slot's. A BS burst is now numbered from its TC only
+    on a repeater channel or once a TC lock has shown a CACH on air (held while BS bursts come); otherwise it goes up
+    with ts 0 (the call layer takes it on any slot) and an aligned reply keys as after MS sync, with no wait for a lock
+    that never comes. The TC is tracked before the burst is numbered, so the burst that completes the lock is numbered.
+    Not ported: the HIL helper and the docs (upstream's)."""
+    transform('drivers/modem/hrc7000/hrc7000_dmr.h', [
+        ('\tuint8_t rx_chip_slot;\t// chip slot of the last burst taken (an aligned start\'s reference)\n',
+         '\tuint8_t rx_chip_slot;\t// chip slot of the last burst taken (an aligned start\'s reference)\n' + ON +
+         '\tint8_t rx_ts;\t\t// RadioFoundry 2093f64: its TS as an aligned start counts it: the slot number given, or\n'
+         '\t\t\t\t// for a BS burst with no CACH (none given) the one MS sync would get\n'
+         '\tbool cach_seen;\t\t// a TC lock since the receiver last synced: a CACH is on air (cach_on_air)\n#endif\n'),
+    ])
+    transform('drivers/modem/hrc7000/hrc7000_dmr.c', [
+        ('\te->tc_slot[0] = e->tc_slot[1] = 0;\n\te->tc_agree = 0;\n',
+         '\te->tc_slot[0] = e->tc_slot[1] = 0;\n\te->tc_agree = 0;\n' + ON + '\te->cach_seen = false;\n#endif\n'),
+        ('\te->tc_est = early ? (uint8_t)(s->tc ^ 1u) : s->tc;\t// the slot started at the last interrupt\n',
+         '\te->tc_est = early ? (uint8_t)(s->tc ^ 1u) : s->tc;\t// the slot started at the last interrupt\n' + ON +
+         '\tif (e->tc_agree >= TC_LOCK) {\n\t\te->cach_seen = true;\t// RadioFoundry 2093f64\n\t}\n#endif\n'),
+        ('static int8_t slot_ts(hrc7000_dmr_t *e, const hrc7000_rx_status_t *s)\n{\n',
+         ON + BS_SLOT_TS + '#else\nstatic int8_t slot_ts(hrc7000_dmr_t *e, const hrc7000_rx_status_t *s)\n{\n'),
+        ('\tdefault:\n\t\treturn e->tc_slot[s->chip_slot] != 0 ? e->tc_slot[s->chip_slot] : (int8_t)(s->chip_slot + 1);\n'
+         '\t}\n}\n',
+         '\tdefault:\n\t\treturn e->tc_slot[s->chip_slot] != 0 ? e->tc_slot[s->chip_slot] : (int8_t)(s->chip_slot + 1);\n'
+         '\t}\n}\n#endif\n'),
+        ('\tint8_t ts = slot_ts(e, &s);\n\te->rx_tick = e->tick;\n',
+         ON + '\ttrack_tc(e, &s);\t// RadioFoundry 2093f64 first: the burst that completes the TC lock gets its number\n'
+         '\tint8_t dmo = 0;\n\tint8_t ts = slot_ts(e, &s, &dmo);\n\te->rx_ts = dmo;\n#else\n'
+         '\tint8_t ts = slot_ts(e, &s);\n#endif\n\te->rx_tick = e->tick;\n'),
+        ('\te->rx_chip_slot = s.chip_slot;\n\ttrack_tc(e, &s);\n',
+         '\te->rx_chip_slot = s.chip_slot;\n#if !CONFIG_RF_FIXES\n\ttrack_tc(e, &s);\n#endif\n'),
+        ('\t\te->tx_bs = timing == DMR_TIMING_ALIGNED && e->rx_bs && ts > 0;\n',
+         ON +
+         '\t\t// RadioFoundry 2093f64: through a repeater (a CACH on air) the slot from the TC lock. Aligned to a direct\n'
+         '\t\t// mode station with BS sync and no CACH: the slot its bursts came in (the lock never came: refused)\n'
+         '\t\te->tx_bs = timing == DMR_TIMING_ALIGNED && e->rx_bs && ts > 0 && cach_on_air(e);\n'
+         '#else\n\t\te->tx_bs = timing == DMR_TIMING_ALIGNED && e->rx_bs && ts > 0;\n#endif\n'),
+        ('\t\t\te->tx_chip_slot = ts == e->st.last_ts ? e->rx_chip_slot : (uint8_t)(e->rx_chip_slot ^ 1u);\n',
+         ON + '\t\t\te->tx_chip_slot = ts == e->rx_ts ? e->rx_chip_slot : (uint8_t)(e->rx_chip_slot ^ 1u);\n#else\n'
+         '\t\t\te->tx_chip_slot = ts == e->st.last_ts ? e->rx_chip_slot : (uint8_t)(e->rx_chip_slot ^ 1u);\n#endif\n'),
+        ('\t\te->st.txb_last_ts = e->st.last_ts;\n',
+         ON + '\t\te->st.txb_last_ts = e->rx_ts;\t// the TS the aligned pick went by (2093f64)\n#else\n'
+         '\t\te->st.txb_last_ts = e->st.last_ts;\n#endif\n'),
+    ])
+    transform('tests/host/hrc7000DmrTest.c', [
+        ('\t// Repeater: BS sync with TC teaches the chip slots their TS numbers\n'
+         '\tdeframe(rti(0, DMR_BURST_IDLE, 3, 1, 0, 1));\n'
+         '\tCHECK(count_kind(DMR_EV_BURST_RX, &b) == 1 && b.ts == 2 && b.sync == DMR_SYNC_BS);\n',
+         ON +
+         '\t// Simplex: a BS burst\'s TC is no slot number until the TC lock (no CACH on air, RadioFoundry 2093f64)\n'
+         '\tdeframe(rti(0, DMR_BURST_IDLE, 3, 1, 0, 1));\n'
+         '\tCHECK(count_kind(DMR_EV_BURST_RX, &b) == 1 && b.ts == 0 && b.sync == DMR_SYNC_BS);\n'
+         '\tCHECK(eng.tc_slot[0] == 0 && eng.tc_slot[1] == 0);\n'
+         '\teng.cfg.repeater = true;\n'
+         '#endif\n'
+         '\t// Repeater: BS sync with TC teaches the chip slots their TS numbers\n'
+         '\tdeframe(rti(0, DMR_BURST_IDLE, 3, 1, 0, 1));\n'
+         '\tCHECK(count_kind(DMR_EV_BURST_RX, &b) == 1 && b.ts == 2 && b.sync == DMR_SYNC_BS);\n'
+         + ON + '\teng.cfg.repeater = false;\n#endif\n'),
+        ('static void test_polite_after_restart(void)\n', BS_TESTS + 'static void test_polite_after_restart(void)\n'),
+        ('\ttest_polite_after_restart();\n', '\ttest_polite_after_restart();\n' + ON + '\ttest_rx_bs_direct_call();\n#endif\n'),
+    ])
+
+
+BS_SLOT_TS = r'''// RadioFoundry 2093f64: a CACH to number the slots from: a repeater channel, or a TC lock since the receiver synced (BS
+// bursts in slots in a row, TC alternating) while BS bursts still come. A direct mode sender with BS sync (a simplex
+// hotspot) keys every other slot with no CACH, so its TC is junk: numbered from it, its bursts landed on the other
+// slot and the call was dropped (issue 928). Held past the lock itself: one missed burst breaks the run
+static bool cach_on_air(const hrc7000_dmr_t *e)
+{
+	return e->cfg.repeater || (e->cach_seen && e->tick - e->tc_tick <= RX_LOST_TICKS);
+}
+
+// The TS a burst with no slot number of its own counts as: the chip slot's last one known, else by chip slot
+static int8_t chip_slot_ts(const hrc7000_dmr_t *e, uint8_t cs)
+{
+	return e->tc_slot[cs] != 0 ? e->tc_slot[cs] : (int8_t)(cs + 1);
+}
+
+// The slot number a burst goes up with (0: none). *dmo: the one an aligned start counts it as
+static int8_t slot_ts(hrc7000_dmr_t *e, const hrc7000_rx_status_t *s, int8_t *dmo)
+{
+	switch (s->sync) {
+	case DMR_SYNC_BS:
+		if (!cach_on_air(e)) {
+			*dmo = chip_slot_ts(e, s->chip_slot);	// no slot number (direct mode): an aligned reply as after MS sync
+			return 0;
+		}
+		e->tc_slot[s->chip_slot] = (int8_t)(s->tc + 1);
+		e->tc_slot[s->chip_slot ^ 1u] = (int8_t)(2 - s->tc);
+		*dmo = (int8_t)(s->tc + 1);
+		return *dmo;
+	case DMR_SYNC_TS1:
+	case DMR_SYNC_TS2:
+		// TDMA direct mode sync names the slot too: kept for the voice bursts after it (no sync of their own), so
+		// an SFR user tells the talker's copy from the repeat on every burst
+		e->tc_slot[s->chip_slot] = s->sync == DMR_SYNC_TS1 ? 1 : 2;
+		e->tc_slot[s->chip_slot ^ 1u] = s->sync == DMR_SYNC_TS1 ? 2 : 1;
+		*dmo = e->tc_slot[s->chip_slot];
+		return *dmo;
+	default:
+		*dmo = chip_slot_ts(e, s->chip_slot);
+		return *dmo;
+	}
+}
+'''
+
+BS_TESTS = ON + r'''// RadioFoundry 2093f64 (issue 928), adapted to the pin: a direct mode station with BS sync (a simplex hotspot) keys
+// every other slot with no CACH, so the TC the chip reports is junk. Its bursts go up with no slot number and an
+// aligned reply picks the other chip slot than theirs, as after MS sync, with no wait for a TC lock. A base station
+// on both slots with the TC alternating gets slot numbers once locked (and through a missed burst), a repeater channel
+// always
+static void test_rx_bs_direct_call(void)
+{
+	for (int tc = 0; tc < 2; tc++) {
+		setup();
+		hrc7000_dmr_run(&eng);
+		const dmr_config_t cfg = { .own_id = 1234, .cc = 1, .access = DMR_ACCESS_IMPOLITE, .repeater = false };
+		hrc7000_dmr_configure(&eng, &cfg);
+		hrc7000_dmr_set_cc_filter(&eng, cfg.cc);
+		int bursts = 0, labeled = 0;
+		for (int k = 0; k < 12; k++) {		// a header and voice A-F every other slot, chip slot 1, TC constant
+			tick(false);
+			tick(false);
+			deframe(rti(k == 0 ? 0 : (uint8_t)((k - 1) % 6 + 1), k == 0 ? DMR_BURST_VOICE_LC_HEADER : 0, 1, 1, 1,
+				    (uint8_t)tc));
+			dmr_burst_t b = { 0 };
+			bursts += count_kind(DMR_EV_BURST_RX, &b);
+			labeled += b.ts != 0;
+		}
+		CHECK(bursts == 12 && labeled == 0 && eng.st.last_ts == 0);
+		CHECK(eng.tc_slot[0] == 0 && eng.tc_slot[1] == 0);
+		// An aligned reply on TS1 (the station's chip slot counts as TS2, as after MS sync): no TC lock wait
+		CHECK(hrc7000_dmr_tx_begin(&eng, DMR_TIMING_ALIGNED, 1, DMR_ACCESS_IMPOLITE));
+		CHECK(!eng.tx_bs && eng.tx_chip_slot == 0 && eng.st.txb_last_ts == 2);
+		hrc7000_dmr_tx_abort(&eng);
+		tick(true);
+		count_kind(0xFF, NULL);
+	}
+	for (int rpt = 0; rpt < 2; rpt++) {
+		setup();
+		hrc7000_dmr_run(&eng);
+		const dmr_config_t cfg = { .own_id = 1234, .cc = 1, .access = DMR_ACCESS_IMPOLITE, .repeater = rpt != 0 };
+		hrc7000_dmr_configure(&eng, &cfg);
+		hrc7000_dmr_set_cc_filter(&eng, cfg.cc);
+		for (int k = 0; k < 10; k++) {
+			tick(false);
+			if (k == 6) {
+				continue;
+			}
+			deframe(rti(0, 9, 1, 1, (uint8_t)(k & 1), (uint8_t)(k & 1)));
+			dmr_burst_t b = { 0 };
+			CHECK(count_kind(DMR_EV_BURST_RX, &b) == 1);
+			CHECK(b.ts == (rpt || k >= 3 ? (k & 1) + 1 : 0));
+		}
+		count_kind(0xFF, NULL);
+	}
+}
+#endif
+
+'''

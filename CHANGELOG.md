@@ -19,6 +19,15 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
     band rule added).
   - DMR text: received control characters (0x7F-0x9F) are dropped instead of being drawn as icons (RadioFoundry 22b27e8).
 - Tools > Repeaters (owner's request): `*` on the picked repeater (in the list or in its details) adds it as a NEW channel in the zone Home is on (`#` keeps its job, the nearest repeater; `*` was free here: it only opened quick settings, which it still does on the province level). The channel carries what the list has: RX, TX = RX + the offset, FM with the access tone as its TX tone and 12.5 / 25 kHz, or DMR with its colour code and slot (both or not known: Any), the repeater's name, the radio's power. A DMR channel is receive only with RX list Any (the list has no talkgroup: pick a TX contact in the channel editor to transmit); a repeater whose TX is outside the radio's TX bands is added receive only. It goes through the channel editor's own write (All channels and the zone in one write, the beta.7 zone fix; on the VFO All channels only). Toast "Added: ch N NAME in zone ZONE" (TR "Eklendi: kanal N NAME bölge ZONE"). A repeater already in the zone (same RX, TX, mode, tone or colour code and slot) says "Already in ZONE: ch N" and adds nothing. Refused cleanly: C4FM / D-STAR / P25 / ... entries (no channel for them: "Info only: not a mode of this radio"), while transmitting, a write in progress ("Saving: wait"), a full zone (80), no free channel, a frequency outside the radio's bands. No band-plan check (the band plan is DOTA's only). Host-tested (`tests/plus/test_ui_rptadd.c`); radio rows RA-1 to RA-4.
+- DMR search and the all digital search's DMR probe: the modem now hears every color code at once. Before, "any color
+  code" made the DMR modem step through the codes one at a time, and once a strong signal near the frequency moved it
+  off the right code it heard nothing at the probe, which is how a DMR radio in the same room was never found
+  (docs/plus.md "DMR search: the color code scan"). Ported from upstream RadioFoundry (d1a7ae4, MIT); "Any" color
+  code channels use the same path. Host-tested only; the owner's radio test decides.
+- From upstream RadioFoundry (2093f64, MIT): a simplex hotspot that sends base station sync is no longer dropped as
+  the other timeslot.
+- Searches: a strong signal that raises several channels around it is probed on a real channel, never 6.25 kHz off,
+  and a signal standing out of a raised band is probed instead of being taken as the noise floor.
 
 ## v1.0.0-beta.7 (candidate, not released yet)
 

@@ -367,6 +367,92 @@ takes the channel back after it. Code: `integration/radiofoundry/spectrum/dmrsea
 simulated modem: hear-all stack, sweep, found list, call played, hang, resume, PTT never keys, stops, P25 channel
 kept off; built without the P25 search).
 
+### DMR search: the color code scan (branch `dmrs3`, beta.8 candidate)
+
+The owner's report on the beta.7 candidate `fe36611c`: a DMR search over 436.000-436.500 never finds the other radio
+in the room (DMR direct mode on 436.275, CC1, TS1, TG 1, low power), while a DMR channel on the same frequency on
+Home receives it and P25 search finds a P25 radio. Two host-model fixes before this (`searchfix`,
+`CONFIG_SEARCH_SURE`) predicted success and the radio disproved them, so this round compared, statement by statement,
+what the radio is set to do on the working channel and during the search's probe.
+
+**Proven by code reading** (pinned RadioFoundry `dfbaf20c` plus our transforms, the built tree
+`build/radiofoundry-p25`), most certain first:
+
+| # | Channel 436.275 CC1 TS1 on Home (works) | DMR search / all digital DMR probe of 436.275 (misses) | Weight |
+|---|---|---|---|
+| 1 | `tune()` -> `dmr_begin` -> `dmr_configure`: `cfg.cc = 1`, `listen.any_cc` false -> `modem_config` `mc->cc = 1` (`core/dmr/call/dmr_call.c`) -> `hrc7000_dmr_set_cc_filter(1)`: LOCAL_CC = 1, cc_opt 0, dynamic sync threshold | `dmr_configure` while `dmrs_on` sets `listen.any_cc` (our hunk in `tools/plus_features.py` `prepare_dmr_search`) -> `mc->cc = -1` -> `cc_filter = -1`. In the pinned HR_C7000 driver that is a **color code scan**: `rx_tick` steps LOCAL_CC to the next code after 4 receive slot interrupts (120 ms) with no good burst and releases the slot sync each step (`drivers/modem/hrc7000/hrc7000_dmr.c` `rx_tick`, `CC_SCAN_TICKS`); one code is deframed at a time (cc_opt 0); `rx_resync` is off without a filter | **The cause, most likely.** RadioFoundry replaced this scan with LOCAL_CC cc_opt 1 in `d1a7ae4` (#583) after the SDR bench showed it "heard nothing": it steps on slot interrupts, and those stop while the chip hears a code it doesn't deframe. The sweep before the probe passes the carrier's skirt (12.5 kHz below it: slot timing, nothing usable), which steps the scan off CC1; at the probe the chip then sits on a wrong code, gets no slot interrupt, never steps back, and `dmr_call_heard` counts zero bursts for the whole 0.6-1.1 s window. The probe is left as "not DMR" and skipped 10-30 s. Explains "never", and why only DMR (P25 search uses the native receiver, not this driver) |
+| 2 | the receiver on the channel's own frequency | the run's target was the middle of the strongest run: an even run of equal steps (a radio in the room raises its neighbours to the same level) gave a half step, 6.25 kHz off the channel, where the DMR modem can't decode (`searchsure.h` `sure_target`) | possible (depends on how many steps the carrier raises equally: unmeasured) |
+| 3 | - | a run of 16 steps within 4 dB became the floor with no probe (`SURE_WIDE`), even with a carrier standing out in it (hole hunt A3) | possible only if the room radio raises 200 kHz flat; unmeasured |
+| 4 | FD6818 in DMR (`set_mode(DMR)`), `rx(hz, ch.bw, no tone)` | the same register set and call (`dmrs_tune` / `alls_setup`), 12.5 kHz (DMR channels are 12.5 kHz) | no difference. The sweep reads the level in DMR mode (the `dmrs2` idea: flat readings); the survey found gain 0x13 identical in FM and DMR; not pursued here, the live sample below measures it |
+| 5 | `cfg.ts = 1`, `rmo` false (simplex): no slot lock | `any_ts`, `rmo` false: no slot lock either; hear all | no difference for a direct mode sender with TDMA / MS sync |
+| 6 | - | RadioFoundry `2093f64`: BS-synced bursts with no CACH (a simplex hotspot) numbered from a junk TC and dropped as the other slot's | not the owner's case (a handheld in direct mode sends MS or TDMA direct sync; the channel works without it); ported anyway, for hotspot reception on channels and in searches |
+
+Why every host test passed: the radio state machine suites (`test_dmrsearch_sm.inc`, `test_allsearch_sm.inc`) use a
+simulated modem that treats `cc_filter -1` as "every code heard", and the search model (`test_search_sure.c`)
+decodes any DMR within 1.5 kHz. Neither ever ran the HR_C7000 driver's scan.
+
+**Changed** (under `CONFIG_RF_FIXES` or `CONFIG_SEARCH_SURE`, both on in `--plus` / `--public`):
+
+- Port of RadioFoundry `d1a7ae4` (#583), the driver part (`tools/plus_rfports.py` `prepare_rfports_cc_any`): no
+  filter is LOCAL_CC cc_opt 1 (every code deframed, RX_TYPE_INFO names it) with RF_MODE b12 (dynamic sync threshold)
+  cleared, as cc_opt 1 requires; cc_opt 0 and b12 set again (in that order: never cc_opt 1 with b12) with a filter
+  and (ours) when the DMR engine halts, so FM and the native P25 / YSF receiver (which saves and restores RF_MODE but
+  never touches LOCAL_CC; `dm32_native.inc` enters through `set_mode(DMR)` -> run -> `hrc_dmr_leave` -> halt) see the
+  chip as Classic leaves it (verifier finding D1 on b930bd7: its halt set b12 and left cc_opt 1). No scan; the stale
+  timing restart also without a filter; `set_cc_filter` switches cc_opt with no restart; every receiver restart
+  applies the filter (as upstream's), so a filter set while keyed takes effect when the transmission ends. The search's probe is now set up as the channel is, except that it
+  hears every code (so the fixed sync threshold). Also affects "Any" color code channels (`CONFIG_DMR_ANY`, RX only)
+  and ERDM users (`cc2`); not digital monitor (ours only sets hear all there).
+- Port of RadioFoundry `2093f64` (#933), the driver part (`prepare_rfports_bs_direct`): a BS burst is numbered from
+  its TC only on a repeater channel or after a TC lock; otherwise `ts` 0 and an aligned reply keys as after MS sync.
+- `searchsure.h`, both engines: a run of three or more steps is probed on a channel step, never a half step: its one
+  step reading `SURE_PEAK_DB` (3 dB) over every other, else its middle step (an even run: the middle step nearer the
+  strongest reading). Two equal steps still give the half step (6.25 kHz raster). A 16-step flat run is still the
+  floor, unless one step reads 3 dB over the rest: that step is probed first and the floor takes the run's level when
+  the probe ends (hole hunt A3). Known cost (verifier, not fixed: the engine keeps no per-step levels): an overloaded
+  plateau of three or more equal steps around a signal on a 6.25 kHz raster (x.xx625) is now probed on a step 6.25
+  kHz off it (before: the half step, right), and an even plateau around a grid channel may be probed on the central
+  step 12.5 kHz off it when the tie goes the wrong way (before: 6.25 kHz off, also undecodable for DMR).
+
+**Host-modelled**: `hrc7000DmrTest` `test_search_probe_cc1` runs the probe on the driver with the chip modelled as
+RadioFoundry describes it (deframes and gives slot interrupts only for a code LOCAL_CC lets through): switch off (the
+pin, beta.7) the skirt moves the scan off CC1 and 1.1 s of a CC1 sender gives **0 bursts**; RF fixes on, every burst.
+It is a regression test of the hypothesis on upstream's description of the chip, not a reproduction of the radio's
+failure. Plus upstream's `test_cc_any` and `test_rx_bs_direct_call` (adapted), and ours `test_native_after_search`
+(a native P25 entry after the search finds cc_opt 0 and b12 set) and `test_cc_filter_after_tx`. `test_searchsure`: an even plateau is probed on
+F (not F + 6.25 kHz), a run's clear peak on the peak, a wide run's 3 dB peak probed (beta.7: never), a flat wide run
+still the floor. The search model (`tools/test_searchfix.py`) keeps its figures (owner's case 197 of 200, median 2.6
+s; every row within a few finds of the `searchfix` table) but cannot show this fix: it never modelled the scan.
+
+**Not proven**: cc_opt 1 itself on this radio (upstream merged it "untested on a radio"; their later DM-32UV HIL runs
+pass DMR receive, not stated with no filter); that the scan really stood on a wrong code during the owner's probes
+(only the live sample below can show it); items 2 and 3.
+
+**Radio test (owner, beta.8 candidate)**: the other radio DMR direct mode on 436.275, CC1, TS1, low power, same room,
+keyed in 10-20 s overs. (a) Tools > DMR search 436.000-436.500: found within about 10 s ("436.2750 DMR CC1 TS1 DIR"),
+the call plays. (b) The other radio on CC7: found as CC7. (c) Tools > All digital search, same range: found as DMR.
+(d) Home, the 436.275 CC1 channel: still receives and talks. (e) A P25 channel, then P25 search: still receive (the
+dynamic threshold is back after DMR). Rows SX-3 / SX-6 / AD-* in [plus-radio-test.md](plus-radio-test.md) for the
+rest.
+
+**Read-only live sample** (owner's approval needed: serial port, read only, nothing keyed or written; on the beta.7
+build installed now, then on beta.8). The FD6818 registers (RadioFoundry's CHIP_REG is not ported) and the HR_C7000's
+(READ_MEM refuses the modem block: read-to-clear registers) can't be read directly; the read-only views tell the
+cause apart. The lab repo's `tools/plus_live.py` sends GET_VIEW only; its allowlist would gain GET_DIAG (0x03, payload
+the first line index; read only: the diagnostics lines, `hrc_dmr_stats_line` for the modem) and GET_VIEW sections 4
+(`dmr_stats`) and 29 (`dmrs`). Each step about 20 s, polled every 0.5 s, the other radio keyed:
+
+1. Home on a DMR channel 436.275 CC1 TS1: GET_VIEW 0 (`rssi_dbm`, `noise`; FD6818 0x67 / 0x65 converted) and GET_DIAG
+   (modem lines: `tk` ticks, `ts` slot interrupts, `si`, `V` / `H` voice and headers, `crc`, `u` unusable, `rs`
+   restarts, `cc` the last code). Expected: `tk` +33 a second, `V` climbing, `cc1`.
+2. The same frequency in FM (an FM channel or the VFO in FM): GET_VIEW 0. `rssi_dbm` in FM against step 1 tests the
+   `dmrs2` idea (the DMR register set reading flat or low) directly.
+3. Tools > DMR search 436.000-436.500 running: GET_VIEW 29 (`dmrs.phase`, `dmrs.at`), GET_VIEW 0, GET_DIAG. On beta.7,
+   if the scan is the cause: while `dmrs.phase` is the probe at 436275000, `tk` and `V` / `H` stand still, `cc` stays
+   stale, and the phase goes back to the sweep after 0.6-1.1 s. On beta.8: `V` / `H` climb during the probe, `cc1`,
+   the find in `dmrs.f0`.
+4. Optional, beta.8: step 3 with the other radio on CC7.
+
 ### All digital search (`CONFIG_ALL_SEARCH`, ours; receive only)
 
 Tools > All digital search (Turkish "Tüm dijital arama"; tool 39, after CW decoder; Tools > ISS (40) follows it, then Battery (41); no other tool's number moved):
@@ -4127,7 +4213,20 @@ with the switch on: upstream's `test_dmr_tone_off` (all three set-ups x CTCSS/DC
 `test_lost_requests`, `test_polite_without_ticks` (with clock wrap), `test_resync_without_ticks`,
 `test_resync_voice_lost`, and the long-silence case added to `test_rx_resync`; the old suites keep running with the
 switch off. Mutation check: removing the driver's 0x51 write, the poll recovery, the request clearing or the wall-time
-busy check each fails the suite. Radio rows RF-1..RF-6 in [plus-radio-test.md](plus-radio-test.md). None of these
+busy check each fails the suite. Radio rows RF-1..RF-6 in [plus-radio-test.md](plus-radio-test.md).
+
+Branch `dmrs3` (beta.8 candidate) adds two HR_C7000 driver ports, each in its own function of `plus_rfports.py`:
+
+| RadioFoundry | What it fixes | Our change |
+|---|---|---|
+| `d1a7ae4` (#583, Spencer Fowler) any color code = LOCAL_CC cc_opt 1 | With no color code filter the driver stepped LOCAL_CC through the codes; upstream found on the SDR bench that this scan hears nothing (it steps on slot interrupts, which stop while the chip hears a code it doesn't deframe) | the driver part only (`prepare_rfports_cc_any`): cc_opt 1 with the fixed sync threshold (RF_MODE b12) while no filter is set, no scan, the stale restart without a filter too, every restart applies the filter; ours: cc_opt 0 and b12 back when the engine halts. The DMR search and the all digital DMR probe ran the scan (they hear every code): "DMR search: the color code scan" above. Tests: upstream's `test_cc_any` (adapted), ours `test_search_probe_cc1` |
+| `2093f64` (#933, Spencer Fowler) no BS slot labels without a CACH | A direct mode sender with BS sync (a simplex hotspot) had TS1 labelled TS2 from a junk TC and dropped | the driver part (`prepare_rfports_bs_direct`) on our pin's tick-based TC lock: numbered only on a repeater channel or after a TC lock (held while BS bursts come), else `ts` 0; an aligned reply as after MS sync. Tests: upstream's `test_rx_bs_direct_call` (adapted), the simplex case in `test_rx` |
+
+Neither is proven on our radio (upstream: `d1a7ae4` merged "untested on a radio"; `2093f64` HIL on a DM-32UV, 120 of
+120 bursts played from a BS-sync direct sender). Budget (`--plus --stack-check --verify-rebuild`, both ports and the
+search target change): FLASH 869,384 -> 869,840 B (+456), RAM 208,616 -> 208,720 B (+104: the driver file is linked
+into RAM; 2,736 B free), radio task 672 B free, the least free prvIdleTask 136 B, zero warnings, forced rebuild
+identical. None of these
 paths is proven on our radio yet (upstream: 625b921 on the SDR bench; 916ac26's recovery not exercised, no stall
 happened; 947c139 not reproduced on demand).
 

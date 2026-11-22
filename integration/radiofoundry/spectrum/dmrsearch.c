@@ -363,6 +363,8 @@ static uint32_t sure_step(bool strong, uint32_t now_ms, bool *hit)
 		}
 		/* nothing there now (the over ended): on past the run, nothing skipped */
 		u.climbing = false;
+		if (sure_wide_floor(&u, &floor_q4))
+			s.floor_dbm = (int16_t)(floor_q4 / 16);
 		revisiting = false;
 		s.at_hz = resume_hz;
 		end_write();
@@ -383,9 +385,10 @@ static uint32_t sure_step(bool strong, uint32_t now_ms, bool *hit)
 		stage = ST_QUICK;
 		prev_hz = 0;
 		int r = sure_climb(&u, s.at_hz, lvl, cand);
-		if (r == SURE_WIDE) {
-			floor_q4 = (int32_t)u.run_lvl * 16;	/* the band's level raised, no carrier: the floor */
-			s.floor_dbm = u.run_lvl;
+		if (r == SURE_WIDE && !sure_peaked(&u)) {
+			/* the band's level raised, no carrier in it: the floor (one step clearly over the rest: probed below) */
+			if (sure_wide_floor(&u, &floor_q4))
+				s.floor_dbm = (int16_t)(floor_q4 / 16);
 			sure_set_skirt(&u, now_ms, s.sweeps);
 			strong = false;
 		} else if (r == SURE_MORE && s.at_hz + s.step_hz <= s.hi_hz) {
@@ -395,11 +398,15 @@ static uint32_t sure_step(bool strong, uint32_t now_ms, bool *hit)
 			tuned(now_ms);
 			return s.at_hz;
 		} else {
-		/* The run is complete: its middle is probed; the sweep then goes on from the step after the run */
-		uint32_t t = sure_target(&u);
+		/* The run is complete: its target is probed (radio/searchsure.h sure_target); the sweep then goes on from the
+		 * step after the run. SURE_WIDE with one step clearly over the rest: that step (never hidden, hole hunt A3);
+		 * the run's level becomes the floor when it ends */
+		uint32_t t = sure_target(&u, s.step_hz);
 		resume_hz = u.run_hi + s.step_hz <= s.hi_hz ? u.run_hi + s.step_hz : next_step(u.run_hi);
 		revisiting = true;
 		if (skipped(t, now_ms)) {
+			if (sure_wide_floor(&u, &floor_q4))
+				s.floor_dbm = (int16_t)(floor_q4 / 16);	/* the band's level raised, no carrier: the floor */
 			sure_set_skirt(&u, now_ms, s.sweeps);	/* a carrier known not to be ours: its steps passed over */
 			revisiting = false;
 			s.at_hz = resume_hz;
@@ -659,6 +666,8 @@ static uint32_t resume(uint32_t now_ms)
 	s.playing = false;
 	held = false;
 #if CONFIG_SEARCH_SURE
+	if (sure_wide_floor(&u, &floor_q4))
+		s.floor_dbm = (int16_t)(floor_q4 / 16);	/* a wide run's target probed: its level the floor */
 	sure_set_skirt(&u, now_ms, s.sweeps);	/* the probed carrier's other steps are its skirt */
 	step_ms0 = now_ms;
 #endif
