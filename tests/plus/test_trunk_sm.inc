@@ -91,6 +91,34 @@ static void test_plus_trunk_sm(void)
     for(int i=0;i<700 && p25tk_on();i++){now+=10;classic_pump();}
     for(int i=0;i<10;i++){now+=10;classic_pump();}
     CHECK(!p25tk_on() && !tk_trunk_on && classic_set_nac==0x293 && classic_set_tg==42 && tk_rx_hz()==433500000u);
+#if CONFIG_DMR_EMERGENCY
+    /* DDM32 Plus (mwfix4): an emergency asked for while following (the key, the lone worker, SOS) never waits for it:
+     * the following ends, the receiver is let go and the radio tick takes the start: on this P25 channel it fails at
+     * once (SOS / the lone worker fall back), within a second; the channel is received again after */
+    classic_select(false);
+    sm.view.ch.rx_hz=433500000u;
+    tk_task_req(RREQ_P25_TRUNK,1,0);
+    for(int i=0;i<10;i++)tk_step();
+    CHECK(p25tk_on() && native_lab_owns());
+    dmr_emergency_settings_t tk_es;
+    dmr_emergency_settings_default(&tk_es);
+    tk_es.mode=DMR_EMERGENCY_MODE_CALL;
+    dmr_emergency_set_settings(&tk_es);
+    radio_sm_tick(&sm,now);
+    CHECK(dmr_emergency_start());
+    uint32_t tk_t0=now,tk_failed=0;
+    for(int i=0;i<300 && !tk_failed;i++) {
+        tk_counts.frames++;tk_counts.last_ms=now;	/* the control channel goes on */
+        tk_step();
+        if(!native_lab_owns())radio_sm_tick(&sm,now);	/* as radio_task.c: the tick only without the native receiver */
+        if(dmr_emergency_state()==DMR_EMERGENCY_FAILED)tk_failed=now-tk_t0;
+    }
+    CHECK(tk_failed!=0 && tk_failed<=1000u && !p25tk_on() && hw.tx_calls==tx0);
+    printf("Plus P25 trunk: an emergency while following: following ended, the emergency failed (P25 channel) after %u ms\n",
+           (unsigned)tk_failed);
+    dmr_emergency_cancel();
+    for(int i=0;i<20;i++){now+=10;classic_pump();if(!native_lab_owns())radio_sm_tick(&sm,now);}
+#endif
     /* Not a P25 channel: no start */
     classic_select(false);
     sm.view.ch.mode=RADIO_MODE_FM;

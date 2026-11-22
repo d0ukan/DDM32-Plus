@@ -3853,6 +3853,15 @@ Host tests: the emergency from each letter and ring position of the owner's A / 
 
 Host tests (`test_mwatch_radio.inc` `test_mwatch_emergency_now`, all failing with the code before): the emergency during a P25 call on B with C or A selected (keyed on A within 1 s, the call running), a single P25 channel with a call (FAILED within 1 s, the channel taken again), pressed while PTT is held on C (nothing until release, then on A).
 
+**Fifth review round** (branch `mwfix4`):
+
+| # | Found | Fix |
+|---|---|---|
+| S1 | The emergency check in `native_lab.c` `channel_service` came after the early returns of the DMR / all digital search, the P25 search and P25 trunk following: those (trunk following can run for hours) still held a pending emergency back, with no FAILED and no fallback | the check is the first thing in `channel_service`: a pending start ends them at once as PTT does (`dmrs_stop`, `p25s_stop` and the probe's `search_let_go`, `p25tk_stop`), their own give back hands the receiver over, nothing is taken meanwhile, and the radio tick takes the start (a DMR channel / letter, else FAILED so SOS and the lone worker fall back). Host model: P25 trunk following and the P25 search playing a find: the emergency failed (P25 / FM channel) 20-50 ms after the key |
+| M1 | A start held while PTT is down (watch) could wait as long as the transmission | 10 s at most: then it is taken on the channel in use (a DMR letter goes out there, another mode fails: SOS / lone worker fall back); host model: taken after 10.05 s with PTT held on an FM letter |
+
+Host tests: `tests/plus/test_trunk_sm.inc` (the emergency while following), `tests/classic/test_scan.inc` (while the P25 search plays a find; fails with the code before), `test_mwatch_radio.inc` `mwx_emergency_ptt_cap`.
+
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free (720 after the review round, 716 after the second), UI 184 B: the radio task's deepest path is still the P25 search's give back):
 
@@ -3865,6 +3874,7 @@ radio task 728 B free (720 after the review round, 716 after the second), UI 184
 | second review (on `ddm25` 415b519: 864,272 / 209,916) | 865,032 (+760) | 209,920 (1,536; +4 B) |
 | third review (on `ddm25` ab6afc3: 865,552 / 208,568) | 865,808 (+256) | 208,568 (2,888; +0 B) |
 | fourth review (same base) | 865,884 (+332 on the base, +76 this round) | 208,568 (2,888; +0 B) |
+| fifth review (on `ddm25` 151a533: 867,420 / 208,576) | 867,536 (+116) | 208,576 (2,880; +0 B) |
 ## Upstream RadioFoundry fixes (`CONFIG_RF_FIXES`, branch `rfports`)
 
 Our RadioFoundry pin is `dfbaf20c`; upstream (MIT, The RadioFoundry Authors) is 194 commits ahead

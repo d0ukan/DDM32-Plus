@@ -5,6 +5,8 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
+- An emergency (the key, the lone worker, SOS) also ends P25 trunk following, the P25 search and the DMR / all
+  digital search at once instead of waiting for them; one pressed while transmitting in a watch waits 10 s at most.
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
   radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
   that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved

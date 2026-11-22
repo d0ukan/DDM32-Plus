@@ -1145,6 +1145,39 @@ static void mwx_emergency_during_ptt(void)
         mwx_core_step(true);
 }
 
+/* mwfix4 M1: PTT held on C for long: the pending start waits 10 s at most, then is taken on the channel in use (C, FM:
+ * it fails, so SOS / the lone worker fall back); C stays on the air until release */
+static void mwx_emergency_ptt_cap(void)
+{
+    snprintf(mwx_tag, sizeof mwx_tag, "emergency, PTT held on C for 12 s");
+    mwx_codeplug("DPFFFF", true);
+    mw_start_radio();
+    codec_present = true;
+    classic_retained = false;
+    mw_busy_hz = mwx_voice_hz = 0;
+    MWX_CHECK(mw_watch(3, 2));
+    MWX_CHECK(mw_until_at(1, 3000));
+    mwx_send(RREQ_PTT, 1);
+    for (int i = 0; i < 8; i++)
+        mwx_core_step(true);
+    MWX_CHECK(sm.view.state == RS_TX && hw.tx_hz == mw_hz[2]);
+    mwx_emergency_setup();
+    MWX_CHECK(dmr_emergency_start());
+    uint32_t t0 = now, failed = 0;
+    for (int i = 0; i < 480 && !failed; i++) {	/* 12 s */
+        mwx_core_step(true);
+        if (dmr_emergency_state() == DMR_EMERGENCY_FAILED)
+            failed = now - t0;
+    }
+    MWX_CHECK(failed >= 9900u && failed <= 10500u && sm.view.state == RS_TX && hw.tx_hz == mw_hz[2]);
+    printf("  emergency with PTT held on C: waited %u ms, then taken on C (FM: failed)\n", (unsigned)failed);
+    mwx_send(RREQ_PTT, 0);
+    dmr_emergency_cancel();
+    for (int i = 0; i < 120; i++)
+        mwx_core_step(true);
+    MWX_CHECK(sm.view.state != RS_TX && !sm.ptt);
+}
+
 static void test_mwatch_emergency_now(void)
 {
     int before = failures;
@@ -1152,6 +1185,7 @@ static void test_mwatch_emergency_now(void)
     mwx_emergency_during_call(0);
     mwx_emergency_single_p25();
     mwx_emergency_during_ptt();
+    mwx_emergency_ptt_cap();
     printf("Plus multi-watch: the emergency never waits for a P25 call or a transmission's letter: %d failures\n",
            failures - before);
 }

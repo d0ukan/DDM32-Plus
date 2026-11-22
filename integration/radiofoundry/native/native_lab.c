@@ -471,6 +471,26 @@ static bool selected_rx_stale(const channel_t *ch)
 #endif
 static void channel_service(radio_sm_t *sm)
 {
+#if CONFIG_DMR_EMERGENCY
+    /* DDM32 Plus: an emergency asked for (the key, the lone worker, SOS) never waits for the receiver: the DMR / all
+     * digital search, the P25 search and P25 trunk following end at once (as PTT ends them) and their receiver is let
+     * go below; a P25 channel or letter it holds is let go further down. A native transmission ends first (PTT) */
+    bool emergency=dmr_emergency_start_pending();
+    if(emergency && !native_ptt && !live_owner()) {
+#if CONFIG_DMR_SEARCH
+        if(dmrs_on())dmrs_stop();
+#endif
+#if CONFIG_P25_SEARCH
+        if(p25s_on())p25s_stop();
+        if(search_owned && !search_release)search_let_go();
+#endif
+#if CONFIG_P25_TRUNK
+        if(p25tk_on())p25tk_stop();
+#endif
+    }
+#else
+    bool emergency=false;
+#endif
 #if CONFIG_DMR_SEARCH
 #if CONFIG_ALL_SEARCH
     /* The all digital search: only its P25 / YSF probe may take the receiver (the rest is the radio core's) */
@@ -499,17 +519,13 @@ static void channel_service(radio_sm_t *sm)
     }
 #endif
 #if CONFIG_DMR_EMERGENCY
-    /* DDM32 Plus: an emergency asked for (the key, the lone worker, SOS) never waits for a P25 call: the native
-     * receiver lets the channel go at once, as for a request (the radio task's tick runs only without it), and takes
-     * none while the start is pending. The radio core then puts it on a DMR letter of the watch, or fails it at once on
-     * a P25 channel (SOS and the lone worker fall back). A native transmission ends first (PTT) */
-    bool emergency=dmr_emergency_start_pending();
+    /* ... and never for a P25 call: the native receiver lets the channel go at once, as for a request (the radio task's
+     * tick runs only without it), and takes none while the start is pending. The radio core then puts it on a DMR
+     * letter of the watch, or fails it at once on a P25 channel (SOS and the lone worker fall back) */
     if(emergency && (channel_selected || channel_handoff) && !native_ptt && !live_owner()) {
         if(channel_let_go(sm)==0) restore_channel(sm);
         return;
     }
-#else
-    bool emergency=false;
 #endif
 #if CONFIG_P25_SCAN
     if(scan_owned && (channel_selected || channel_handoff) && scan_on(&sm->scan)) { scan_give_back(sm); return; }

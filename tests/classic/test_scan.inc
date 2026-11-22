@@ -280,6 +280,35 @@ static void test_plus_p25search_sm(void)
     ptt.arg=1;CHECK(native_lab_request(&sm,&ptt)==1);ptt.arg=0;native_lab_request(&sm,&ptt);
     radio_sm_poll(&sm,now+=10);
     CHECK(!p25s_on() && hw.tx_calls==tx0);
+#if CONFIG_DMR_EMERGENCY
+    /* DDM32 Plus (mwfix4): an emergency while the search plays a find: the search ends, the receiver is let go and the
+     * radio tick takes the start within a second (on this FM channel it fails: SOS / the lone worker fall back) */
+    radio_sm_request(&sm,&r,now);
+    for(int i=0;i<4000 && !native_lab_owns();i++) ps_step();
+    CHECK(native_lab_owns() && p25s_phase()==P25S_PROBE);
+    for(int i=0;i<10;i++){ ps_frames++;ps_frame_ms=now;ps_nac=0x1C8;ps_tg=655;ps_src=1234567;now+=20;classic_pump(); }
+    CHECK(p25s_snapshot(&v) && v.playing);
+    {
+        dmr_emergency_settings_t es;
+        dmr_emergency_settings_default(&es);
+        es.mode=DMR_EMERGENCY_MODE_CALL;
+        dmr_emergency_set_settings(&es);
+        radio_sm_tick(&sm,now);
+        CHECK(dmr_emergency_start());
+        uint32_t et0=now,failed=0;
+        for(int i=0;i<100 && !failed;i++) {
+            ps_frames++;ps_frame_ms=now;	/* the find still on the air */
+            now+=10;classic_pump();
+            if(!native_lab_owns())radio_sm_tick(&sm,now);
+            if(dmr_emergency_state()==DMR_EMERGENCY_FAILED)failed=now-et0;
+        }
+        CHECK(failed!=0 && failed<=1000u && !p25s_on() && hw.tx_calls==tx0);
+        printf("Plus P25 search: an emergency while playing a find: search ended, the emergency failed (FM channel) after %u ms\n",
+               (unsigned)failed);
+        dmr_emergency_cancel();
+        for(int i=0;i<20;i++){ now+=10;classic_pump();if(!native_lab_owns())radio_sm_tick(&sm,now); }
+    }
+#endif
     hw.st.rssi_dbm=0;
     printf("Plus P25 search in the state machine: sweep, any-NAC probe, found list, give back, skip, PTT never keys\n");
 }
