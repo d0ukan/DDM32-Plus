@@ -422,6 +422,7 @@ __pycache__/
 # DM32 Plus repeaters by province (tools/test_rptprov.py)
 !/tools/test_rptprov.py
 !/tests/plus/test_ui_rptprov.c
+!/tests/plus/test_ui_rptadd.c
 !/tools/plus_p25nac.py
 !/tools/test_p25nac.py
 !/tests/plus/test_p25nac.c
