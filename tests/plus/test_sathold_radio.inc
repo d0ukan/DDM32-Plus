@@ -269,9 +269,11 @@ static void test_sathold_txk(void)
 	start();
 	poll_for(200);
 	CHECK(radio_sat_txk(&sm) == SAT_TX_NONE);
+#if CONFIG_APRS	/* (this build has none: tests/plus/test_aprs_iss.c checks it on a real frame's wait) */
 	sm.aprs_phase = 1;		/* APRS_RF_LISTEN (any phase but off) */
 	CHECK(radio_sat_txk(&sm) == SAT_TX_OWN);
 	sm.aprs_phase = 0;
+#endif
 	req(RREQ_PTT, 1);
 	CHECK(radio_sat_txk(&sm) == SAT_TX_PTT);
 	req(RREQ_PTT, 0);

@@ -477,16 +477,26 @@ static void channel_service(radio_sm_t *sm)
      * go below; a P25 channel or letter it holds is let go further down. A native transmission ends first (PTT) */
     bool emergency=dmr_emergency_start_pending();
     if(emergency && !native_ptt && !live_owner()) {
+        /* A search the radio core runs (the sweep's frequency, the DMR stack hearing every color code and slot) ends
+         * through its own stop request, which tunes the channel at once (RREQ_RETUNE would wait for the trim to settle,
+         * after the radio tick took the start); one whose probe the native receiver holds is retuned by its give back */
+        bool owned=false,stop=false;
+        radio_req_t r={.type=RREQ_PTT};     /* (its type set below when used; arg 0: the stop) */
+#if CONFIG_P25_SEARCH
+        owned=search_owned;
+#endif
 #if CONFIG_DMR_SEARCH
-        if(dmrs_on())dmrs_stop();
+        if(dmrs_on()){if(owned)dmrs_stop();else{stop=true;r.type=RREQ_DMR_SEARCH;}}
 #endif
 #if CONFIG_P25_SEARCH
-        if(p25s_on())p25s_stop();
+        if(p25s_on()){if(owned)p25s_stop();else{stop=true;r.type=RREQ_P25_SEARCH;}}
         if(search_owned && !search_release)search_let_go();
 #endif
 #if CONFIG_P25_TRUNK
         if(p25tk_on())p25tk_stop();
 #endif
+        (void)owned;
+        if(stop)radio_sm_request(sm,&r,hal_millis());
     }
 #else
     bool emergency=false;

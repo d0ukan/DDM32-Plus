@@ -15,6 +15,8 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   DMR and P25 search are refused over a dual / multi-watch or the air watch. OK on a search find outside the amateur
   band plan makes the VFO receive only ("This channel is RX only") until its frequency changes. The radio name must
   look like a callsign for SSTV, the cross-band and CW IDs ("DM32UV", the factory name, is refused; TA2DOU/P works).
+  digital search at once instead of waiting for them (the channel tuned again before the emergency goes out); one
+  pressed while transmitting in a watch waits 10 s at most.
 - Satellite tracks (ISS auto track and the held track from Tools > ISS / the pop-up): the emergency key, the lone
   worker and SOS now end the track at once and go on from the user's channel (a DMR channel transmits the emergency;
   before, the key only ended the track and SOS / the lone worker failed on the receive-only satellite frequency). A

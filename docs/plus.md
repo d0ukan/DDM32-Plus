@@ -1334,8 +1334,9 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     radio's own frame waiting 30 s mid pass: no VFO request, the Doppler caught up after; the hold ended by the radio
     core: the track ends at the next poll, nothing moved after); `tests/plus/test_ui_sat.c` (the emergency key's down,
     long and up not taken by an auto track; the pop-up up at 26 s and gone by 35 s after the rise).
-  - FLASH +124 B (867,408 -> 867,532 on ddm25 151a533), RAM +0 B (208,576). Radio rows IS-12-IS-14; IS-8 / IS-9 now
-    30 s.
+  - FLASH +184 B on `ddm25` 3118a86 (867,536 -> 867,720: the satellite part +128, the search stop below +56), RAM
+    +8 B (208,576 -> 208,584: the watchdog's word); zero warnings, forced rebuild identical, stack check passed. Radio
+    rows IS-12-IS-14; IS-8 / IS-9 now 30 s.
 
 - [built] P25 Phase 1 trunk following (`CONFIG_P25_TRUNK`, `prepare_p25_trunk`; parallel job; receive only):
   Tools > P25 trunk (tool 24, before Battery) follows a trunked system from the **selected channel**: a P25 channel
@@ -3983,6 +3984,25 @@ Host tests (`test_mwatch_radio.inc` `test_mwatch_emergency_now`, all failing wit
 | M1 | A start held while PTT is down (watch) could wait as long as the transmission | 10 s at most: then it is taken on the channel in use (a DMR letter goes out there, another mode fails: SOS / lone worker fall back); host model: taken after 10.05 s with PTT held on an FM letter |
 
 Host tests: `tests/plus/test_trunk_sm.inc` (the emergency while following), `tests/classic/test_scan.inc` (while the P25 search plays a find; fails with the code before), `test_mwatch_radio.inc` `mwx_emergency_ptt_cap`.
+
+The 10 s cap of M1 applies to the multi-watch only (`emergency_tick`'s `held_ms`, inside `dual_running`). On a single
+P25 channel with native PTT held the start waits for the transmission to end (`channel_service` skips its let-go while
+`native_ptt`), so it is bounded by the TOT, not by 10 s; on a single FM / DMR channel the radio tick takes the start at
+once (a DMR channel's hot mic waits for PTT up as upstream's does).
+
+Hardening (verifier's suggestion, branch `satfix`): S1's stop of a search the radio core ran (the DMR search, the all
+digital search's sweep or DMR probe, the P25 search's sweep) left the board and the DMR stack in the search's set-up
+(its frequency, every color code and slot heard): every other stop pairs with a retune, this one did not, so a DMR
+channel's emergency keyed with the stack still in hear-all. `channel_service` now ends such a search through its own
+stop request (RREQ_DMR_SEARCH / RREQ_P25_SEARCH with arg 0, handed to `radio_sm_request` at once), which tunes the
+channel in the same call, before the radio tick takes the start (`restore_channel`'s RREQ_RETUNE was tried first: it
+waits for the reference trim to settle, so the tick took the start in the search's set-up); a search whose probe the
+native receiver holds is retuned by its own give back as before. Host tests: `tests/plus/test_dmrsearch_sm.inc` (an
+emergency during the DMR search on a DMR channel: the stack back on color code 2 and the hot mic keyed; on an FM
+channel: the channel tuned again, FAILED, nothing keyed) and `tests/plus/test_allsearch_sm.inc` (during the all
+digital sweep: the FM channel tuned again, FAILED). Residual: the start is set by the UI task, so it can land between
+the native service and the radio tick of one loop; the tick then takes it before the search is stopped (a window of
+one radio loop, not closed here).
 
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free (720 after the review round, 716 after the second), UI 184 B: the radio task's deepest path is still the P25 search's give back):
