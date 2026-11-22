@@ -3214,12 +3214,16 @@ the zone work runs in the storage job on its `work` zone, nothing new on the UI 
   virtual zone shows every channel).
 - **and the zone it was made for**: Copy here's zone at its position; otherwise the zone Home is on, at its end; in
   dual / multi-watch the selected letter's zone (`ui_view()` is the selected letter's view). Not when Home (the letter)
-  is on the VFO, and not a Find & save zone ("Bulunanlar N": it holds the finds only). Home on All channels: once.
+  is on the VFO, and not a Find & save zone ("Bulunanlar N": it holds the finds only). Home on All channels: once;
+  Copy here inside All channels: at Copy here's position.
 - **never silently in no zone**: a toast after "Saved as channel N" says what happened when a zone did not take it:
   "All channels full, in no zone: ch N" (TR "Tüm kanallar dolu, bölgesiz: kanal N"), "In no zone: channel N" (no All
   channels zone and no zone to take it; TR "Bölgesiz: kanal N"), "All channels full, not in it: ch N" (Home's zone took
   it; TR "Tüm kanallar dolu, dışında: kanal N"), "Zone full, only in All channels: N" (TR "Bölge dolu, yalnız Tüm
   kanallarda: N"). Full is 80, or 16 on a codeplug with the old 16-channel zone records.
+  The note travels from the storage job to the UI as one 32-bit word (a sequence, the kind, the number), so the UI
+  never pairs one note's kind with another's number; a second save finished before the UI reads the first note
+  replaces it (only the later toast shows).
 - **a zone write that fails** while the channel is in no zone deletes the channel again, and the toast says "Couldn't
   write the codeplug: not saved"; when All channels took it and only Home's zone write failed, the channel stays and
   the toast says "Zone full, only in All channels".

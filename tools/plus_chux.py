@@ -69,10 +69,11 @@ def prepare_new_joins(transform, install):
          'zone_edit_result_t zone_edit_add_join(uint16_t zone, uint16_t pos, uint16_t number, const channel_t *ch);\n'
          '// Every channel in no zone at the end of zone, while it has room\n'
          'zone_edit_result_t zone_edit_add_unzoned(uint16_t zone);\n'
-         '// What the last of those two did (ZONE_NOTE_IDLE: nothing to say), once; n: the channel, or how many added\n'
+         '// What the last of those two did (ZONE_NOTE_IDLE: nothing new since *seen, the caller\'s last sequence, which it\n'
+         '// updates); n: the channel, or how many added. A later note replaces one not read yet\n'
          'enum { ZONE_NOTE_IDLE, ZONE_NOTE_NO_ZONE, ZONE_NOTE_ALL_FULL, ZONE_NOTE_NOT_ALL, ZONE_NOTE_ONLY_ALL,\n'
          '       ZONE_NOTE_ADDED, ZONE_NOTE_ADDED_FULL, ZONE_NOTE_NO_UNZONED };\n'
-         'uint8_t zone_edit_note(uint16_t *n);\n#endif\n'),
+         'uint8_t zone_edit_note(uint8_t *seen, uint16_t *n);\n#endif\n'),
     ])
     transform('core/codeplug/zone_edit.c', [
         ('static uint32_t applied;\nstatic uint8_t last_result;\n',
@@ -118,7 +119,7 @@ def prepare_new_joins(transform, install):
          '\t\t[ZONE_NOTE_ADDED] = TRN("Added to the zone: "),\n'
          '\t\t[ZONE_NOTE_ADDED_FULL] = TRN("Zone full, added: "),\n'
          '\t\t[ZONE_NOTE_NO_UNZONED] = TRN("Every channel is in a zone") };\n'
-         '\tuint16_t n;\n\tuint8_t k = zone_edit_note(&n);\n'
+         '\tstatic uint8_t seen;\n\tuint16_t n;\n\tuint8_t k = zone_edit_note(&seen, &n);\n'
          '\tif (k == ZONE_NOTE_IDLE || k >= sizeof text / sizeof text[0])\n\t\treturn;\n'
          '\tsbuf_t b;\n\tsb_init(&b, ze_msg, sizeof ze_msg);\n\tsb_str(&b, tr(text[k]));\n'
          '\tif (k != ZONE_NOTE_NO_UNZONED)\n\t\tsb_u32(&b, n, 1);\n'

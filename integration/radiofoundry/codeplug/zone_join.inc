@@ -7,25 +7,26 @@
  * all_channels; "Tüm kanallar" typed on the radio counts too). Renamed, it is an ordinary zone: a new channel then goes
  * only into the zone it was made for. */
 
-/* What the last ZONE_OP_ADD_JOIN or ZONE_OP_UNZONED did, for the UI (zone_edit_note): written by the storage job, read
- * by the UI task; the number first, the kind last */
-static volatile uint16_t note_n;
-static volatile uint8_t note_k;
+/* What the last ZONE_OP_ADD_JOIN or ZONE_OP_UNZONED did, for the UI (zone_edit_note): one aligned 32-bit word, written
+ * whole by the storage job and read whole by the UI task (a single load / store on the radio's CPU), so the UI never
+ * sees one note's kind with another's number: sequence << 24 | kind << 16 | number. The UI keeps the last sequence it
+ * showed; nothing is cleared. A second note written before the UI reads the first replaces it (the later one shows) */
+static volatile uint32_t note_word;
 
 static void note(uint8_t kind, uint16_t n)
 {
-	note_n = n;
-	note_k = kind;
+	uint32_t seq = ((note_word >> 24) + 1u) & 0xFFu;
+	note_word = seq << 24 | (uint32_t)kind << 16 | n;
 }
 
-uint8_t zone_edit_note(uint16_t *n)
+uint8_t zone_edit_note(uint8_t *seen, uint16_t *n)
 {
-	uint8_t k = note_k;
-	if (k != ZONE_NOTE_IDLE) {
-		*n = note_n;
-		note_k = ZONE_NOTE_IDLE;
-	}
-	return k;
+	uint32_t w = note_word;
+	if ((uint8_t)(w >> 24) == *seen)
+		return ZONE_NOTE_IDLE;
+	*seen = (uint8_t)(w >> 24);
+	*n = (uint16_t)w;
+	return (uint8_t)(w >> 16);
 }
 
 /* work is zone 0 as make_room stored it */
@@ -56,7 +57,8 @@ zone_edit_result_t zone_edit_add_join(uint16_t zone, uint16_t pos, uint16_t numb
 		return r;
 	}
 	bool all = load(0) == ZONE_EDIT_OK && all_zone();
-	zone_edit_result_t ra = all ? join(0, ZONE_POS_JOIN, number) : ZONE_EDIT_NO_ZONE;
+	/* Copy here into All channels itself: at its position */
+	zone_edit_result_t ra = all ? join(0, zone == 0 ? pos : ZONE_POS_JOIN, number) : ZONE_EDIT_NO_ZONE;
 	zone_edit_result_t rh = ZONE_EDIT_NO_ZONE;
 	if (ra != ZONE_EDIT_FAILED && zone != ZONE_NONE && !(all && zone == 0)) {
 		rh = load(zone);
