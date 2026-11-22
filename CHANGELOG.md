@@ -14,6 +14,21 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   radio says "ISS tracking" once it holds, or why it can't), Back hides it, none while transmitting. During such a
   track only the "# APRS via ISS" frame is sent; beacons wait for its end. Fixed: Tools > Satellites without a GPS fix showed only "Back" in the hint row
   although OK opens the pass alarm page ("OK alarm  Back").
+- Dual watch / multi-watch transmit fix (owner's beta.7 report: with the FM letter selected PTT went out as P25 on the
+  P25 letter; PTT on a P25 letter did nothing; TALKING stayed on after release; the P25 letter went deaf until a power
+  cycle). PTT now always transmits on the letter Home shows with PTT (the selected one), with its own frequency, mode,
+  power, tones, CC / TS / talk group or NAC / talk group, also while the receiver is on another letter or a P25 call is
+  held there (that letter is let go and the selected one tuned first); a P25 letter transmits as a single P25 channel
+  does; an FM carrier is never keyed on a P25 letter; the TX indicator clears on release, end or refusal; after our
+  over on a P25 letter its reply is waited for 2.5 s without the cooldown.
+- Home shows each channel's own mode settings: a P25 channel "NAC $293/659 TG 42" (RX Any with its TX NAC: "NAC
+  Any>$293/659 TG 1"), YSF DG-ID, NXDN RAN, dPMR colour code on the single channel's chips row; dual watch panes of
+  those modes name the talk group and NAC as DMR panes do (a P25 VFO pane no longer says "VFO FM"); the multi-watch
+  rows add the NAC and TG, DMR colour code / timeslot / talk group, or the FM tones, in the form that fits.
+- The watch is named by its letters: Dual, Triple, Quad, 5x, 6x watch (Çift, Üçlü, Dörtlü, Beşli, Altılı izleme) on
+  the status bar, Quick settings, Tools, the # screen and its toast. In dual / multi-watch the 1750 Hz burst, the
+  emergency hot mic, VOX and SSTV send act on the letter with PTT and never key P25 by themselves; a new letter can't
+  be selected while transmitting; a P25 call of ours is no longer skipped for 8 s when its voice comes late.
 - Satellites: ISS notifications and auto track. The pass alarm page gains "Every pass" (the ISS or any satellite:
   every qualifying pass announced with the beeps and banner before and at AOS, armed again by itself and kept across
   power cycles) and "Auto track" (Off / On / APRS): at AOS, when the radio is idle on Home or the Satellites screen, it

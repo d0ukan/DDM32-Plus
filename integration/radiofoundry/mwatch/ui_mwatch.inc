@@ -29,9 +29,19 @@ static struct {				// what Home's row shows, read when the letter gets its chann
 	uint8_t mode;
 	uint32_t rx_hz;
 	char name[CODEPLUG_NAME_LEN + 1];
+#if UI_DETAIL
+	uint16_t da, db, dc;		// DDM32 Plus: its mode's settings, ui_detail_t's a, b, c (4 bytes a row: padding)
+#endif
 } mw_row[UI_MW_MAX];
 static char mw_msg[32];			// the toasts built here
-static zone_t mw_z;			// the codeplug reads here (static: not on the UI task's stack)
+// The codeplug reads here (static: not on the UI task's stack); a DMR row's talk contact reuses the zone's room
+static union {
+	zone_t z;
+#if UI_DETAIL && CONFIG_DMR
+	contact_t c;
+#endif
+} mw_u;
+#define mw_z mw_u.z
 static channel_t mw_ch;
 
 static void mw_reset(void)
@@ -82,6 +92,22 @@ static bool __attribute__((noinline)) mw_row_read(uint8_t k)
 	}
 	mw_row[k].mode = mw_ch.mode;
 	mw_row[k].rx_hz = mw_ch.rx_hz;
+#if UI_DETAIL
+	ui_detail_t d;
+	ui_detail_of(&mw_ch, &d);
+#if CONFIG_DMR
+	// A DMR channel's talk target (the VFO's is the radio's: CC and TS only)
+	uint16_t talk = r->vfo || mw_ch.mode != RADIO_MODE_DMR ? 0 : codeplug_channel_talk_contact(&mw_ch);
+	if (talk != 0 && codeplug_contact(talk, &mw_u.c)) {
+		d.b = (uint16_t)mw_u.c.id;
+		d.c = (uint16_t)(UI_DETAIL_TALK | (mw_u.c.type == CONTACT_PRIVATE ? UI_DETAIL_PRIVATE : 0u) |
+				 ((mw_u.c.id >> 16) & 0xFFu));
+	}
+#endif
+	mw_row[k].da = d.a;
+	mw_row[k].db = d.b;
+	mw_row[k].dc = d.c;
+#endif
 	return true;
 }
 
@@ -251,6 +277,38 @@ static void mw_toast_letter(const char *before, uint8_t k, const char *after)
 	ui_toast(mw_msg);
 }
 
+// DDM32 Plus (owner 2026-11-22): the watch named by its letters, the ring's when it runs, else the setting's
+static uint8_t mw_letters(void)
+{
+	uint8_t n = mw_cnt > 2 ? mw_cnt : mw_n;
+	return n >= 2 && n <= UI_MW_MAX ? n : 2;
+}
+
+const char *ui_watch_name(uint8_t form)
+{
+	static const char *const names[3][UI_MW_MAX - 1] = {
+		{ TRN("Dual watch"), TRN("Triple watch"), TRN("Quad watch"), TRN("5x watch"), TRN("6x watch") },
+		{ TRN("DUAL"), TRN("TRIPLE"), TRN("QUAD"), TRN("5X"), TRN("6X") },
+		{ TRN(TEXT_ALT_OPEN "Dual watch" TEXT_ALT_NEXT "Dual" TEXT_ALT_CLOSE),
+		  TRN(TEXT_ALT_OPEN "Triple watch" TEXT_ALT_NEXT "Triple" TEXT_ALT_CLOSE),
+		  TRN(TEXT_ALT_OPEN "Quad watch" TEXT_ALT_NEXT "Quad" TEXT_ALT_CLOSE),
+		  TRN(TEXT_ALT_OPEN "5x watch" TEXT_ALT_NEXT "5x" TEXT_ALT_CLOSE),
+		  TRN(TEXT_ALT_OPEN "6x watch" TEXT_ALT_NEXT "6x" TEXT_ALT_CLOSE) },
+	};
+	return tr(names[form < 3 ? form : 0][mw_letters() - 2]);
+}
+
+const char *ui_watch_on_text(void)
+{
+	if (mw_letters() == 2)
+		return TR("Dual watch on");
+	sbuf_t b;
+	sb_init(&b, mw_msg, sizeof mw_msg);
+	sb_str(&b, ui_watch_name(0));
+	sb_str(&b, TR(" on"));
+	return mw_msg;
+}
+
 // PTT and the keys on letter k: A or pane 1's letter as dual watch selects a pane; another letter first takes pane 1's
 // place (pane 1's channel stays its letter's)
 static void __attribute__((noinline)) mw_select(uint8_t k)
@@ -392,6 +450,12 @@ static bool mw_has_p25(void)
 // long ago each letter last heard a call, the Busy marks, the P25 warning. True: redraw
 static bool __attribute__((noinline)) mw_tick(ui_dual_t *d, const radio_view_t *v, uint32_t now)
 {
+	// DDM32 Plus (docs/plus.md "The TX target"): the PTT pill and the radio's selected letter agree. A selection is
+	// refused while transmitting (apply); one the radio dropped anyway (it raced a transmission) is asked again once the
+	// transmission is over, at most once a second, so PTT never goes to a letter the pill isn't on
+	if (v->scan == 3 /* SCAN_DUAL */ && v->state != RS_TX && v->state != RS_TX_DENIED && !v->hotspot &&
+	    v->dual_sel != (mw_ring() ? mw_sel_letter() : d->sel) && now - started_ms >= 1000u)
+		(void)apply(d->sel);
 	if (!mw_ring()) {
 		mw_rx = UI_DUAL_NONE;
 		return false;
@@ -458,9 +522,27 @@ void ui_dual_ring_row(uint8_t k, const radio_view_t *v, ui_mw_row_t *out)
 	out->mode = mw_row[k].mode;
 	out->rx_hz = mw_row[k].rx_hz;
 	out->name = mw_row[k].name;
+#if UI_DETAIL
+	out->detail = (ui_detail_t){ mw_row[k].da, mw_row[k].db, mw_row[k].dc, mw_row[k].mode };
+	// A VFO letter as it is now (its mode, NAC or talk group change without a new channel): read from the radio's copy
+	if (mw_ref[k].vfo && ui_svc_vfo_get((uint8_t)mw_ref[k].pos, &mw_ch)) {
+		out->mode = mw_ch.mode;
+		out->rx_hz = mw_ch.rx_hz;
+		ui_detail_of(&mw_ch, &out->detail);
+	}
+#endif
 	uint8_t pane = mw_pane_of(k);
 	if (pane != UI_DUAL_NONE && d->pane[pane].vfo)
 		out->rx_hz = d->pane[pane].rx_hz;	// the VFO steps: the pane follows it
+#if UI_DETAIL && CONFIG_DMR
+	// A DMR letter in a pane: the talk target PTT uses there now (a target for now, Call back, the VFO's) as dual watch
+	// keeps it (snap), not only the channel's contact
+	if (pane != UI_DUAL_NONE && out->mode == RADIO_MODE_DMR && snap[pane].valid && snap[pane].target_id != 0) {
+		out->detail.b = (uint16_t)snap[pane].target_id;
+		out->detail.c = (uint16_t)(UI_DETAIL_TALK | (snap[pane].target_private ? UI_DETAIL_PRIVATE : 0u) |
+					   ((snap[pane].target_id >> 16) & 0xFFu));
+	}
+#endif
 	out->sel = k == mw_sel_letter();
 	out->rx = k == mw_rx;
 	out->busy = !out->rx && (v->dual_busy & MW_BIT(k)) != 0;

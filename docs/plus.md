@@ -1590,7 +1590,8 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   default. **Radio core** (`radio_mwatch.inc`): dual watch's pair grown to `dual[0..n-1]`; the one receiver steps
   A > B > C ... with the scan's dwell per channel; a signal holds its channel, the wait after it (`Dual watch delay`)
   stays for the reply and looks at the other channels in turn (a signal found marks that row Busy), then the ring
-  goes on from the next one; PTT transmits on the selected channel (tuned first) and the ring goes on after;
+  goes on from the next one; PTT transmits on the selected channel (tuned first) and the ring goes on after (a P25 letter, or the native receiver
+  holding another letter, too since `mwfix`: section "Dual watch and multi-watch: the TX target");
   hotspot mode, a stop, a channel / zone / VFO change act as on dual watch. A P25 (or YSF) channel is listened on
   the FM path like the others while quiet; a signal there is handed to the native P25 receiver as in dual watch
   and zone scan (`native_lab.c` scan hold: the radio core waits while it has the channel) and holds the ring up to
@@ -3668,3 +3669,102 @@ stack, the least free prvIdleTask 136 B as before):
 
 Also fixed on the way: `tests/plus/test_dmrsearch.c` expected the search log's range from an earlier search
 (433.000 MHz); the search running there starts at 432.500 MHz.
+
+## Dual watch and multi-watch: the TX target (branch `mwfix`)
+
+Owner's report on the v1.0.0-beta.7 candidate (f75f319a), triple watch with A DMR 436.275 CC1 TS1 TG1, B P25 145.500
+TG1 RX NAC Any (F7E) TX NAC $293, C FM 433.500 no tone; a DMR radio on A's settings, a P25 radio on B's:
+
+1. P25 on B sometimes not heard (sometimes it is; after power off/on it sometimes works again);
+2. PTT on the P25 letter does not transmit inside dual / multi-watch (it does with the watch off);
+3. sometimes the screen still shows TALKING / TX after PTT is released;
+4. **with C (FM) selected, PTT transmitted P25 on B** (the P25 radio heard it): the wrong channel and mode.
+
+**The TX target rule** (now true in every case): PTT transmits on the letter Home shows with the PTT pill, the
+selected one (`dual_sel`), with that letter's own frequency, power, tones, CC / TS / talk group or NAC / talk group.
+With 2 channels upstream's talk back may move the selection to the pane a call just came in on: the toast "Talk back on
+B" says so and the PTT pill moves with it, so the rule is the same (talk back is off in the ring of 3..6). The receiver
+being on another letter (a quiet stop of the ring, a look in the wait, a call held there) never changes the target: the
+radio first tunes the selected letter, then keys it.
+
+**Root causes** (read from the code, each reproduced in the host model on the real radio state machine and native
+receiver before the fix):
+
+| # | Report | Cause | Fix |
+|---|---|---|---|
+| 1 | 4, 2 | The native P25 owner sees PTT before the radio core (`radio_task.c`: `native_lab_request` first) and decided by the channel **the receiver happened to be on** (`sm->view.ch`), not the selected one. Ring on (or a call held on) B with C selected: it kept PTT and keyed P25 on B with B's NAC (report 4); ring on B quiet with C selected: PTT swallowed, nothing keyed. The radio core's own rule (`dual_talk`: tune the selected letter first) never ran | `native_lab.c`: PTT in dual watch / the ring asks the radio core first (`radio_sm_dual_away`, `tools/plus_mwfix.py`); the receiver on another letter: the native receiver lets that letter go (the request waits, `NATIVE_REQUEST_WAIT`), the radio core tunes the selected one (`dual_talk`), then a P25 / YSF letter is keyed by the native transmitter, an FM / DMR one by the radio core. A selected letter that can't be read ends the watch and refuses the PTT (never the letter underneath) |
+| 2 | 2 | B selected, the ring on A or C: the radio core tuned B (a P25 channel) and keyed it as **FM** (an analog carrier on 145.500 the P25 radio ignores); its release went to the native owner (the view was P25 now), so the radio core never unkeyed it (`tx_off`) until the ring's next retune | 1 above sends it to the native transmitter; besides, `ptt_down` refuses (TXDENY_MODE) instead of keying FM on a P25 / YSF letter whatever reaches it (`tools/plus_mwfix.py`) |
+| 3 | 2 | B selected, the ring on B but on a quiet stop (not holding a signal): the native receiver may take a ring letter only while the ring holds a signal there (`scan_allows`), so PTT took nothing and keyed nothing; a take that came later started receive only (`live_tx_pending` cleared) | `scan_allows`: PTT on the selected letter takes it whatever the ring does there (a quiet stop, the settle after a give back, a cooldown); a take while PTT is held keys at once |
+| 4 | 3, 1 | The native receiver shows its own state in the view (`channel_view`: TX while its transmission arms, runs or drains). When it gave a ring letter back in the poll right after its transmission ended (the call's voice ended over 1.5 s before: a reply longer than that), no `channel_view` ran in between (the session's cleanup returns early), so **TX stayed in the view**: Home showed TALKING after release, the radio core took it for its own transmission, so the ring stood still (`scan_talked` every poll), the retune after the give back waited for the end of that TX, and nothing was heard on any letter, B included, until the time-out (3 min by default; never with the time-out off) or a power cycle. The same with TX denied | `native_lab.c` `native_view_clear`: a TX / TX denied / RX the native receiver showed is cleared whenever it hands the channel back (`restore_channel`, `channel_let_go`) |
+| 5 | (1) | A take of the ring made for PTT and no reply afterwards would have been given back as a foreign carrier, with the 8 s cooldown (fast ring: 2 s, 8 s when it repeats): the reply to our over unheard | a take that transmitted waits 2.5 s after the release for the reply, then goes back to the ring without a cooldown (`scan_after_tx`) |
+| 6 | 3 | A P25 transmission the native worker refused while PTT was held showed nothing (idle) | shown as TX denied (Busy) until release |
+
+Not changed: the ring's order, dwell, hold, wait and looks, Busy, the P25 hand-over to the native receiver on a
+signal and its give back by the zone scan's rules, talk back with 2 channels, the native P25 transmitter itself, the
+TX checks (`radio_sm_tx_check`, the P25 TX bands). One receiver: a call on one letter is missed while the receiver is
+on another (the ring's limit, above).
+
+**Host tests** (`tests/plus/test_mwatch_radio.inc`, run without and with the faster ring by `tools/test_classic.py`
+and `tools/test_scan.py`, and inside the VFO-modes, priority-channel and air watch suites): each PTT goes the way the
+radio task sends it (`classic_dispatch`: the native owner first, its wait kept). The owner's exact A DMR / B P25 / C FM
+(PTT on each letter with the receiver parked on each letter, and on B held by a P25 call: the reply right after the
+other station's over); 2..6 letters in two mixed patterns (`DPFPDF`, `FDPDFP`), every letter selected, the receiver on
+every letter and held by a call on every P25 letter: 227 PTT cases per build. Each checks the letter keyed (FM / DMR
+through the board, P25 through the native transmitter), its frequency, mode, power, FM tone or P25 NAC (RX Any, TX
+$293) and talk group, the ring holding 2 s while PTT is down, then on release: the indicator cleared, the native
+receiver let go, the ring going on, the board retuned, and a new P25 call heard again. An RX-only FM and P25 letter
+refused and cleared; a TX / TX denied left in the view at the give back cleared (report 3's order played by hand: the
+fixture's worker lets go inside its own pump). With the code before the fix the same tests fail thousands of checks (the
+owner's setup: PTT on A or C from B and on B from anywhere keyed the wrong letter or nothing; the stale TX froze the
+ring and B was not heard again).
+
+Not host-tested: YSF / NXDN / dPMR letters (YSF has no transmitter in this build: refused as on a channel; NXDN /
+dPMR receive only), VFO letters (they go through the same `dual_here` / `dual_talk`), the real worker's timing.
+Radio rows MW9-MW16 in [plus-radio-test.md](plus-radio-test.md).
+
+
+**Home's details** (part 2 of the same job; with VFO_MODES and NAC_DEC, i.e. every Plus build: `UI_DETAIL`,
+`integration/radiofoundry/mwatch/ui_detail.inc`, `tools/plus_mwfix.py`): each channel row says its mode's own
+settings, the first form that fits the 240 px row (the simulator's layout checks, English and Turkish, normal and
+Large text):
+
+| Where | Before | Now |
+|---|---|---|
+| Single channel, the chips row of a P25 / YSF / NXDN / dPMR channel | FM's "No tone 12.5k High SQ3" | `NAC $293/659 TG 42` (the owner's B: `NAC Any>$293/659 TG 1`), `DG-ID 12`, `RAN 5`, `CC 7`, then the power and squelch where they fit; tight `NAC$293/659 TG42`. FM (tones) and DMR (CC, TS, talk group) rows had theirs already; the VFO has them on its own row (round 15) |
+| Dual watch panes (2 letters), a P25 / YSF / NXDN / dPMR pane | row 2 the frequency, row 3 "No tone 12.5k"; a P25 VFO pane said "VFO FM" | P25 as a DMR pane: row 2 what PTT talks to (`TG 42`), row 3 the frequency and the NAC (`145.5000 MHz  NAC Any>$293/659`); YSF / NXDN / dPMR (receive only) the frequency on row 2 and `DG-ID 12`, `RAN 5`, `CC 7` on row 3 |
+| Multi-watch rows (3..6), line 2 | `P25 145.5000` | `P25 145.5000 NAC Any>$293/659 TG 1`, tight `...NACAny>$293/659 TG1`; then the frequency and the tight details (`467.375 CC1 TS1 TG3100`), the mode and the tight details (the selected row, beside its PTT pill: `DMR CC1 TS1 TG3100`), the tight details alone, last the mode and frequency as before. FM `T88.5 R100.0` / `T88.5` / `No tone`; DMR `CC1 TS1 TG 91` (Any `CC* TS*`, a private talk target `ID 1234`); YSF `DG-ID 12`, NXDN `RAN 5`, dPMR `CC 7`. A VFO letter's row follows its VFO as it is now (before, the mode it had when it became a VFO) |
+| Large text | | unchanged: one line per letter / pane, the name only |
+
+Not done (no room on the row or in RAM): NXDN's group (the channel keeps the RAN only), dPMR's own ID (the radio's),
+the DMR talk group of a VFO letter (the radio core's, not in the VFO copy: CC and TS only). RAM: 4 B per ring row
+(the three packed values in the row's padding and 4 more) and the row the drawing fills: +32 B static. Host tests:
+`tests/plus/test_ui_mwdetail.c` (the formatter for every mode and form; Home with 4 and 6 letters, a P25 VFO letter,
+dual watch with a P25 VFO pane; English and Turkish, normal and Large text, the layout checks), `test_ui_vfox.c` and
+`test_ui_mwatch.c` unchanged; the single channel's chips row is covered by the formatter only (the simulator has no
+P25 channel to put on Home). Radio rows HD1-HD4.
+
+**Review round** (an independent check of the two commits above found these; fixed on the same branch):
+
+| # | Found | Fix |
+|---|---|---|
+| B1 | **A refused PTT became an unstoppable P25 transmission**: the radio core keys by itself (the 1750 Hz burst, the DMR emergency hot mic, VOX, cross-band: `ptt_down`) and on a P25 letter refuses it (TXDENY_MODE) but sets `sm->ptt`; the native side took `sm->ptt` as its PTT (`scan_allows`, the take's `live_tx_pending`), keyed P25 on the selected letter and, the release never reaching it, held it until the time-out (never with the time-out off) | `native_lab.c` `native_ptt`: set and cleared only by its own PTT branch; only it lets the native receiver take a letter for PTT, arms a transmission or passes `eligible`; a native transmission ends as soon as `native_ptt` or `sm->ptt` goes; while the radio core holds PTT itself the native side leaves the view (its TX denied) alone |
+| S1 | The PTT pill and the radio's selected letter could disagree: during TX the radio drops a selection (RREQ_DUAL / RREQ_MWATCH) but the UI moved the pill anyway (the keys, talk back) | `apply()` refuses a new selection while TX / TX denied ("Not while transmitting", the pill stays); `mw_tick` asks the radio again for the pill's letter after a transmission if they still differ (once a second at most); talk back waits through TX denied too |
+| S2 | The 1750 Hz burst checked the mode of the letter the ring was on, then `dual_talk` keyed the selected one: 1750 Hz on a DMR (or P25) carrier | `tone_burst` tunes the selected letter first (`dual_to_selected`), then checks it is FM |
+| S2b | SSTV send keyed the letter the ring was on; DOTA and cross-band ended the watch there; DOTA's "Current channel" frequency was the ring's letter | SSTV tunes the selected letter first; DOTA and cross-band end the watch on the selected letter; DOTA's "Current channel" source has no frequency while a watch runs (another source must be picked) |
+| S3 | Listening only: P25 frames without voice for us within 2.5 s (a late entry still waiting for its link control) were given back with the **8 s** cooldown, so most of a call of ours could be skipped | frames without voice: taken again after 2 s (the zone scan's retry); the whole cooldown only when it happens again within 10 s (another talk group's conversation). Host model, ring of 3 / 6, the call starting while the receiver is elsewhere: late entry heard after 250 / 450 ms; frames 1.5 s before voice: 1.5 s; frames 3 s without voice then voice: 4.8 / 5.0 s (before: over 10 s, failing) |
+| M2 | A DMR row showed only the channel's contact; YSF / NXDN / dPMR values were shown as talk targets although this build can't transmit them | a DMR letter in a pane shows the talk target PTT uses there now (a target for now, Call back: dual watch's snapshot); YSF DG-ID, NXDN RAN, dPMR CC are shown as what the channel receives (pane row 3, not row 2's "PTT talks to") |
+| M3 | With 2 letters, talk back moves the PTT pill and now P25 really goes out there | a short beep with the "Talk back on B" toast (the pill moves with it); the setting's default unchanged (off), the owner decides |
+
+**Named by its letters** (owner 2026-11-22): the watch is Dual / Triple / Quad / 5x / 6x watch (Turkish Çift / Üçlü / Dörtlü / Beşli / Altılı izleme) by the ring's letters (else Settings > Watch channels): the status strip's word (DUAL, TRIPLE, QUAD, 5X, 6X; ÇİFT, ÜÇLÜ, DÖRTLÜ, BEŞLİ, ALTILI, where it fits), Quick settings tile 7 ("Quad watch" / "Quad"), Tools' row, the # screen's title, the toast when it starts ("Quad watch on" / "Dörtlü izleme açık"); its end says "Watch off: on C" as before. The settings rows keep their names ("Dual watch delay" and "talk back", "Watch channels", the key function "Dual/multi-watch"). The Turkish "Dual watch" entries are now "Çift izleme".
+
+Host tests added: the burst and the hot mic from every letter of the owner's A / B / C and every ring position, and with a P25 call holding B, the time-out off (no native transmission, the burst only on an FM letter, nothing left on the air; the hot-mic cases fail with the code before); a selection asked during TX (radio side), the UI's refusal and the pill moving after it (`test_ui_mwdetail.c`); RS_RX left at the give back; the listen-only cases above (the 3 s case fails with the 8 s cooldown); the zone scan's frames-without-voice rule (`tests/classic/test_scan.inc`: 2 s, then 8 s); the names (EN toasts and strip words; the layout checks in EN and TR, normal and Large text).
+
+Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
+radio task 728 B free (720 after the review round), UI 184 B: the radio task's deepest path is still the P25 search's give back):
+
+| | FLASH B | RAM B (free) |
+|---|---:|---:|
+| `ddm25` dc6376d | 857,584 | 209,856 (1,600) |
+| the TX target fix | 858,176 (+592) | 209,856 (1,600; the one new flag sits in padding) |
+| Home's details | 859,524 (+1,348) | 209,888 (1,568; +32 B, the 1,500 B floor kept) |
+| review round and the names | 860,584 (+1,060) | 209,904 (1,552; +16 B: the # screen's title) |

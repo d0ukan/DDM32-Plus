@@ -871,6 +871,16 @@ def main():
          '-DCONFIG_NAC_DEC=1','-DCONFIG_DMR_ANY=1','-DCONFIG_MULTI_WATCH=1','-DCONFIG_VFO_MODES=1','-DCONFIG_P25_NATIVE=1',
          str(APP/'core/dpmr/dpmr.c'),str(APP/'core/radio/vfox.c')],cwd=host)
     run([OUT/'test_ui_vfox'],cwd=host)
+    # DDM32 Plus Home details (tests/plus/test_ui_mwdetail.c, tools/plus_mwfix.py): the formatter for every mode, the
+    # multi-watch rows and dual watch's panes in English and Turkish, normal and Large text, with the layout checks
+    run(['make','out/gen/lang_tables.h'],cwd=host,stdout=subprocess.DEVNULL)
+    argv_md=[str(ROOT/'tests/plus/test_ui_mwdetail.c') if a==str(ROOT/'tests/plus/test_ui_vfox.c') else a for a in argv]
+    argv_md[argv_md.index('-o')+1]=str(OUT/'test_ui_mwdetail')
+    run([*argv_md,'-DCONFIG_P25_ANY=1','-DCONFIG_DEV_TX=1','-DCONFIG_YSF=1','-DCONFIG_NXDN=1','-DCONFIG_DPMR=1',
+         '-DCONFIG_NAC_DEC=1','-DCONFIG_DMR_ANY=1','-DCONFIG_MULTI_WATCH=1','-DCONFIG_VFO_MODES=1','-DCONFIG_P25_NATIVE=1',
+         '-DCONFIG_P25_TXNAC=1','-DCONFIG_LANG_TR=1','-I'+str(host),
+         str(APP/'core/dpmr/dpmr.c'),str(APP/'core/radio/vfox.c')],cwd=host)
+    run([OUT/'test_ui_mwdetail'],cwd=host)
     # DM32 Plus separate RX / TX NAC: the editor's and VFO settings' rows (tests/plus/test_ui_p25nac.c)
     p25nac.ui(argv,ROOT/'tests/plus/test_ui_vfox.c',['-DCONFIG_P25_ANY=1','-DCONFIG_DEV_TX=1','-DCONFIG_YSF=1',
         '-DCONFIG_NXDN=1','-DCONFIG_DPMR=1','-DCONFIG_NAC_DEC=1','-DCONFIG_DMR_ANY=1','-DCONFIG_MULTI_WATCH=1',

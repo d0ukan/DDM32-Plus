@@ -371,6 +371,459 @@ static void test_mwatch_catch(void)
 #endif
 }
 
+/* ---- DDM32 Plus TX target fix (docs/plus.md "Multi-watch", "The TX target"; tools/plus_mwfix.py, native_lab.c) ----
+ * The owner's report on v1.0.0-beta.7 (A DMR, B P25 NAC Any / TX $293, C FM): PTT on C keyed P25 on B; PTT on the P25
+ * letter did nothing; TALKING stayed on after release; the P25 letter went deaf. Here every PTT goes the way the radio
+ * task sends it (tests/classic/test_radio.inc classic_dispatch: native_lab_request first, its NATIVE_REQUEST_WAIT kept),
+ * for 2..6 letters of mixed modes, each letter selected, the receiver parked on each letter or held on a P25 letter by a
+ * call the native receiver has (the reply right after the other station's over). Checked: the letter keyed is the
+ * selected one, with its frequency, mode, power and tone / NAC; the ring holds while PTT is down; on release the
+ * indicator clears, the native receiver lets go, the ring goes on; then a new P25 call on a P25 letter is heard again
+ * (no cooldown after our over). */
+#define MWX_CHECK(c) do { checks++; if (!(c)) { failures++; printf("FAIL %s:%d: %s [%s]\n", __FILE__, __LINE__, #c, mwx_tag); } } while (0)
+static char mwx_tag[64];
+static uint32_t mwx_voice_hz;	/* a P25 call with voice for us on this frequency (0: none) */
+static bool mwx_frames_only;	/* ... its frames only so far (a late entry before its link control, another TG) */
+
+/* Zone 0's six channels in the modes given ('F' FM with a TX tone of its own, 'D' DMR CC 1 TS 1, 'P' P25 RX NAC Any,
+ * TX NAC $293 (inherited), TG 42), each its own power; owner: A, B, C on the owner's frequencies */
+static void mwx_codeplug(const char *modes, bool owner)
+{
+    static const uint32_t own[3] = { 436275000u, 145500000u, 433500000u };
+    mw_codeplug(RADIO_MODE_FM, -1);
+    for (int i = 0; i < 6; i++) {
+        channel_t *c = &chans[zones[0].channels[i]];
+        if (owner && i < 3)
+            c->rx_hz = c->tx_hz = own[i];
+        mw_hz[i] = c->rx_hz;
+        c->power = (uint8_t)(i % 3);
+        c->contact = 1;
+        c->listen_list = 0;
+        if (modes[i] == 'F') {
+            c->tx_tone = (subtone_t){ TONE_CTCSS, (uint16_t)(885 + 10 * i) };
+        } else if (modes[i] == 'D') {
+            c->mode = RADIO_MODE_DMR;
+        } else {
+            c->mode = RADIO_MODE_P25;
+            c->bw = RADIO_BW_12K5;
+            c->p25_nac = 0xF7E;
+            c->p25_tg = 42;
+            c->p25_id = 3101234;
+        }
+    }
+}
+
+/* One pass of the radio task, a signal on mw_busy_hz, the P25 call's frames and voice while the native receiver is on it */
+static void mwx_dispatch(void)
+{
+    signal(mw_busy_hz != 0 && hw.rx_hz == mw_busy_hz ? 0 : 120, true);
+    bool rx = mwx_voice_hz != 0 && classic_busy && classic_live != NULL && classic_live->config.mode != NT_TRANSMIT &&
+              classic_live->config.frequency_hz == mwx_voice_hz;
+    classic_receiving = rx;
+    if (rx) {
+        zs_sync_ms = now;
+        if (!mwx_frames_only)
+            scan_voice_ms = now;
+    }
+    classic_dispatch();
+}
+
+/* A request as the radio task takes it, kept while the native owner asks it to wait */
+static void mwx_send(uint8_t type, int32_t arg)
+{
+    classic_request = (radio_req_t){ type, arg, 0 };
+    classic_retained = true;
+    for (int i = 0; i < 80 && classic_retained; i++)
+        mwx_dispatch();
+    MWX_CHECK(!classic_retained);
+}
+
+/* What is on the air: 'F' / 'D' through the board (the radio core), 'P' the native P25 transmitter, 0 nothing */
+static char mwx_keyed(int tx0, uint32_t *hz, uint8_t *power)
+{
+    if (sm.view.state != RS_TX)
+        return 0;
+    if (hw.tx_calls > tx0) {
+        *hz = hw.tx_hz;
+        *power = hw.tx_power;
+        return sm.view.ch.mode == RADIO_MODE_DMR ? 'D' : codeplug_mode_p25(sm.view.ch.mode) ? 'X' : 'F';
+    }
+    if (classic_live != NULL && classic_live->config.mode == NT_TRANSMIT && native_lab_owns()) {
+        *hz = classic_live->config.frequency_hz;
+        *power = classic_live->config.power;
+        return 'P';
+    }
+    return 0;
+}
+
+/* The native receiver hears a P25 call on letter i within ms */
+static bool mwx_heard(uint8_t i, uint32_t ms)
+{
+    mw_busy_hz = mwx_voice_hz = mw_hz[i];
+    bool heard = false;
+    for (uint32_t t = 0; t < ms && !heard; t += RADIO_POLL_MS) {
+        mwx_dispatch();
+        heard = native_lab_owns() && sm.dual_at == i && classic_receiving;
+    }
+    return heard;
+}
+
+/* One PTT (see above). Returns the mode keyed */
+static char mwx_ptt_case(const char *modes, uint8_t n, uint8_t sel, uint8_t at, bool call, bool owner)
+{
+    snprintf(mwx_tag, sizeof mwx_tag, "%.*s%s n=%u sel %c at %c%s", (int)n, modes, owner ? " owner" : "", n, 'A' + sel,
+             'A' + at, call ? " held by a call" : "");
+    mwx_codeplug(modes, owner);
+    mw_start_radio();
+    codec_present = true;
+    classic_retained = false;
+    mw_busy_hz = mwx_voice_hz = 0;
+    MWX_CHECK(mw_watch(n, sel));
+    if (call) {
+        /* The other station's over on letter `at`, heard; it ends, the native receiver still holds the letter */
+        MWX_CHECK(mwx_heard(at, 4000));
+        mw_busy_hz = mwx_voice_hz = 0;
+        for (int i = 0; i < 10; i++)
+            mwx_dispatch();
+        MWX_CHECK(native_lab_owns() && sm.dual_at == at);
+    } else {
+        MWX_CHECK(mw_until_at(at, 3000));
+    }
+    int tx0 = hw.tx_calls;
+    unsigned dmr0 = sim.tx_begins;
+    uint32_t hz = 0;
+    uint8_t power = 0;
+    char keyed = 0;
+    mwx_send(RREQ_PTT, 1);
+    for (int i = 0; i < 8 && !keyed; i++) {
+        keyed = mwx_keyed(tx0, &hz, &power);
+        if (!keyed)
+            mwx_dispatch();
+    }
+    char want = modes[sel];
+    MWX_CHECK(keyed == want && hz == mw_hz[sel] && power == sel % 3 && sm.dual_at == sel);
+    if (keyed == 'F')
+        MWX_CHECK(hw.tx_tone.type == TONE_CTCSS && hw.tx_tone.value == 885 + 10 * sel);
+    if (keyed == 'D')
+        MWX_CHECK(sim.tx_begins == dmr0 + 1);
+    if (keyed == 'P')
+        MWX_CHECK(classic_set_nac == 0xF7E && classic_set_tx_nac == 0x293 && classic_set_tg == 42 && hw.tx_calls == tx0);
+    /* Held 2 s (longer than the 1.5 s a call's take is kept after its voice: the give back is due at the release, the
+     * case that left TALKING on): the ring stays on the letter, still on the air */
+    for (int i = 0; i < 80; i++) {
+        mwx_dispatch();
+        MWX_CHECK(sm.dual_at == sel && sm.view.state == RS_TX);
+    }
+    /* Released: the indicator clears, the native receiver lets go, the ring goes on, the board on its letter */
+    mwx_send(RREQ_PTT, 0);
+    if (keyed == 'D')
+        run(1000);
+    bool moved = false;
+    for (int i = 0; i < 320; i++) {
+        mwx_dispatch();
+        moved = moved || sm.dual_at != sel;
+    }
+    MWX_CHECK(!sm.ptt && sm.view.state != RS_TX && sm.view.state != RS_TX_DENIED && !native_lab_owns());
+    MWX_CHECK(moved && sm.scan.kind == SCAN_DUAL && sm.dual_n == n && sm.dual_sel == sel);
+    MWX_CHECK(hw.rx_hz == mw_hz[sm.dual_at]);
+    /* A new P25 call on a P25 letter (the reply to our over among them): heard within a round and the probe */
+    for (uint8_t p = 0; p < n; p++) {
+        if (modes[p] == 'P') {
+            MWX_CHECK(mwx_heard(p, 4000));
+            mw_busy_hz = mwx_voice_hz = 0;
+            for (int i = 0; i < 160 && native_lab_owns(); i++)
+                mwx_dispatch();
+            break;
+        }
+    }
+    mw_busy_hz = mwx_voice_hz = 0;
+    return keyed;
+}
+
+static void test_mwatch_tx_target(void)
+{
+    static const char *const pattern[2] = { "DPFPDF", "FDPDFP" };
+    int before = failures;
+    /* The owner's exact setup: A DMR 436.275, B P25 145.500 (NAC Any, TX $293), C FM 433.500 */
+    for (uint8_t sel = 0; sel < 3; sel++) {
+        for (uint8_t at = 0; at < 3; at++)
+            mwx_ptt_case("DPFFFF", 3, sel, at, false, true);
+        mwx_ptt_case("DPFFFF", 3, sel, 1, true, true);
+    }
+    printf("Plus multi-watch TX target: the owner's A DMR / B P25 / C FM, PTT on each letter from each: %d failures\n",
+           failures - before);
+    for (int p = 0; p < 2; p++) {
+        for (uint8_t n = 2; n <= 6; n++) {
+            int cases = 0;
+            before = failures;
+            for (uint8_t sel = 0; sel < n; sel++) {
+                for (uint8_t at = 0; at < n; at++) {
+                    mwx_ptt_case(pattern[p], n, sel, at, false, false);
+                    cases++;
+                    if (p == 0 && pattern[p][at] == 'P') {
+                        mwx_ptt_case(pattern[p], n, sel, at, true, false);
+                        cases++;
+                    }
+                }
+            }
+            printf("Plus multi-watch TX target: %.*s, %d PTT cases: %d failures\n", (int)n, pattern[p], cases,
+                   failures - before);
+        }
+    }
+}
+
+/* A letter that can't transmit (RX only: FM and P25), selected while the ring is on another: refused (TX denied, nothing
+ * keyed on any letter), cleared on release, the ring goes on */
+static void test_mwatch_tx_refused(void)
+{
+    int before = failures;
+    for (int k = 0; k < 2; k++) {
+        uint8_t sel = k == 0 ? 2 : 1;	/* C FM, B P25 */
+        snprintf(mwx_tag, sizeof mwx_tag, "refused, sel %c", 'A' + sel);
+        mwx_codeplug("DPFFFF", true);
+        chans[zones[0].channels[sel]].rx_only = true;
+        mw_start_radio();
+        codec_present = true;
+        classic_retained = false;
+        mw_busy_hz = mwx_voice_hz = 0;
+        MWX_CHECK(mw_watch(3, sel));
+        MWX_CHECK(mw_until_at(0, 3000));
+        int tx0 = hw.tx_calls;
+        mwx_send(RREQ_PTT, 1);
+        for (int i = 0; i < 8; i++)
+            mwx_dispatch();
+        MWX_CHECK(sm.view.state == RS_TX_DENIED && sm.view.tx_deny == TXDENY_RX_ONLY && hw.tx_calls == tx0);
+        MWX_CHECK(!(classic_live != NULL && classic_live->config.mode == NT_TRANSMIT && classic_busy));
+        mwx_send(RREQ_PTT, 0);
+        bool moved = false;
+        for (int i = 0; i < 320; i++) {
+            mwx_dispatch();
+            moved = moved || sm.dual_at != sel;
+        }
+        MWX_CHECK(sm.view.state != RS_TX_DENIED && sm.view.state != RS_TX && moved && !native_lab_owns());
+    }
+    printf("Plus multi-watch TX target: an RX only letter refused and cleared: %d failures\n", failures - before);
+}
+
+/* Report 3 (TALKING after release) and 1 (the ring deaf until a power cycle): the native receiver gives a letter back
+ * in the poll right after its transmission ended. On the radio the worker ends a transmission as DRAIN (shown as TX by
+ * channel_view), the radio task's next service moves it to STOPPED and returns early (nt_cleanup, live_enabled), the
+ * worker lets go, and the service after that gives the letter back (its call's voice ended 1.5 s before): no
+ * channel_view ran in between, so the TX stayed in the view. The fixture's worker lets go inside its own pump, so the
+ * order is played by hand here: the letter's take let go, the view as the drain left it, then the give back. Checked:
+ * the TX is cleared, the ring goes on, the board is retuned, a new call is heard (before: TALKING until the time-out,
+ * the ring stood still on scan_talked, the retune waited for the end of that TX) */
+static void test_mwatch_tx_stale(void)
+{
+    int before = failures;
+    static const radio_state_t shown[3] = { RS_TX, RS_TX_DENIED, RS_RX };
+    for (int k = 0; k < 3; k++) {
+        snprintf(mwx_tag, sizeof mwx_tag, "native %s left at the give back", k == 2 ? "RX" : k ? "TX denied" : "TX");
+        mwx_codeplug("DPFFFF", true);
+        mw_start_radio();
+        codec_present = true;
+        classic_retained = false;
+        MWX_CHECK(mw_watch(3, 1));
+        MWX_CHECK(mwx_heard(1, 4000));	/* the other station's over on B, heard; then our reply (not modelled) */
+        mw_busy_hz = mwx_voice_hz = 0;
+        classic_receiving = false;
+        now += 2000;			/* the give back is due: the over's voice ended over 1.5 s ago */
+        native_lab_voice_stop(classic_sid);	/* the worker ends its session */
+        native_lab_service(&sm, now);	/* the give back starts, the session's cleanup returns early */
+        MWX_CHECK(native_lab_voice_release(classic_sid));
+        classic_busy = classic_stop = false;
+        sm.view.state = shown[k];	/* as the last channel_view showed the drain */
+        bool moved = false;
+        for (int i = 0; i < 200; i++) {
+            mwx_dispatch();
+            moved = moved || sm.dual_at != 1;
+        }
+        MWX_CHECK(sm.view.state != RS_TX && sm.view.state != RS_TX_DENIED && !native_lab_owns() && moved);
+        MWX_CHECK(sm.view.state == RS_IDLE);
+        MWX_CHECK(hw.rx_hz == mw_hz[sm.dual_at]);
+        MWX_CHECK(mwx_heard(1, 4000));
+        mw_busy_hz = mwx_voice_hz = 0;
+    }
+    printf("Plus multi-watch TX target: a TX left in the view by the native receiver's give back cleared: %d failures\n",
+           failures - before);
+}
+
+
+/* The verifier's B1 / S2: the radio core keys by itself (the 1750 Hz burst, the emergency hot mic; VOX and cross-band
+ * go the same way, ptt_down) with each letter of the owner's A DMR / B P25 / C FM selected and the receiver on each
+ * letter, the time-out off. Never a native P25 transmission (before: a burst with B selected keyed P25 on B and held it
+ * until the time-out, never with it off); the burst only on an FM selected letter (before: 1750 Hz on a DMR carrier);
+ * when it ends nothing stays on the air, no TX / TX denied left. Also with a P25 call holding B */
+static bool mwx_native_tx(void)
+{
+    return classic_live != NULL && classic_live->config.mode == NT_TRANSMIT && classic_busy;
+}
+
+static void mwx_core_step(bool ticks)
+{
+    mwx_dispatch();
+    if (ticks) {
+        sim_slot();
+        radio_sm_tick(&sm, now);
+    }
+}
+
+static void mwx_core_key_case(uint8_t sel, uint8_t at, bool hot_mic, bool held)
+{
+    snprintf(mwx_tag, sizeof mwx_tag, "%s, sel %c, ring at %c%s", hot_mic ? "hot mic" : "1750 burst", 'A' + sel, 'A' + at,
+             held ? " held by a P25 call" : "");
+    static const char modes[] = "DPFFFF";
+    mwx_codeplug(modes, true);
+    mw_start_radio();
+    codec_present = true;
+    classic_retained = false;
+    mw_busy_hz = mwx_voice_hz = 0;
+    mwx_frames_only = false;
+    MWX_CHECK(mw_watch(3, sel));
+    sm.view.tot_s = 0;
+    if (held) {
+        MWX_CHECK(mwx_heard(at, 4000));
+        mw_busy_hz = mwx_voice_hz = 0;
+        for (int i = 0; i < 10; i++)
+            mwx_dispatch();
+    } else {
+        MWX_CHECK(mw_until_at(at, 3000));
+    }
+    int tx0 = hw.tx_calls;
+    tone.hz = 0;
+    if (hot_mic) {
+        dmr_emergency_settings_t es;
+        dmr_emergency_settings_default(&es);
+        es.mode = DMR_EMERGENCY_MODE_CALL;
+        es.hot_mic_s = 1;
+        dmr_emergency_set_settings(&es);
+        dmr_emergency_start();
+    } else {
+        mwx_send(RREQ_TONE_BURST, 1);
+    }
+    int p25 = 0;
+    bool wrong = false;
+    for (int i = 0; i < 40; i++) {
+        mwx_core_step(hot_mic);
+        p25 += mwx_native_tx();
+        if (sm.view.state == RS_TX && hw.tx_calls > tx0 && hw.tx_hz != mw_hz[sel])
+            wrong = true;	/* keyed another letter */
+        if (tone.hz != 0 && (modes[sel] != 'F' || sm.view.ch.mode != RADIO_MODE_FM))
+            wrong = true;	/* the burst on a DMR / P25 carrier */
+    }
+    MWX_CHECK(p25 == 0 && !wrong);
+    if (!hot_mic && modes[sel] == 'F')
+        MWX_CHECK(tone.hz == RADIO_BURST_HZ && sm.view.state == RS_TX && hw.tx_hz == mw_hz[sel]);
+    if (!hot_mic && modes[sel] != 'F')
+        MWX_CHECK(sm.view.state != RS_TX && hw.tx_calls == tx0);	/* not an FM letter: no burst, nothing keyed */
+    if (hot_mic) {
+        for (int i = 0; i < 80; i++)	/* the 1 s hot mic runs out */
+            mwx_core_step(true);
+        dmr_emergency_cancel();
+    } else {
+        mwx_send(RREQ_TONE_BURST, 0);
+    }
+    for (int i = 0; i < 200; i++) {
+        mwx_core_step(true);
+        p25 += mwx_native_tx();
+    }
+    MWX_CHECK(p25 == 0 && !mwx_native_tx() && sm.view.state != RS_TX && sm.view.state != RS_TX_DENIED && !sm.ptt);
+}
+
+static void test_mwatch_core_keying(void)
+{
+    int before = failures;
+    for (uint8_t sel = 0; sel < 3; sel++) {
+        for (uint8_t at = 0; at < 3; at++) {
+            mwx_core_key_case(sel, at, false, false);
+            mwx_core_key_case(sel, at, true, false);
+        }
+        mwx_core_key_case(sel, 1, false, true);
+        mwx_core_key_case(sel, 1, true, true);
+    }
+    printf("Plus multi-watch TX target: the 1750 burst and the emergency hot mic from each letter, TOT off: %d failures\n",
+           failures - before);
+}
+
+/* S1: a selection asked while transmitting is dropped by the radio (RREQ_MWATCH while TX); the UI refuses it then
+ * (tests/plus/test_ui_mwdetail.c). Here: the radio keeps transmitting on B and keeps B selected */
+static void test_mwatch_sel_during_tx(void)
+{
+    int before = failures;
+    snprintf(mwx_tag, sizeof mwx_tag, "selection asked during TX");
+    mwx_codeplug("DPFFFF", true);
+    mw_start_radio();
+    codec_present = true;
+    classic_retained = false;
+    mw_busy_hz = mwx_voice_hz = 0;
+    MWX_CHECK(mw_watch(3, 1));
+    MWX_CHECK(mw_until_at(0, 3000));
+    mwx_send(RREQ_PTT, 1);
+    for (int i = 0; i < 20; i++)
+        mwx_dispatch();
+    radio_dual_ref_t r[RADIO_DUAL_SLOTS];
+    for (uint8_t i = 0; i < 3; i++)
+        r[i] = (radio_dual_ref_t){ false, 0, i };
+    memcpy(mw_req_ref, r, 3 * sizeof r[0]);
+    mw_req_n = 3;
+    mw_req_sel = 2;
+    mwx_send(RREQ_MWATCH, 0);
+    for (int i = 0; i < 20; i++)
+        mwx_dispatch();
+    MWX_CHECK(sm.dual_sel == 1 && sm.view.state == RS_TX);
+    mwx_send(RREQ_PTT, 0);
+    for (int i = 0; i < 200; i++)
+        mwx_dispatch();
+    MWX_CHECK(sm.dual_sel == 1 && !mwx_native_tx() && sm.view.state != RS_TX);
+    printf("Plus multi-watch TX target: a selection during TX is not taken (the UI refuses it): %d failures\n",
+           failures - before);
+}
+
+/* S3, listening only (the owner's B: RX NAC Any, TG 1): a call already running when the ring comes to B (late entry);
+ * frames for 1.5 s before voice (its link control late); frames without voice for 3 s, then voice (before: the 8 s
+ * cooldown skipped most of the call); in a ring of 3 and 6 */
+static void mwx_listen_case(uint8_t n, uint32_t frames_ms, const char *what)
+{
+    snprintf(mwx_tag, sizeof mwx_tag, "listen n=%u: %s", n, what);
+    mwx_codeplug("DPFDFF", true);
+    mw_start_radio();
+    classic_retained = false;
+    mw_busy_hz = mwx_voice_hz = 0;
+    MWX_CHECK(mw_watch(n, 0));
+    MWX_CHECK(mw_until_at(2, 3000));
+    mw_busy_hz = mwx_voice_hz = mw_hz[1];	/* the call starts while the receiver is elsewhere */
+    mwx_frames_only = frames_ms != 0;
+    uint32_t t0 = now, heard_at = 0;
+    bool heard = false;
+    for (int i = 0; i < 600 && !heard; i++) {	/* 15 s */
+        if (mwx_frames_only && now - t0 >= frames_ms)
+            mwx_frames_only = false;	/* the voice for us starts */
+        mwx_dispatch();
+        heard = native_lab_owns() && sm.dual_at == 1 && classic_receiving && now - scan_voice_ms <= 2u * RADIO_POLL_MS;
+        heard_at = now - t0;
+    }
+    mwx_frames_only = false;
+    /* At most the frames-only time, the native take's no-voice limit, a short pause and a ring */
+    uint32_t limit = frames_ms + 2500u + 2000u + 1000u;
+    MWX_CHECK(heard && heard_at <= limit);
+    printf("  %s, %u letters: voice heard %u ms after the call started (limit %u)\n", what, n, (unsigned)heard_at,
+           (unsigned)limit);
+    mw_busy_hz = mwx_voice_hz = 0;
+    for (int i = 0; i < 200 && native_lab_owns(); i++)
+        mwx_dispatch();
+}
+
+static void test_mwatch_listen(void)
+{
+    int before = failures;
+    for (uint8_t n = 3; n <= 6; n += 3) {
+        mwx_listen_case(n, 0, "late entry");
+        mwx_listen_case(n, 1500, "frames 1.5 s before voice");
+        mwx_listen_case(n, 3000, "frames 3 s without voice, then voice");
+    }
+    printf("Plus multi-watch: P25 calls on the letter heard while only listening: %d failures\n", failures - before);
+}
+
 int main(void)
 {
     int prior = classic_radio_main();
@@ -382,6 +835,12 @@ int main(void)
     uint32_t stayed = test_mwatch_p25();
     test_mwatch_period(stayed);
     test_mwatch_catch();
+    test_mwatch_tx_target();
+    test_mwatch_tx_refused();
+    test_mwatch_tx_stale();
+    test_mwatch_core_keying();
+    test_mwatch_sel_during_tx();
+    test_mwatch_listen();
     printf("Plus multi-watch radio core: %d failures\n", failures - before);
     return prior || failures != before ? 1 : 0;
 }

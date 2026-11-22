@@ -95,6 +95,12 @@ static void test_plus_scan(void)
     scan_hold(SCAN_PH_HOLD,3);classic_pump();classic_pump();CHECK(native_lab_owns());
     for(unsigned i=0;i<12;i++) { now+=200;zs_sync_ms=now;classic_pump();CHECK(native_lab_owns()); }
     now+=200;zs_sync_ms=now;classic_pump();classic_pump();classic_pump();CHECK(!native_lab_owns());
+    /* DDM32 Plus (mwfix): frames without voice are a late entry or another talk group: taken again after 2 s (a call
+     * of ours isn't skipped for 8 s); the same again within 10 s: the whole cooldown */
+    now+=1700;classic_pump();classic_pump();CHECK(!native_lab_owns());
+    now+=400;zs_sync_ms=now;classic_pump();classic_pump();CHECK(native_lab_owns());
+    for(unsigned i=0;i<12;i++) { now+=200;zs_sync_ms=now;classic_pump(); }
+    now+=200;zs_sync_ms=now;classic_pump();classic_pump();classic_pump();CHECK(!native_lab_owns());
     now+=7000;classic_pump();classic_pump();CHECK(!native_lab_owns());
     now+=1100;classic_pump();classic_pump();CHECK(native_lab_owns());
     /* Dual watch keeps its limit without frames (multi-watch's ring estimate, radio_mwatch.h) */

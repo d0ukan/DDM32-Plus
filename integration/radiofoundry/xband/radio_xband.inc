@@ -144,8 +144,10 @@ static void xb_take(radio_sm_t *sm, uint32_t now_ms)
 	aprs_rf_abort(sm, now_ms);
 	roam_cancel(sm, now_ms);
 #if CONFIG_SCAN
+	/* dual / multi-watch: it ends on the selected letter (the one with PTT; reload() puts it back after the session),
+	 * not the letter the ring is on */
 	if (scan_on(&sm->scan))
-		scan_stop(sm, false, now_ms);	/* dual watch and multi-watch too: the session has one channel */
+		scan_stop(sm, dual_running(sm), now_ms);	/* dual watch and multi-watch too: the session has one channel */
 #endif
 #if CONFIG_CW_BEACON
 	if (beacon.on || beacon.keying) {
