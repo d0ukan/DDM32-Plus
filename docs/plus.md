@@ -3668,3 +3668,61 @@ stack, the least free prvIdleTask 136 B as before):
 
 Also fixed on the way: `tests/plus/test_dmrsearch.c` expected the search log's range from an earlier search
 (433.000 MHz); the search running there starts at 432.500 MHz.
+
+## Upstream RadioFoundry fixes (`CONFIG_RF_FIXES`, branch `rfports`)
+
+Our RadioFoundry pin is `dfbaf20c`; upstream (MIT, The RadioFoundry Authors) is 194 commits ahead
+(`docs/upstream-survey-2026-11-22.md` in the lab repo). Fixes for this radio are ported as transforms in
+`tools/plus_rfports.py`, every hunk under `CONFIG_RF_FIXES` (on in `--plus` / `--public`, off in `--classic`).
+
+Ported:
+
+| RadioFoundry | What it fixes | Our change |
+|---|---|---|
+| `625b921` (#825) FD6818 sub-audio off on entering DMR | After an FM channel with an RX CTCSS/DCS tone, FD6818 register 0x51 kept the tone; its bit 15 also keys the chip's sub-audio transmitter, so the tone rode on the 4FSK and every DMR over went out unheard (upstream SDR bench: 0 of 3 heard, 3 of 3 with the fix) | Classic r13 already cleared 0x51 from the default and DMR-6943 set-up tables, the two the DM-32UV detects, so the radio was covered. Now it is the driver's rule: `fd6818_set_mode(DMR)` writes 0x51 = 0 for every set-up (set-up B's first DMR table had no such word), and on set-up B the board puts 0x2E/0x2F back to the no-tone pair. Every way into DMR goes through `board.radio->set_mode`: channel change, scan, dual watch, the multi-watch ring, the searches' DMR probe (`radio_alls.inc`), the VFO and the native P25 session (`dm32_native.inc`, so P25 TX after a toned FM channel too) |
+| `916ac26` (#389) HR_C7000 lost interrupts | The PIC acts only on a request line *rising*; a modem request missed while its line stays high never interrupts again. A dead timeslot interrupt fits Open25 issue #28 ("any digital mode: shows TX for a split second, then idle, until a reboot": each key-up stalls) and nx #30 | Every receiver restart (DMR entry, colour code or framing change, lost/stale reception, end of every transmission including a stalled one) clears TS TX / TS RX / RF TX and the pending system requests; the 10 ms poll drops a system request pending 50 ms with no handler run (`st.sys_stuck`, shown as " k" on the DMR diagnostics line 6); after a stall or a stuck request the glue unmasks the modem sources again. Task-side glue code (event task, set-up, diagnostics lines) moved to flash (`.flashfunc`), as upstream did. Not ported: CHIP_REG, the IRQ stack canary, the Find speed-ups, the debug link health view |
+| `947c139` (#541) polite access expires when slot interrupts stop | The busy window was counted in timeslot ticks; when the ticks stopped (timing released after a signal went away) the count froze and every polite PTT was refused ("I have to press PTT several times", RF #530) | Busy window (360 ms) and receive recovery (390 ms lost / 600 ms stale) by wall time, recovery also from the task poll; after a restart only new modem activity re-arms it, counted from that activity; a poll restart mid-call reports VOICE_LOST first. Adapted to the pin (no post-TX hold, `a0664450f`) |
+
+Host tests: `tools/test_rfports.py` (run by `make classic-test`) builds the pinned `fd6818Test` and `hrc7000DmrTest`
+with the switch on: upstream's `test_dmr_tone_off` (all three set-ups x CTCSS/DCS/DCS-inverted),
+`test_lost_requests`, `test_polite_without_ticks` (with clock wrap), `test_resync_without_ticks`,
+`test_resync_voice_lost`, and the long-silence case added to `test_rx_resync`; the old suites keep running with the
+switch off. Mutation check: removing the driver's 0x51 write, the poll recovery, the request clearing or the wall-time
+busy check each fails the suite. Radio rows RF-1..RF-6 in [plus-radio-test.md](plus-radio-test.md). None of these
+paths is proven on our radio yet (upstream: 625b921 on the SDR bench; 916ac26's recovery not exercised, no stall
+happened; 947c139 not reproduced on demand).
+
+Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its
+stack, the least free prvIdleTask 136 B, dmr task 800 B free):
+
+| | FLASH B | RAM B (free) |
+|---|---:|---:|
+| `ddm25` 3e1119a (switch off) | 861,280 | 209,872 (1,584) |
+| this branch | 861,784 (+504) | 208,520 (2,936): +1,352 B free, the glue's task side in flash |
+
+### Evaluated, not ported (decision needed)
+
+**`b93be31` (#777) cold buffers in modem SRAM, about 6 KB RAM.** Upstream puts the storage sector buffer (4,096 B,
+`storage.c`) and the CPS request buffer (2,048 B, `cps_openfw.c`) in a `MODEM_BSS` region of the HR_C7000's modem
+SRAM, 0x18004F90-0x18007EF0: past the codec table window (`__codec_tab_hi` 0x18003E38, which our build already sets
+for Classic) with a 4,440 B margin, below the crash record (0x18007EF0). What it would take here: the `MODEM_BSS`
+region in `boards/dm32/memory.ld`, the `.modem_bss` section and its link-time asserts in `common.ld`, crt0 zeroing it,
+`RFOUNDRY_COLD_RAM` in `config.h` and on the two buffers; about 40 lines of transforms. Our own code does not touch
+modem SRAM (grep: no 0x1800xxxx outside the codec window patch), and the native P25 modem uses only registers.
+Risks: the codec (stock AMBE from the owner's 047 slot) may keep state past its tables; upstream checked "no modem
+SRAM above the table window changed" with voice both ways on the 047 codec and a 30-minute soak, which is our
+profile, but we have not; the storage buffer is used by DOTA and data-pack writes (task side, fine) and must never
+be touched by an interrupt or DMA (none here). Gain: about 6 KB of RAM.
+Decision: port it as its own branch with the owner's radio checks (DMR and P25 voice both ways, a codeplug save, a
+CPS read/write, a data pack load, a 30-minute soak), or wait until RAM is needed again (this branch already freed
+1.35 KB).
+
+**`577c242` (#644) P25/NXDN TX deviation 1685 -> about 1776 Hz.** Upstream's own P25 TX (its `hrc7000_air.c` layer,
+not in our pin) scaled the board's DMR modulation bytes by 1800/1944, assuming those bytes give DMR's nominal 1944 Hz;
+measured they give about 1820 Hz, so P25 went out at 1685 Hz (93.6 %), and users saw a hotspot decode only after
+calibrating its RX offset. The fix scales by 1800/1820. **Our P25 TX does not have that code:** the native modem
+(`integration/radiofoundry/native/hrc_native_chip.c`) leaves RF_MOD_BIAS, DEV_LIMITER and the FIR at the board's DMR
+calibration and scales nothing (grep for 1944 / dev_outer_hz / mod bias in our P25 path: none). With upstream's
+measurement our outer deviation would be the DMR bytes' own, about 1820 Hz (101 % of 1800), so nothing to port.
+Unmeasured on the owner's unit: an SDR check of our P25 TX outer deviation (row RF-6) settles it; if it comes out
+low, the fix belongs in the native path (scale the modulation bytes there), not in a port of 577c242.

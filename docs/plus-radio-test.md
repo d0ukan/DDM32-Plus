@@ -763,3 +763,17 @@ What to send back if SX-3 still misses: the three screen figures (steps/s, hits,
 radio's over, whether "Probe ..." showed and on which frequency, and how long the over was. A floor that jumps up by
 20-30 dB during the over says the receiver's level reading (FD6818 register 0x67) is desensed across the range by the
 strong signal; "Probe 436.2750" shown but no find says the DMR modem's lock in the 1.1 s window is the limit.
+
+## Upstream RadioFoundry fixes (branch `rfports`, docs/plus.md "Upstream RadioFoundry fixes")
+
+Each step that opens the serial port, installs, restarts or transmits needs the owner's approval in chat first.
+TX only on frequencies the licence allows, the other radio listening.
+
+| # | Do | Expect |
+|---|---|---|
+| RF-1 | **625b921.** An FM channel with an RX CTCSS tone (e.g. 88.5 Hz), receive on it a few seconds; then change to a DMR channel (simplex, CC1, TS1, TG 1) and key a 5 s over; the other radio on that DMR channel | the other radio hears the over (caller ID and audio), every time in 5 tries. Upstream before the fix: the overs went out but none decoded |
+| RF-2 | RF-1 with an FM channel with DCS (e.g. D023N), then D023I | heard each time |
+| RF-3 | Dual watch / multi-watch ring with a toned FM channel and the DMR channel; let it rotate, then PTT on the DMR channel; then a P25 over after the toned FM channel | DMR heard; the P25 over decoded by the other radio too |
+| RF-4 | **947c139.** DMR channel with polite admit (own CC); the other radio sends an over, wait 2 s after it ends, PTT | keys first time (never refused "busy" after the channel went quiet); during the other radio's over: refused, as before |
+| RF-5 | **916ac26.** A long DMR session (an hour, overs every few minutes, zone changes in between); then the DMR diagnostics line 6 | every over keys first time; note the line's " k" count (0 is normal; more means stuck requests were dropped and recovered). Report any "TX for a split second then idle" (Open25 #28) |
+| RF-6 | **577c242 (evaluation).** SDR: our P25 TX on 433.500 (NAC $659, TG 101), measure the outer deviation (C4FM, nominal 1800 Hz) | about 1.8 kHz; write the figure down. Well below (about 1.69 kHz) means the native path needs upstream's correction |

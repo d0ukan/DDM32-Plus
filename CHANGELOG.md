@@ -5,6 +5,14 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
+- Upstream RadioFoundry fixes (MIT, The RadioFoundry Authors; docs/plus.md "Upstream RadioFoundry fixes"):
+  DMR after an FM channel with an RX tone: the FD6818's sub-audio is off on entering DMR for every RF set-up
+  (RadioFoundry 625b921; Classic's tables already covered the DM-32UV's two set-ups, set-up B now also gets its
+  no-tone words back). HR_C7000 interrupt recovery (916ac26): every receiver restart drops pending modem requests, a
+  system request stuck for 50 ms is dropped, the modem interrupts are unmasked again after a stalled transmission;
+  this is the likely cause of "the radio shows TX for a split second, then idle, until a reboot" (Open25 #28). Polite
+  admit no longer refuses every PTT once the slot interrupts stop (947c139): its busy window and the receiver's
+  recovery run on wall time. The DMR glue's task-side code moved to flash: 1,352 B more free RAM.
 - Tools > ISS (owner's request): the ISS on one page: the next pass (AOS / LOS, top elevation; "Above now" with
   azimuth / elevation), the downlinks 145.800 FM voice / SSTV and 145.825 APRS with the Doppler of the one in use, the
   notification and auto track settings; OK tracks now (within 10 min of AOS or during the pass: receive only, the

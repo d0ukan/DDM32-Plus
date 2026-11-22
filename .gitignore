@@ -688,3 +688,6 @@ __pycache__/
 !/integration/radiofoundry/sat/radio_sathold.inc
 !/tests/plus/test_sathold_radio.inc
 !/tests/plus/test_sat_set.c
+# Upstream RadioFoundry fixes (tools/plus_rfports.py, CONFIG_RF_FIXES)
+!/tools/plus_rfports.py
+!/tools/test_rfports.py

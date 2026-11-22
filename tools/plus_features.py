@@ -200,6 +200,7 @@ def prepare(transform, install):
     __import__((__package__ + "." if __package__ else "") + "plus_alldigital", fromlist=["x"]).prepare_alldigital(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_satauto", fromlist=["x"]).prepare_sat_auto(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_sstvtx", fromlist=["x"]).prepare_sstvtx(transform, install)
+    __import__((__package__ + "." if __package__ else "") + "plus_rfports", fromlist=["x"]).prepare_rfports(transform, install)
 
 
 def prepare_large_scale(transform):

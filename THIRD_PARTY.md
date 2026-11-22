@@ -33,6 +33,13 @@ settings are selectively ported from RadioFoundry `9e1f7209` (MIT). The pinned
 base remains unchanged. The port preserves the existing FM-to-digital tone
 reset and adds regression tests for both RF setups and failed lock detection.
 
+DDM32 Plus ports three later RadioFoundry fixes (MIT, The RadioFoundry Authors)
+as transforms in `tools/plus_rfports.py` (`CONFIG_RF_FIXES`): `625b921` (FD6818
+sub-audio off on entering DMR, Spencer Fowler), `916ac26` (HR_C7000 lost modem
+requests, task-side glue in flash, Spencer Fowler) and `947c139` (polite access
+and receive recovery by wall time, Joshua Fuller and Spencer Fowler), with their
+host tests adapted to the pin.
+
 The channel-mode registry, RFKV store, tag/record readers and P25 parameter
 codec are selected from RadioFoundry `9e1f7209` in `third_party/rf_codeplug`.
 Its `UPSTREAM.json` records the original files. Local extensions implement the

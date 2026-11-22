@@ -650,6 +650,8 @@ def main():
     run([host/'fd6818Test'],cwd=host)
     run(['make','-B','hrc7000DmrTest','SANITIZE=1'],cwd=host)
     run([host/'hrc7000DmrTest'],cwd=host)
+    # DDM32 Plus upstream RadioFoundry fixes: the same two suites with CONFIG_RF_FIXES=1 (tools/plus_rfports.py)
+    run(['python3',ROOT/'tools/test_rfports.py'],cwd=ROOT)
     run(['make','-B','radioCoreTest','SANITIZE=1'],cwd=host)
     run([host/'radioCoreTest'],cwd=host)
     fixture=(host/'radioCoreTest.c').read_text().replace('int main(void)','int upstream_radio_main(void)')
