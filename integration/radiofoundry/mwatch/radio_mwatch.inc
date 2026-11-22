@@ -168,17 +168,68 @@ bool radio_sm_dual_keeps(radio_sm_t *sm, const radio_req_t *req)
 		return false;
 	}
 	for (uint8_t i = 0; i < n && i < RADIO_DUAL_SLOTS; i++) {
-		const radio_dual_ref_t *r = &mw_ref_buf[i];
-#if CONFIG_VFO_MODES
-		bool here = r->vfo ? sm->view.vfo && vfox_in_use(sm) == r->pos :
-#else
-		bool here = r->vfo ? sm->view.vfo && sm->vfo_idx == r->pos :
-#endif
-			    !sm->view.vfo && r->zone == sm->view.zone_index && r->pos == sm->view.zone_pos;
-		if (here) {
+		if (dual_ref_here(sm, &mw_ref_buf[i])) {
 			return true;
 		}
 	}
 	return false;
+}
+#endif
+
+#if CONFIG_DMR_EMERGENCY
+static void scan_stop_asked(radio_sm_t *sm, bool cancel, uint32_t now_ms);
+
+// Letter i's mode now (FM when it can't be read): the channel's, or the VFO's as its slot keeps it
+static uint8_t __attribute__((noinline)) dual_mode(radio_sm_t *sm, uint8_t i)
+{
+	const radio_dual_ref_t *r = &sm->dual[i];
+	if (dual_ref_here(sm, r)) {
+		return sm->view.ch.mode;
+	}
+	channel_t ch;
+	if (r->vfo) {
+#if CONFIG_VFO_MODES
+		uint32_t talk;
+		bool seeded;
+		if (r->pos >= 2 && r->pos < RADIO_DUAL_SLOTS) {
+			vfox_slot_get(&sm->vfox_x[r->pos - 2u], &ch, &talk, &seeded);
+			return ch.mode;
+		}
+		if (sm->vfox_at >= 2 && r->pos == sm->vfo_idx) {
+			vfox_slot_get(&sm->vfox_park, &ch, &talk, &seeded);	// waiting while a C..F VFO is in use
+			return ch.mode;
+		}
+#endif
+		return r->pos == sm->vfo_idx ? sm->vfo_ch.mode : sm->vfo_other.ch.mode;
+	}
+	zone_t z;
+	return dual_read(sm, r, &z, &ch) != NULL ? ch.mode : (uint8_t)RADIO_MODE_FM;
+}
+
+// DDM32 Plus (docs/plus.md "The TX target", third review): an emergency asked for (the user's key, the lone worker, SOS)
+// while the watch runs. Its alarm, hot mic and talk target are the channel the radio is on, which in the ring is the
+// letter it happens to be on: the watch ends on the selected letter when it is DMR, else on the first DMR letter A..F
+// (the UI follows the stop and says which: "Watch off: on A"). No DMR letter: the watch goes on and the emergency fails
+// as on any FM channel. Called from emergency_tick before dmr_emergency_tick takes the start
+static void __attribute__((noinline)) mw_emergency(radio_sm_t *sm, uint32_t now_ms)
+{
+	uint8_t n = dual_count(sm), pick = RADIO_DUAL_SLOTS;
+	if (sm->ptt || sm->view.state == RS_TX) {
+		return;	// PTT first: it ends, then the emergency goes on the channel it was on
+	}
+	if (sm->dual_sel < n && dual_mode(sm, sm->dual_sel) == RADIO_MODE_DMR) {
+		pick = sm->dual_sel;
+	}
+	for (uint8_t i = 0; i < n && pick == RADIO_DUAL_SLOTS; i++) {
+		if (dual_mode(sm, i) == RADIO_MODE_DMR) {
+			pick = i;
+		}
+	}
+	if (pick == RADIO_DUAL_SLOTS) {
+		return;
+	}
+	sm->dual_sel = pick;
+	sm->view.dual_sel = pick;
+	scan_stop_asked(sm, true, now_ms);	// on that letter, counted (view.dual_stops): the UI stops its watch there
 }
 #endif

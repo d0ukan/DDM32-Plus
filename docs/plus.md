@@ -3764,12 +3764,23 @@ Host tests added: the burst and the hot mic from every letter of the owner's A /
 | # | Found | Fix |
 |---|---|---|
 | S1 | The once-a-second re-ask of the pill's letter (RREQ_MWATCH) makes the native receiver let a letter go (`channel_let_go`): with a mismatch that stays (the radio refuses the ring), a P25 call held on a letter was cut every second | asked again twice at most, never while a call comes in (RS_RX); then the pill takes the radio's letter ("Talking on C"). The radio choosing another letter itself (the debug link) is taken at once, without a request back (`mw_adopt`). And a selection (the A/B key, a re-ask) whose ring still has the letter a P25 call is held on no longer lets the native receiver go: the radio core doesn't retune for it (`radio_sm_dual_keeps`), the call plays on, PTT goes to the new letter |
-| S2 | The DMR emergency (alarm, hot mic, its talk target, `data_can_send`) works on the channel the radio is on: in the ring, the letter it happens to be on | the emergency key while a watch runs: the selected letter DMR: the watch ends there first; else refused, toast "Emergency: select a DMR letter" ("Acil durum: DMR harfi seçin"). ARS and text replies still answer on the letter the data came in on |
+| S2 | The DMR emergency (alarm, hot mic, its talk target, `data_can_send`) works on the channel the radio is on: in the ring, the letter it happens to be on | the emergency key while a watch runs: the selected letter DMR: the watch ends there first; else refused, toast "Emergency: select a DMR letter" ("Acil durum: DMR harfi seçin"). ARS and text replies still answer on the letter the data came in on (superseded by the third round below: no refusal while the ring has a DMR letter) |
 | M1 | A safety net for any TX / TX denied left in the view | in the ring's poll, TX / TX denied with PTT up and nothing keyed (burst, roger, sub-audio tail, VOX, DMR keying or TX, CW, the hot mic) is cleared, and a retune that waited for it is done |
 | M3 | The S3 retry's cost | a P25 conversation on another talk group on a ring letter takes it 2.5 s, then 2 s free, then again (the other letters get about 45 % of the ring until the 8 s cooldown applies, from the second time within 10 s) |
 | M5 | Ring PTT on VFO letters untested | host test (VFO modes build): C a P25 VFO (145.575, NAC $456, TG 99) keyed natively with its NAC from every ring position; D a YSF VFO refused (TX denied, nothing keyed) |
 
 Host tests added: a selection during a held P25 call (`test_mwatch_radio.inc`; fails without the fix), the debug link's selection and the UI flows (`test_ui_mwdetail.c`: the radio selecting A, the emergency key on a DMR and an FM letter), the safety net (`test_mwatch_radio.inc`), the VFO letters (`test_vfox_radio.inc`).
+
+**Third review round** (branch `mwfix3`):
+
+| # | Found | Fix |
+|---|---|---|
+| S1 | The emergency check refused when the selected letter wasn't DMR, so the lone worker fell back to sound only and SOS said "no DMR" although the ring had a DMR letter | the emergency uses the selected letter when it is DMR, else the first DMR letter A..F, for the user's key, the lone worker and SOS alike, without asking; the stop's toast names the letter ("Watch off: on A"); only a ring with no DMR letter keeps the watch (the emergency then fails as on an FM channel). The UI check and its toast are gone |
+| S2 | The watch's stop went through the request queue while the emergency start is a mailbox read in the radio tick: their order could go wrong | done in the radio core: `emergency_tick`, before `dmr_emergency_tick` takes the start (`dmr_emergency_start_pending`), ends the watch on the chosen letter (`mw_emergency`, `scan_stop_asked`: counted, so the UI stops its watch and adopts the letter first). While the native receiver holds a P25 letter the radio tick waits, so the emergency starts once it lets go |
+| M1 | PTT while B's P25 voice still runs, after selecting C or A during the call | host test: the native receiver lets B go before the board keys (never both), C keyed in FM / A in DMR on their frequencies, no native transmission |
+| M2 | Two copies of "the receiver is on this letter" | `dual_ref_here`, used by `dual_here` and `radio_sm_dual_keeps` |
+
+Host tests: the emergency from each letter and ring position of the owner's A / B / C (always A), a ring with two DMR letters (the selected one, or the first), one without (the watch goes on, failed); PTT during the held call (`test_mwatch_radio.inc`). Radio row MW22 changes: with C (FM) selected the emergency goes out on A, the toast "Watch off: on A".
 
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free (720 after the review round, 716 after the second), UI 184 B: the radio task's deepest path is still the P25 search's give back):

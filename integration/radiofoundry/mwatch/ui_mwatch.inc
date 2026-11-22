@@ -299,24 +299,6 @@ static void __attribute__((noinline)) mw_adopt(ui_dual_t *d, uint8_t k)
 	mw_toast_letter(TR("Talking on "), k, "");
 }
 
-#if CONFIG_DMR_EMERGENCY
-// The emergency key while the watch runs (ui_svc_emergency.c): the alarm, the hot mic and its target are the channel
-// the radio is on, which in the ring is whichever letter it is on now. The selected letter DMR: the watch ends there
-// first; else refused (a toast says what to do)
-bool ui_dual_emergency_ok(void)
-{
-	ui_dual_t *d = dual();
-	if (!d->on)
-		return true;
-	if (d->pane[d->sel].mode != RADIO_MODE_DMR) {
-		ui_toast(TR("Emergency: select a DMR letter"));
-		return false;
-	}
-	stop(true);	// the radio stays on the selected letter
-	return true;
-}
-#endif
-
 // DDM32 Plus (owner 2026-11-22): the watch named by its letters, the ring's when it runs, else the setting's
 static uint8_t mw_letters(void)
 {
