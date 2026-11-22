@@ -127,14 +127,58 @@ static void dual_start_n(radio_sm_t *sm, const radio_dual_ref_t ref[], uint8_t n
 	scan_publish(sm);
 }
 
+static radio_dual_ref_t mw_ref_buf[RADIO_DUAL_SLOTS];	// a ring asked for: only the radio task uses it
+
 // RREQ_MWATCH: the ring the UI asked for (radio_req_mwatch left it with the radio task). Refused, as RREQ_DUAL is,
 // while transmitting or in hotspot mode
 static void mw_request(radio_sm_t *sm, uint32_t now_ms)
 {
-	static radio_dual_ref_t ref[RADIO_DUAL_SLOTS];	// only the radio task uses it
 	uint8_t n = 0, sel = 0;
-	if (!radio_mwatch_take(ref, &n, &sel) || sm->view.state == RS_TX || sm->hotspot || sm->ptt) {
+	if (!radio_mwatch_take(mw_ref_buf, &n, &sel) || sm->view.state == RS_TX || sm->hotspot || sm->ptt) {
 		return;
 	}
-	dual_start_n(sm, ref, n, sel, now_ms);
+	dual_start_n(sm, mw_ref_buf, n, sel, now_ms);
 }
+
+#if CONFIG_P25_CHANNELS
+// DDM32 Plus (docs/plus.md "The TX target", second review): a watch request (RREQ_MWATCH, RREQ_DUAL) whose ring still
+// has the channel the receiver is on: dual_start_n keeps the receiver there (only the selection or the ring around it
+// changes), so the native receiver keeps a P25 call it holds there instead of letting it go (native_lab.c). Peeks at
+// the request, takes nothing
+static radio_dual_ref_t dual_ref(uint32_t a);
+bool radio_sm_dual_keeps(radio_sm_t *sm, const radio_req_t *req)
+{
+	uint8_t n = 0, sel = 0;
+	if (!dual_running(sm)) {
+		return false;
+	}
+	if (req->type == RREQ_MWATCH) {
+		if (!radio_mwatch_take(mw_ref_buf, &n, &sel)) {
+			return false;
+		}
+	} else if (req->type == RREQ_DUAL) {
+		uint32_t a = (uint32_t)req->arg, b = req->arg2;
+		if (((a | b) & RADIO_DUAL_SEL) == 0) {
+			return false;	// a stop: the radio stays on the selected channel, maybe another one
+		}
+		mw_ref_buf[0] = dual_ref(a);
+		mw_ref_buf[1] = dual_ref(b);
+		n = 2;
+	} else {
+		return false;
+	}
+	for (uint8_t i = 0; i < n && i < RADIO_DUAL_SLOTS; i++) {
+		const radio_dual_ref_t *r = &mw_ref_buf[i];
+#if CONFIG_VFO_MODES
+		bool here = r->vfo ? sm->view.vfo && vfox_in_use(sm) == r->pos :
+#else
+		bool here = r->vfo ? sm->view.vfo && sm->vfo_idx == r->pos :
+#endif
+			    !sm->view.vfo && r->zone == sm->view.zone_index && r->pos == sm->view.zone_pos;
+		if (here) {
+			return true;
+		}
+	}
+	return false;
+}
+#endif

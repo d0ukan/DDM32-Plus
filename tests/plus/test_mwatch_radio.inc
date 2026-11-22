@@ -824,6 +824,97 @@ static void test_mwatch_listen(void)
     printf("Plus multi-watch: P25 calls on the letter heard while only listening: %d failures\n", failures - before);
 }
 
+/* M1, the safety net: in the ring a TX / TX denied with PTT up and nothing keyed (whatever left it) is cleared at the
+ * poll, and the ring goes on; one with the 1750 burst keying is left alone */
+static void test_mwatch_stale_net(void)
+{
+    int before = failures;
+    static const radio_state_t shown[2] = { RS_TX, RS_TX_DENIED };
+    for (int k = 0; k < 2; k++) {
+        snprintf(mwx_tag, sizeof mwx_tag, "safety net, %s", k ? "TX denied" : "TX");
+        mwx_codeplug("DPFFFF", true);
+        mw_start_radio();
+        classic_retained = false;
+        mw_busy_hz = mwx_voice_hz = 0;
+        MWX_CHECK(mw_watch(3, 2));
+        MWX_CHECK(mw_until_at(0, 3000));
+        sm.view.state = shown[k];
+        bool moved = false;
+        for (int i = 0; i < 40; i++) {
+            mwx_dispatch();
+            moved = moved || sm.dual_at != 0;
+        }
+        MWX_CHECK(sm.view.state == RS_IDLE && moved);
+    }
+    snprintf(mwx_tag, sizeof mwx_tag, "safety net, the burst keying");
+    MWX_CHECK(mw_until_at(2, 3000));
+    mwx_send(RREQ_TONE_BURST, 1);
+    for (int i = 0; i < 20; i++)
+        mwx_dispatch();
+    MWX_CHECK(sm.view.state == RS_TX && tone.hz == RADIO_BURST_HZ);
+    mwx_send(RREQ_TONE_BURST, 0);
+    for (int i = 0; i < 40; i++)
+        mwx_dispatch();
+    MWX_CHECK(sm.view.state != RS_TX);
+    printf("Plus multi-watch: a stale TX in the ring cleared, a keyed one kept: %d failures\n", failures - before);
+}
+
+/* S1 follow-up: a new selection while a P25 call is held on B (the A/B key, or the UI asking again for the pill's
+ * letter) doesn't cut the call: the ring keeps B, only the selection changes (radio_sm_dual_keeps); PTT then goes to
+ * the new letter. A ring without B (a letter changed to another channel) still lets B go */
+static void test_mwatch_sel_during_call(void)
+{
+    int before = failures;
+    snprintf(mwx_tag, sizeof mwx_tag, "selection during a P25 call on B");
+    mwx_codeplug("DPFFFF", true);
+    mw_start_radio();
+    codec_present = true;
+    classic_retained = false;
+    mw_busy_hz = mwx_voice_hz = 0;
+    MWX_CHECK(mw_watch(3, 0));
+    MWX_CHECK(mwx_heard(1, 4000));
+    unsigned starts = classic_starts;
+    radio_dual_ref_t r[RADIO_DUAL_SLOTS];
+    for (uint8_t i = 0; i < 3; i++)
+        r[i] = (radio_dual_ref_t){ false, 0, i };
+    memcpy(mw_req_ref, r, 3 * sizeof r[0]);
+    mw_req_n = 3;
+    mw_req_sel = 2;
+    mwx_send(RREQ_MWATCH, 0);
+    for (int i = 0; i < 20; i++)
+        mwx_dispatch();
+    MWX_CHECK(sm.dual_sel == 2 && native_lab_owns() && sm.dual_at == 1 && classic_receiving && classic_starts == starts);
+    /* The call ends: PTT goes to C (FM) */
+    mw_busy_hz = mwx_voice_hz = 0;
+    for (int i = 0; i < 10; i++)
+        mwx_dispatch();
+    int tx0 = hw.tx_calls;
+    uint32_t hz = 0;
+    uint8_t pw = 0;
+    char keyed = 0;
+    mwx_send(RREQ_PTT, 1);
+    for (int i = 0; i < 8 && !keyed; i++) {
+        keyed = mwx_keyed(tx0, &hz, &pw);
+        if (!keyed)
+            mwx_dispatch();
+    }
+    MWX_CHECK(keyed == 'F' && hz == mw_hz[2]);
+    mwx_send(RREQ_PTT, 0);
+    for (int i = 0; i < 200; i++)
+        mwx_dispatch();
+    /* A ring without B while B is held: B is let go */
+    MWX_CHECK(mwx_heard(1, 4000));
+    r[1] = (radio_dual_ref_t){ false, 0, 3 };
+    memcpy(mw_req_ref, r, 3 * sizeof r[0]);
+    mw_req_sel = 0;
+    mwx_send(RREQ_MWATCH, 0);
+    for (int i = 0; i < 20; i++)
+        mwx_dispatch();
+    MWX_CHECK(!(native_lab_owns() && hw.rx_hz == mw_hz[1]) && sm.dual_n == 3);
+    mw_busy_hz = mwx_voice_hz = 0;
+    printf("Plus multi-watch TX target: a selection during a P25 call keeps the call: %d failures\n", failures - before);
+}
+
 int main(void)
 {
     int prior = classic_radio_main();
@@ -841,6 +932,8 @@ int main(void)
     test_mwatch_core_keying();
     test_mwatch_sel_during_tx();
     test_mwatch_listen();
+    test_mwatch_stale_net();
+    test_mwatch_sel_during_call();
     printf("Plus multi-watch radio core: %d failures\n", failures - before);
     return prior || failures != before ? 1 : 0;
 }

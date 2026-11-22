@@ -315,6 +315,59 @@ static void test_vfox_ring(void)
            "and native receive on C, A / B's saved VFOs untouched, C..F RAM only\n");
 }
 
+/* M5: PTT on VFO letters of the ring (the radio task's way, native_lab_request first): C a P25 VFO (145.575, NAC $456,
+ * TG 99) keys natively on its own frequency with its NAC from any ring position; D a YSF VFO is refused (no YSF
+ * transmitter in this build): TX denied, nothing keyed, natively or by the board; both cleared on release */
+static void test_vfox_ring_tx(void)
+{
+    int before = failures;
+    mw_codeplug(RADIO_MODE_FM, -1);
+    mw_start_radio();
+    fake_radio.rx_am = vx_rx_am;
+    codec_present = true;
+    classic_retained = false;
+    mw_busy_hz = mwx_voice_hz = 0;
+    radio_dual_ref_t r[RADIO_DUAL_SLOTS] = { { false, 0, 0 }, { false, 0, 1 }, { true, 0, 2 }, { true, 0, 3 } };
+    radio_req_mwatch(r, 4, 2);
+    vx_apply(145575000, RADIO_MODE_P25, 0x456, 99, 3101234);
+    vx_pump(2);
+    vx_request(RREQ_DMR_FOCUS, 0);
+    radio_req_mwatch(r, 4, 3);
+    vx_apply(430500000, RADIO_MODE_YSF, 0, 12, 3101234);
+    vx_pump(2);
+    vx_request(RREQ_DMR_FOCUS, 0);
+    for (uint8_t sel = 2; sel < 4; sel++) {
+        for (uint8_t at = 0; at < 4; at++) {
+            snprintf(mwx_tag, sizeof mwx_tag, "VFO letter %c (%s), ring at %c", 'A' + sel, sel == 2 ? "P25" : "YSF", 'A' + at);
+            radio_req_mwatch(r, 4, sel);
+            MWX_CHECK(sm.scan.kind == SCAN_DUAL && sm.dual_sel == sel);
+            MWX_CHECK(mw_until_at(at, 3000));
+            int tx0 = hw.tx_calls;
+            uint32_t hz = 0;
+            uint8_t pw = 0;
+            char keyed = 0;
+            mwx_send(RREQ_PTT, 1);
+            for (int i = 0; i < 8 && !keyed; i++) {
+                keyed = mwx_keyed(tx0, &hz, &pw);
+                if (!keyed)
+                    mwx_dispatch();
+            }
+            if (sel == 2) {
+                MWX_CHECK(keyed == 'P' && hz == 145575000 && classic_set_nac == 0x456 && classic_set_tg == 99 &&
+                          sm.dual_at == 2 && sm.view.vfo);
+            } else {
+                MWX_CHECK(keyed == 0 && sm.view.state == RS_TX_DENIED && hw.tx_calls == tx0 && !mwx_native_tx());
+            }
+            mwx_send(RREQ_PTT, 0);
+            for (int i = 0; i < 320; i++)
+                mwx_dispatch();
+            MWX_CHECK(!sm.ptt && sm.view.state != RS_TX && sm.view.state != RS_TX_DENIED && !native_lab_owns());
+        }
+    }
+    printf("Plus VFO modes in multi-watch: PTT on a P25 VFO letter keys it, on a YSF one refused: %d failures\n",
+           failures - before);
+}
+
 /* Dual watch (2 channels): B the VFO in P25: taken while the watch holds there */
 static void test_vfox_dual(void)
 {
@@ -353,6 +406,7 @@ int main(void)
     test_vfox_copy();
     test_vfox_dual();
     test_vfox_ring();
+    test_vfox_ring_tx();
     printf("Plus every mode in the VFO, radio core: %d failures\n", failures - before);
     return prior || failures != before ? 1 : 0;
 }

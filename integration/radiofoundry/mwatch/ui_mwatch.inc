@@ -277,6 +277,46 @@ static void mw_toast_letter(const char *before, uint8_t k, const char *after)
 	ui_toast(mw_msg);
 }
 
+// DDM32 Plus: the PTT pill follows the radio's selected letter k (the debug link chose it, or the radio kept another
+// after a selection it dropped): the pane takes it as a selection here would, without asking the radio
+static uint8_t mw_reask, mw_radio_sel = UI_DUAL_NONE;
+static void __attribute__((noinline)) mw_adopt(ui_dual_t *d, uint8_t k)
+{
+	mw_reask = 0;
+	if (k == 0 || mw_cnt <= 2) {
+		d->sel = k ? 1 : 0;
+	} else {
+		if (k != mw_p1) {
+			mw_sync();	// pane 1's letter keeps its channel
+			ref[1] = mw_ref[k];
+			mw_p1 = k;
+			refill[1] = true;
+		}
+		d->sel = 1;
+	}
+	d->back_to = UI_DUAL_NONE;
+	state_save();
+	mw_toast_letter(TR("Talking on "), k, "");
+}
+
+#if CONFIG_DMR_EMERGENCY
+// The emergency key while the watch runs (ui_svc_emergency.c): the alarm, the hot mic and its target are the channel
+// the radio is on, which in the ring is whichever letter it is on now. The selected letter DMR: the watch ends there
+// first; else refused (a toast says what to do)
+bool ui_dual_emergency_ok(void)
+{
+	ui_dual_t *d = dual();
+	if (!d->on)
+		return true;
+	if (d->pane[d->sel].mode != RADIO_MODE_DMR) {
+		ui_toast(TR("Emergency: select a DMR letter"));
+		return false;
+	}
+	stop(true);	// the radio stays on the selected letter
+	return true;
+}
+#endif
+
 // DDM32 Plus (owner 2026-11-22): the watch named by its letters, the ring's when it runs, else the setting's
 static uint8_t mw_letters(void)
 {
@@ -451,11 +491,25 @@ static bool mw_has_p25(void)
 static bool __attribute__((noinline)) mw_tick(ui_dual_t *d, const radio_view_t *v, uint32_t now)
 {
 	// DDM32 Plus (docs/plus.md "The TX target"): the PTT pill and the radio's selected letter agree. A selection is
-	// refused while transmitting (apply); one the radio dropped anyway (it raced a transmission) is asked again once the
-	// transmission is over, at most once a second, so PTT never goes to a letter the pill isn't on
-	if (v->scan == 3 /* SCAN_DUAL */ && v->state != RS_TX && v->state != RS_TX_DENIED && !v->hotspot &&
-	    v->dual_sel != (mw_ring() ? mw_sel_letter() : d->sel) && now - started_ms >= 1000u)
-		(void)apply(d->sel);
+	// refused while transmitting (apply). The radio choosing another letter itself (the debug link) is taken at once;
+	// one it dropped (it raced a transmission, or refused the ring) is asked again, a second apart, twice at most and
+	// never while a call comes in (a request lets the native receiver's P25 call go), then the pill takes the radio's
+	if (v->scan == 3 /* SCAN_DUAL */ && !v->hotspot && v->dual_sel < (mw_ring() ? mw_cnt : 2u)) {
+		bool moved = v->dual_sel != mw_radio_sel;
+		mw_radio_sel = v->dual_sel;
+		if (v->dual_sel == (mw_ring() ? mw_sel_letter() : d->sel)) {
+			mw_reask = 0;
+		} else if (moved) {
+			mw_adopt(d, v->dual_sel);
+		} else if (v->state != RS_TX && v->state != RS_TX_DENIED && v->state != RS_RX && now - started_ms >= 1000u) {
+			if (mw_reask < 2u) {
+				mw_reask++;
+				(void)apply(d->sel);
+			} else {
+				mw_adopt(d, v->dual_sel);
+			}
+		}
+	}
 	if (!mw_ring()) {
 		mw_rx = UI_DUAL_NONE;
 		return false;

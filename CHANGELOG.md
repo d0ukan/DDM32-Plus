@@ -5,6 +5,9 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
+- Dual / multi-watch: the emergency key ends the watch on the selected DMR letter (refused with a toast on another
+  mode); the PTT pill follows the radio when it keeps another letter, without cutting a P25 call; a TX indicator
+  left with nothing keyed is cleared in the ring.
 - Tools > ISS (owner's request): the ISS on one page: the next pass (AOS / LOS, top elevation; "Above now" with
   azimuth / elevation), the downlinks 145.800 FM voice / SSTV and 145.825 APRS with the Doppler of the one in use, the
   notification and auto track settings; OK tracks now (within 10 min of AOS or during the pass: receive only, the

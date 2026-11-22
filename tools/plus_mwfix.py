@@ -30,6 +30,10 @@ def prepare_mwfix(transform, install):
          '// DDM32 Plus: PTT in dual watch / the ring talks on the selected letter. 0: the receiver is on it (or no watch);\n'
          '// else (tune) tuned there now: 1, or 2 when it can\'t be read (the watch ended, the PTT refused: TXDENY_MODE)\n'
          'uint8_t radio_sm_dual_away(radio_sm_t *sm, bool tune, uint32_t now_ms);\n'
+         '#endif\n'
+         '#if CONFIG_MULTI_WATCH\n'
+         '// DDM32 Plus: a watch request (RREQ_MWATCH / RREQ_DUAL) that keeps the receiver\'s channel in the ring: no retune\n'
+         'bool radio_sm_dual_keeps(radio_sm_t *sm, const radio_req_t *req);\n'
          '#endif\n#endif\n'),
     ])
     transform('core/radio/radio_sm.c', [
@@ -155,7 +159,9 @@ def prepare_mwfix(transform, install):
          '// DDM32 Plus: the watch named by its letters (in the ring, else Settings > Watch channels): form 0 "Triple watch",\n'
          '// 1 the strip\'s "TRIPLE", 2 the Quick tile\'s "Triple watch" | "Triple"; translated\n'
          'const char *ui_watch_name(uint8_t form);\n'
-         'const char *ui_watch_on_text(void);\t// "Triple watch on" (2: "Dual watch on")\n'),
+         'const char *ui_watch_on_text(void);\t// "Triple watch on" (2: "Dual watch on")\n'
+         '// The emergency key while it runs: the watch ends on the selected letter when that is DMR (true), else a toast\n'
+         'bool ui_dual_emergency_ok(void);\n'),
     ])
     transform('core/ui/ui_screens.c', [
         ('SCX_WORD(TR("DUAL"))', 'SCX_WORD(UI_WATCH_WORD)', 2),
@@ -191,5 +197,46 @@ def prepare_mwfix(transform, install):
          '#else\n'
          '\t.name = "dual", .flags = SF_LIST | SF_NUMBERED | SF_FIELD, .prefix = TRN("Dual Watch"),\n'
          '#endif\n'),
+    ])
+
+    # ---- Second review round (branch mwfix2) ----
+    # M1, a safety net: in the ring a TX / TX denied with PTT up and nothing keyed is stale (it froze the ring before
+    # 508180e): cleared at the poll, so the ring and the retune go on whatever left it
+    transform('core/radio/radio_sm.c', [
+        ('\tif (scan_on(&sm->scan) && !sm->ptt && sm->view.state != RS_TX && sm->view.state != RS_TX_DENIED && !sm->hotspot) {\n',
+         '#if CONFIG_DUAL_WATCH && CONFIG_P25_CHANNELS\n'
+         '\tif (dual_running(sm) && !sm->ptt && !sm->hotspot &&\n'
+         '\t    (sm->view.state == RS_TX || sm->view.state == RS_TX_DENIED)) {\n'
+         '\t\tbool keyed = false;\t// DDM32 Plus: whatever may hold a transmission without PTT\n'
+         '#if CONFIG_FM_TX_TONES\n\t\tkeyed = keyed || sm->burst_keyed || sm->roger_ms != 0 || sm->view.tone_burst;\n#endif\n'
+         '#if CONFIG_SUBTONE\n\t\tkeyed = keyed || sm->tail_ms != 0;\n#endif\n'
+         '#if CONFIG_VOX\n\t\tkeyed = keyed || sm->vox_keyed;\n#endif\n'
+         '#if CONFIG_DMR\n\t\tkeyed = keyed || sm->dmr_keyed || sm->view.dmr.state == RDMR_TX;\n'
+         '#if RADIO_SM_CW\n\t\tkeyed = keyed || sm->cw_phase != 0;\n#endif\n#endif\n'
+         '#if CONFIG_DMR_EMERGENCY\n\t\tkeyed = keyed || sm->em_keyed;\n#endif\n'
+         '\t\tif (!keyed) {\n'
+         '\t\t\tsm->view.state = RS_IDLE;\n\t\t\tsm->view.tx_deny = TXDENY_NONE;\n\t\t\tsm->view.tot_warning = false;\n'
+         '\t\t\toutputs(sm);\n\t\t\tchanged(sm);\n'
+         '\t\t\tif (sm->retune_pending) {\n\t\t\t\tsm->retune_pending = false;\n\t\t\t\ttune(sm, now_ms);\n\t\t\t}\n'
+         '\t\t}\n'
+         '\t}\n'
+         '#endif\n'
+         '\tif (scan_on(&sm->scan) && !sm->ptt && sm->view.state != RS_TX && sm->view.state != RS_TX_DENIED && !sm->hotspot) {\n'),
+    ])
+    # S2: the DMR emergency (the alarm, the hot mic, its target) works on the channel the radio is on, which in the ring
+    # is whichever letter it is on now: the emergency key ends the watch on the selected letter when that is DMR, else
+    # it is refused with a toast (ui_mwatch.inc ui_dual_emergency_ok; without multi-watch the weak one lets it through)
+    transform('core/ui/ui_svc_emergency.c', [
+        ('\tif (dmr_emergency_start()) {\n\t\treturn true;\n\t}\n',
+         '#if CONFIG_MULTI_WATCH\n'
+         '\tif (!ui_dual_emergency_ok()) {\n\t\treturn false;\t// DDM32 Plus: not on a letter it can\'t be for\n\t}\n'
+         '#endif\n'
+         '\tif (dmr_emergency_start()) {\n\t\treturn true;\n\t}\n'),
+        ('bool ui_svc_emergency(bool on)\n{\n',
+         '#if CONFIG_MULTI_WATCH\n'
+         '// DDM32 Plus: dual / multi-watch\'s say (ui_mwatch.inc); this one where the UI has no watch (tests, other builds)\n'
+         '__attribute__((weak)) bool ui_dual_emergency_ok(void)\n{\n\treturn true;\n}\n'
+         '#endif\n'
+         'bool ui_svc_emergency(bool on)\n{\n'),
     ])
 

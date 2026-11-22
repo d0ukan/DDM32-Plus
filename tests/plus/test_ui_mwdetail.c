@@ -242,8 +242,45 @@ static void sel_during_tx(void)
 	layout();
 }
 
+/* The radio chooses another letter itself (the debug link selects A): the pill follows at once, no request back */
+static void radio_selects(void)
+{
+	start("the radio selects another letter");
+	run("mwatch:4 quick 7 wait:2500 abkey abkey wait:300 expect:mwsel=C");
+	run("dlsel:a wait:300 expect:mwsel=A");
+	layout();
+}
+
+#if CONFIG_DMR_EMERGENCY
+/* The emergency key in the ring (ui_svc_emergency.c asks ui_dual_emergency_ok): the selected letter DMR (A, COUNTY
+ * DMR): the watch ends there; an FM letter selected (B, County fire): refused, the watch goes on */
+static void emergency_key(void)
+{
+	start("the emergency key in the ring");
+	run("mwatch:4 quick 7 wait:2500 expect:dual=1 expect:mwsel=A");
+	if (!ui_dual_emergency_ok()) {
+		printf("FAIL %s: refused on a DMR letter\n", name);
+		fails++;
+	}
+	run("wait:300 expect:dual=0");
+	run("mwatch:4 quick 7 wait:2500 abkey wait:300 expect:dual=1 expect:mwsel=B");
+	if (ui_dual_emergency_ok()) {
+		printf("FAIL %s: let through on an FM letter\n", name);
+		fails++;
+	}
+	run("wait:100 expect:dual=1");
+	if (!turkish)
+		run("expect:toast=Emergency:_select_a_DMR_letter");
+	layout();
+}
+#endif
+
 typedef void (*case_fn)(void);
-static const case_fn all[] = { ring4, ring6, ring_p25, pair_p25, sel_during_tx };
+static const case_fn all[] = { ring4, ring6, ring_p25, pair_p25, sel_during_tx, radio_selects,
+#if CONFIG_DMR_EMERGENCY
+			       emergency_key,
+#endif
+};
 
 int main(void)
 {

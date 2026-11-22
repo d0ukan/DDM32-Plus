@@ -905,6 +905,11 @@ int native_lab_request(radio_sm_t *sm, const radio_req_t *r)
         if(r->type==RREQ_POWER_OFF) {
             sm->ptt=native_ptt=false;channel_denial=0;p25_lab_live_up();
         } else if(native_ptt || live_owner())return 1;
+#if CONFIG_MULTI_WATCH
+        /* DDM32 Plus: a new selection (or ring) that keeps this letter: no retune, the P25 call it holds goes on */
+        if((r->type==RREQ_MWATCH || r->type==RREQ_DUAL) && channel_selected && !channel_handoff &&
+           radio_sm_dual_keeps(sm,r)) return 0;
+#endif
         return channel_let_go(sm);
     }
 #endif

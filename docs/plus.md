@@ -3759,6 +3759,18 @@ P25 channel to put on Home). Radio rows HD1-HD4.
 
 Host tests added: the burst and the hot mic from every letter of the owner's A / B / C and every ring position, and with a P25 call holding B, the time-out off (no native transmission, the burst only on an FM letter, nothing left on the air; the hot-mic cases fail with the code before); a selection asked during TX (radio side), the UI's refusal and the pill moving after it (`test_ui_mwdetail.c`); RS_RX left at the give back; the listen-only cases above (the 3 s case fails with the 8 s cooldown); the zone scan's frames-without-voice rule (`tests/classic/test_scan.inc`: 2 s, then 8 s); the names (EN toasts and strip words; the layout checks in EN and TR, normal and Large text).
 
+**Second review round** (branch `mwfix2`):
+
+| # | Found | Fix |
+|---|---|---|
+| S1 | The once-a-second re-ask of the pill's letter (RREQ_MWATCH) makes the native receiver let a letter go (`channel_let_go`): with a mismatch that stays (the radio refuses the ring), a P25 call held on a letter was cut every second | asked again twice at most, never while a call comes in (RS_RX); then the pill takes the radio's letter ("Talking on C"). The radio choosing another letter itself (the debug link) is taken at once, without a request back (`mw_adopt`). And a selection (the A/B key, a re-ask) whose ring still has the letter a P25 call is held on no longer lets the native receiver go: the radio core doesn't retune for it (`radio_sm_dual_keeps`), the call plays on, PTT goes to the new letter |
+| S2 | The DMR emergency (alarm, hot mic, its talk target, `data_can_send`) works on the channel the radio is on: in the ring, the letter it happens to be on | the emergency key while a watch runs: the selected letter DMR: the watch ends there first; else refused, toast "Emergency: select a DMR letter" ("Acil durum: DMR harfi seçin"). ARS and text replies still answer on the letter the data came in on |
+| M1 | A safety net for any TX / TX denied left in the view | in the ring's poll, TX / TX denied with PTT up and nothing keyed (burst, roger, sub-audio tail, VOX, DMR keying or TX, CW, the hot mic) is cleared, and a retune that waited for it is done |
+| M3 | The S3 retry's cost | a P25 conversation on another talk group on a ring letter takes it 2.5 s, then 2 s free, then again (the other letters get about 45 % of the ring until the 8 s cooldown applies, from the second time within 10 s) |
+| M5 | Ring PTT on VFO letters untested | host test (VFO modes build): C a P25 VFO (145.575, NAC $456, TG 99) keyed natively with its NAC from every ring position; D a YSF VFO refused (TX denied, nothing keyed) |
+
+Host tests added: a selection during a held P25 call (`test_mwatch_radio.inc`; fails without the fix), the debug link's selection and the UI flows (`test_ui_mwdetail.c`: the radio selecting A, the emergency key on a DMR and an FM letter), the safety net (`test_mwatch_radio.inc`), the VFO letters (`test_vfox_radio.inc`).
+
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free (720 after the review round), UI 184 B: the radio task's deepest path is still the P25 search's give back):
 
