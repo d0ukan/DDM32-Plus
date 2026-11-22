@@ -809,6 +809,24 @@ radio's over, whether "Probe ..." showed and on which frequency, and how long th
 20-30 dB during the over says the receiver's level reading (FD6818 register 0x67) is desensed across the range by the
 strong signal; "Probe 436.2750" shown but no find says the DMR modem's lock in the 1.1 s window is the limit.
 
+## Faster searches (branch `fastsrch`, docs/plus.md "Faster searches (beta.9 candidate)")
+
+Receive only in every row: our radio keys nothing (PTT stops the search). The other radio transmits on the owner's
+authorised frequencies. The PC's Search log page runs in every row (it shows the stats line once a second and the CSV
+keeps it); held 0 on the search screen switches fast / classic ("Search: fast" / "Search: classic (beta.8)"). Nothing
+here was measured yet: the expectations are the host model's.
+
+| # | Do | Expect |
+|---|---|---|
+| FS-1 | Nothing on air. DMR search 430-440 MHz (range editor `*`), 1 minute classic, then 1 minute fast | "pass" about 60 s classic, about 40 s fast (801 steps); probes 0 in both; the screen "Sweep ... 13/s" classic, "20/s" fast. Probes or hits on fast only = the 10 ms settle is too short on this radio: send the stats lines |
+| FS-2 | The other radio DMR direct mode 436.275, CC1, TS1, low power, 5-10 s overs, 5 s pauses. DMR search 436.000-436.500: classic 2 minutes, then fast 2 minutes (start each anew so FIRST_MS counts from the start) | both find "436.2750 CC1 TS1 DIR"; fast's "first find" and "seen->found" about half classic's (model: median 2.6 -> 1.3 s); calls a minute about equal |
+| FS-3 | FS-2 with All digital search | found as DMR in both; fast first find shorter (model 2.9 -> 1.5 s) |
+| FS-4 | The other radio P25 (NAC $659, TG 101) on 433.500; P25 search +-1 MHz, classic then fast | about the same in both (the P25 sweep didn't change); write down "sync" and "max": the native receiver's lock time |
+| FS-5 | The other radio's over cut short while the screen shows "Probe 436.2750" (unkey at once), then keyed again within 10 s; DMR search 430-440 MHz | fast: "gone" +1, the next over found within a few seconds ("watch" +1); classic: found only when the pass comes back (up to a minute) |
+| FS-6 | Two radios if available: FM on 436.300 (long over) and DMR on 436.275; All digital search 436.000-436.500, fast | the FM carrier probed twice ("no sync" +2), then left alone for 2 minutes; the DMR found |
+| FS-7 | A DMR repeater in range (if any): DMR search around it, fast | found as RPT; "early" stays 0 for it (the early end is for steady carriers with no burst) |
+| FS-8 | Safety as before, fast: PTT during "Probe"; leave the screen; a watch running then OK on the search | PTT stops the search and keys nothing; it stops 5 s after leaving; "Stop the scan or watch first" |
+
 ## Upstream RadioFoundry fixes (branch `rfports`, docs/plus.md "Upstream RadioFoundry fixes")
 
 Each step that opens the serial port, installs, restarts or transmits needs the owner's approval in chat first.

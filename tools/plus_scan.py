@@ -26,6 +26,12 @@ through the hunks below.
                 1.1 s (DMR) and P25 1.2 s, a carrier that went off the air during its probe never skipped, the
                 steps a second on the search screen. The radio core hands the engines the level while they probe.
                 In the engines (spectrum/p25search.c, dmrsearch.c, searchsure.h). Needs SEARCH_FAST.
+  SEARCH_HYBRID (branch fastsrch, docs/plus.md "Faster searches (beta.9 candidate)") counters the PC reads (the X.st
+                line of the search log sections) and the "fast" algorithm, chosen on the search screens (held 0;
+                "classic" is beta.8's): the DMR and all digital sweeps read a quiet step in two polls from samples on
+                the radio task's 10 ms tick; carriers left undecided are read again between steps; a steady carrier
+                not digital twice in a row is skipped for minutes; a DMR probe of a steady carrier ends after 0.4 s.
+                In spectrum/searchhy.* and the engines; the tick hook below. Needs SEARCH_SURE.
 """
 
 SRANGE = 'integration/radiofoundry/srange/'
@@ -34,6 +40,8 @@ SRANGE = 'integration/radiofoundry/srange/'
 def prepare_scan(transform, install):
     install('core/radio/srange.h', SRANGE + 'srange.h')
     install('core/radio/searchsure.h', 'integration/radiofoundry/spectrum/searchsure.h')
+    install('core/radio/searchhy.h', 'integration/radiofoundry/spectrum/searchhy.h')
+    install('core/radio/searchhy.c', 'integration/radiofoundry/spectrum/searchhy.c')
     for f in ('ui_srange.c', 'ui_srange.h'):
         install('core/ui/' + f, SRANGE + f)
 
@@ -49,7 +57,10 @@ def prepare_scan(transform, install):
          '$(error SEARCH_FAST needs P25_SEARCH=y or DMR_SEARCH=y)\nendif\nendif\n'
          'CONFIG_SEARCH_SURE ?= n\nFEATURES += SEARCH_SURE\n'
          'ifeq ($(CONFIG_SEARCH_SURE),y)\nifneq ($(CONFIG_SEARCH_FAST),y)\n'
-         '$(error SEARCH_SURE needs SEARCH_FAST=y)\nendif\nendif\n'),
+         '$(error SEARCH_SURE needs SEARCH_FAST=y)\nendif\nendif\n'
+         'CONFIG_SEARCH_HYBRID ?= n\nFEATURES += SEARCH_HYBRID\n'
+         'ifeq ($(CONFIG_SEARCH_HYBRID),y)\nifneq ($(CONFIG_SEARCH_SURE),y)\n'
+         '$(error SEARCH_HYBRID needs SEARCH_SURE=y)\nendif\nendif\n'),
         # after MULTI_WATCH's own lines
         ('$(error MULTI_WATCH needs DUAL_WATCH=y)\nendif\nendif\n',
          '$(error MULTI_WATCH needs DUAL_WATCH=y)\nendif\nendif\n'
@@ -64,6 +75,7 @@ def prepare_scan(transform, install):
          '#endif\n#ifndef CONFIG_SEARCH_FAST\n#define CONFIG_SEARCH_FAST 0\t/* DDM32 Plus faster searches (tools/plus_scan.py) */\n'
          '#endif\n#ifndef CONFIG_MWATCH_FAST\n#define CONFIG_MWATCH_FAST 0\t/* DDM32 Plus faster ring (tools/plus_scan.py) */\n'
          '#endif\n#ifndef CONFIG_SEARCH_SURE\n#define CONFIG_SEARCH_SURE 0\t/* DDM32 Plus surer searches (tools/plus_scan.py) */\n'
+         '#endif\n#ifndef CONFIG_SEARCH_HYBRID\n#define CONFIG_SEARCH_HYBRID 0\t/* DDM32 Plus faster searches, beta.9 (tools/plus_scan.py) */\n'
          '#endif\n'),
     ])
 
@@ -87,6 +99,20 @@ def prepare_scan(transform, install):
          '\t\t}\n'
          '#endif\n'
          '\t\tif (now_ms - p25s_shown_ms >= 250u) {\n'),
+    ])
+
+    # SEARCH_HYBRID: the DMR and all digital sweeps' samples on the 10 ms tick (radio/dmrsearch.h DMRS_SAMPLE_MS); only
+    # while a fast search's step waits for them, so nothing else reads the FD6818 more often
+    transform('core/radio/radio_sm.c', [
+        ('void radio_sm_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n',
+         'void radio_sm_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n'
+         '#if CONFIG_SEARCH_HYBRID && CONFIG_DMR_SEARCH\n'
+         '\tif (dmrs_sampling(now_ms)) {\n'
+         '\t\tradio_status_t st;\t// DDM32 Plus faster search: the sweep step\'s level, sampled every tick\n'
+         '\t\tboard.radio->status(&st);\n'
+         '\t\tdmrs_sample(st.rssi_dbm, now_ms);\n'
+         '\t}\n'
+         '#endif\n'),
     ])
 
     # Item 1: * on the two search screens opens their range editor, not quick settings

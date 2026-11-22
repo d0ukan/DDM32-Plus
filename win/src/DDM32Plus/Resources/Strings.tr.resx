@@ -1529,6 +1529,33 @@ Telsizdeki önceki paket hâlâ kullanımda.</value>
   <data name="SLog_Missed" xml:space="preserve">
     <value>({0} konuşma kaçmış olabilir: telsiz iki okuma arasında 8'den fazla buldu)</value>
   </data>
+  <data name="SLog_Stat_Fast" xml:space="preserve">
+    <value>Hızlı</value>
+  </data>
+  <data name="SLog_Stat_Classic" xml:space="preserve">
+    <value>Klasik</value>
+  </data>
+  <data name="SLog_Stat_Pass" xml:space="preserve">
+    <value>tur {0} sn ({1} adım)</value>
+  </data>
+  <data name="SLog_Stat_Probes" xml:space="preserve">
+    <value>deneme {0}: bulundu {1}, senk yok {2}, kısmi {3}, kayboldu {4}</value>
+  </data>
+  <data name="SLog_Stat_Skips" xml:space="preserve">
+    <value>atlandı {0}, erken {1}, izleme {2}</value>
+  </data>
+  <data name="SLog_Stat_Probing" xml:space="preserve">
+    <value>deneme payı %{0}</value>
+  </data>
+  <data name="SLog_Stat_First" xml:space="preserve">
+    <value>ilk bulma {0} sn</value>
+  </data>
+  <data name="SLog_Stat_Seen" xml:space="preserve">
+    <value>görülme-&gt;bulma {0} sn</value>
+  </data>
+  <data name="SLog_Stat_Sync" xml:space="preserve">
+    <value>senk {0} sn (en çok {1} sn)</value>
+  </data>
   <data name="Menu_File" xml:space="preserve">
     <value>_Dosya</value>
   </data>

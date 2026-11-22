@@ -1529,6 +1529,33 @@ The pack the radio had is still in force.</value>
   <data name="SLog_Missed" xml:space="preserve">
     <value>({0} calls may be missed: the radio found more than 8 between two reads)</value>
   </data>
+  <data name="SLog_Stat_Fast" xml:space="preserve">
+    <value>Fast</value>
+  </data>
+  <data name="SLog_Stat_Classic" xml:space="preserve">
+    <value>Classic</value>
+  </data>
+  <data name="SLog_Stat_Pass" xml:space="preserve">
+    <value>pass {0} s ({1} steps)</value>
+  </data>
+  <data name="SLog_Stat_Probes" xml:space="preserve">
+    <value>probes {0}: found {1}, no sync {2}, partial {3}, gone {4}</value>
+  </data>
+  <data name="SLog_Stat_Skips" xml:space="preserve">
+    <value>skipped {0}, early {1}, watch {2}</value>
+  </data>
+  <data name="SLog_Stat_Probing" xml:space="preserve">
+    <value>probing {0}%</value>
+  </data>
+  <data name="SLog_Stat_First" xml:space="preserve">
+    <value>first find {0} s</value>
+  </data>
+  <data name="SLog_Stat_Seen" xml:space="preserve">
+    <value>seen-&gt;found {0} s</value>
+  </data>
+  <data name="SLog_Stat_Sync" xml:space="preserve">
+    <value>sync {0} s (max {1} s)</value>
+  </data>
   <data name="Menu_File" xml:space="preserve">
     <value>_File</value>
   </data>

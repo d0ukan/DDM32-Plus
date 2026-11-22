@@ -18,7 +18,16 @@
  * wraps; dmrs and alls show the same engine's), ID an entry's serial given when it was made (p25s 16 bits, dmrs /
  * alls 8 bits) that stays while its code / group are filled in. The PC follows each entry by engine + ID + frequency
  * + mode and adds the change of its CALLS (a call the radio moves to the right talkgroup goes down on one entry and up
- * on the other); seq going back is a restart, seq growing more than the entries' calls is calls lost between polls. */
+ * on the other); seq going back is a restart, seq growing more than the entries' calls is calls lost between polls.
+ * DDM32 Plus faster searches (CONFIG_SEARCH_HYBRID, radio/searchhy.h): the section of the engine that ran last ends
+ * with its counters (the line is left out when the section is full; the other sections have none):
+ *   X.st=ALGO,UP_MS,PASSES,PASS_MS,PASS_STEPS,PROBES,FOUND,NOSYNC,PARTIAL,GONE,SKIPPED,EARLY,WATCH,PROBE_MS,SWEEP_MS,
+ *        FIRST_MS,SEEN_MS,SYNC_LAST,SYNC_MAX
+ *     ALGO fast | classic; UP_MS since the search started (stopped: to its last probe / sweep change); PASS_MS /
+ *     PASS_STEPS the last complete pass (0 = none yet); the probes' outcomes; SKIPPED targets in the skip list; EARLY
+ *     probes ended early; WATCH probes of watched carriers; PROBE_MS / SWEEP_MS the time in each; FIRST_MS start to
+ *     the first find, SEEN_MS the last find's carrier first read strong to found (0 = none); SYNC_LAST / SYNC_MAX a
+ *     found probe's wait for its mode's first frame. */
 #include "config.h"
 #include "hal_time.h"
 #include "debuglink/debuglink.h"
@@ -29,11 +38,30 @@
 #if CONFIG_DMR_SEARCH
 #include "radio/dmrsearch.h"
 #endif
+#if CONFIG_SEARCH_HYBRID
+#include "radio/searchhy.h"
+#endif
 
 static unsigned age_s(uint32_t now, uint32_t heard)
 {
 	return (unsigned)((now - heard) / 1000u);
 }
+
+#if CONFIG_SEARCH_HYBRID
+/* The counters' line, when this section's engine owns them (radio/searchhy.h) */
+static void __attribute__((noinline)) st_line(dl_text_t *t, const char *x, uint8_t owner, bool running, uint32_t now)
+{
+	sh_stats_t v;
+	if (!sh_view(owner, running, now, &v))
+		return;
+	dl_text(t, "%s.st=%s,%lu,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%lu,%lu,%lu,%lu,%u,%u\n", x, v.fast ? "fast" : "classic",
+		(unsigned long)(v.mark_ms - v.start_ms), (unsigned)v.passes, (unsigned long)v.pass_ms,
+		(unsigned)v.pass_steps, (unsigned)v.probes, (unsigned)v.found, (unsigned)v.nosync, (unsigned)v.partial,
+		(unsigned)v.gone, (unsigned)v.skipped, (unsigned)v.early, (unsigned)v.watch, (unsigned long)v.probe_ms,
+		(unsigned long)v.sweep_ms, (unsigned long)v.first_ms, (unsigned long)v.seen_ms, (unsigned)v.sync_last,
+		(unsigned)v.sync_max);
+}
+#endif
 
 void searchlog_view_p25(dl_text_t *t)
 {
@@ -52,6 +80,9 @@ void searchlog_view_p25(dl_text_t *t)
 			(unsigned)p.f.tg, (unsigned long)p.f.src, (unsigned)p.f.calls, age_s(now, p.f.heard_ms),
 			(unsigned)p.f.id);
 	}
+#if CONFIG_SEARCH_HYBRID
+	st_line(t, "p25s", SH_P25, p25s_on(), now);
+#endif
 #else
 	dl_text(t, "p25s.built=0\n");
 #endif
@@ -75,6 +106,9 @@ void searchlog_view_dmr(dl_text_t *t)
 			p.f.group ? 1u : 0u, p.f.enc ? 1u : 0u, (unsigned long)p.f.dst, (unsigned long)p.f.src,
 			(unsigned)p.f.calls, age_s(now, p.f.heard_ms), (unsigned)p.f.id);
 	}
+#if CONFIG_SEARCH_HYBRID
+	st_line(t, "dmrs", SH_DMR, dmrs_on(), now);
+#endif
 #else
 	dl_text(t, "dmrs.built=0\n");
 #endif
@@ -103,6 +137,9 @@ void searchlog_view_all(dl_text_t *t)
 			ysf ? 0ul : (unsigned long)p.f.src, (unsigned)p.f.calls, age_s(now, p.f.heard_ms), (unsigned)p.f.id,
 			call);
 	}
+#if CONFIG_SEARCH_HYBRID
+	st_line(t, "alls", SH_ALL, dmrs_on(), now);
+#endif
 #else
 	dl_text(t, "alls.built=0\n");
 #endif

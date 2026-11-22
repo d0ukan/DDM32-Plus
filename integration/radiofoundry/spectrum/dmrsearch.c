@@ -12,6 +12,12 @@
 #endif
 #include "radio/searchsure.h"
 #endif
+#if CONFIG_SEARCH_HYBRID
+#if !CONFIG_SEARCH_SURE
+#error "SEARCH_HYBRID builds on SEARCH_SURE"
+#endif
+#include "radio/searchhy.h"
+#endif
 
 static dmrs_view_t s;
 #if CONFIG_ALL_SEARCH
@@ -73,6 +79,16 @@ static bool tdma_hint, level_known, low_seen, tdma, some;
 static uint8_t ups;
 static uint32_t on_ms, step_ms0, step_q4;
 #endif
+#if CONFIG_SEARCH_HYBRID
+/* The faster search (radio/searchhy.h, dmrsearch.h DMRS_SAMPLE_MS): the step's samples on the radio task's 10 ms tick
+ * and its polls from DMRS_SAMPLE_MS after the retune (their peak, the first and last one's ms after the retune, how
+ * many); the probe's level readings and whether one was in a gap (a steady carrier: none); the revisit read now is a
+ * watched carrier's, whose turn the next revisit is */
+static int16_t fpeak;
+static uint8_t fn, ffirst, flast, preads;
+static bool gapped, watching, watch_turn;
+static uint32_t sup_hz;		/* the first weaker run a stronger one ended in the run followed now, 0 = none */
+#endif
 
 static void begin_write(void) { seq++; __asm__ volatile("" ::: "memory"); }
 static void end_write(void) { __asm__ volatile("" ::: "memory"); seq++; }
@@ -115,7 +131,14 @@ static void add_skip(uint32_t hz, uint32_t now_ms)
 				pick = i;
 	}
 	skip[pick].hz = hz;
+#if CONFIG_SEARCH_HYBRID
+	/* fast: a steady carrier none of the search's modes twice in a row (a busy FM carrier, a beacon) is skipped for
+	 * minutes; one whose level rose and fell as a direct mode DMR carrier's keeps classic's (radio/searchhy.h) */
+	bool steady = !tdma && !tdma_hint && !some;
+	skip[pick].until_ms = now_ms + (again ? (sh_fast() && steady ? SH_REJECT_MS : DMRS_SKIP_LONG_MS) : DMRS_SKIP_MS);
+#else
 	skip[pick].until_ms = now_ms + (again ? DMRS_SKIP_LONG_MS : DMRS_SKIP_MS);
+#endif
 }
 #else
 	unsigned pick = 0;
@@ -148,13 +171,17 @@ static uint32_t revisit_pick(uint32_t now_ms)
 }
 
 /* The next step after `hz`, wrapping to the bottom (a full sweep) */
-static uint32_t next_step(uint32_t hz)
+static uint32_t next_step(uint32_t hz, uint32_t now_ms)
 {
 	uint32_t n = hz + s.step_hz;
 	if (n > s.hi_hz) {
 		n = s.lo_hz;
 		s.sweeps++;
+#if CONFIG_SEARCH_HYBRID
+		sh_pass(now_ms);
+#endif
 	}
+	(void)now_ms;
 	return n;
 }
 
@@ -163,12 +190,28 @@ static uint32_t advance(uint32_t now_ms)
 {
 	if (revisiting) {
 		revisiting = false;
+#if CONFIG_SEARCH_HYBRID
+		watching = false;
+#endif
 		return resume_hz;
 	}
-	uint32_t n = next_step(s.at_hz);
+	uint32_t n = next_step(s.at_hz, now_ms);
 	if (++since_revisit >= DMRS_REVISIT_STEPS) {
 		since_revisit = 0;
+#if CONFIG_SEARCH_HYBRID
+		/* fast: the found list and the watched carriers take turns (either alone when the other has none) */
+		bool first = sh_fast() && (watch_turn = !watch_turn);
+		uint32_t r = first ? sh_watch_pick(s.lo_hz, s.hi_hz, now_ms, skipped) : 0u;
+		watching = r != 0;
+		if (r == 0)
+			r = revisit_pick(now_ms);
+		if (r == 0 && sh_fast() && !first) {
+			r = sh_watch_pick(s.lo_hz, s.hi_hz, now_ms, skipped);
+			watching = r != 0;
+		}
+#else
 		uint32_t r = revisit_pick(now_ms);
+#endif
 		if (r != 0 && r != n) {
 			resume_hz = n;
 			revisiting = true;
@@ -188,6 +231,9 @@ static void tuned(uint32_t now_ms)
 #endif
 #if CONFIG_SEARCH_SURE
 	nset = 0;
+#endif
+#if CONFIG_SEARCH_HYBRID
+	fn = 0;
 #endif
 }
 
@@ -221,6 +267,10 @@ static uint32_t start(uint8_t kind, uint32_t lo_hz, uint32_t hi_hz, uint32_t ste
 	s.at_hz = lo_hz;
 	s.sweeps = s.hits = s.found_dmr = 0;
 	end_write();
+#if CONFIG_SEARCH_HYBRID
+	sh_start(kind == DMRS_KIND_DMR ? SH_DMR : SH_ALL, now_ms);
+	watching = watch_turn = false;
+#endif
 	floor_q4 = -125 * 16;
 	memset(skip, 0, sizeof skip);
 	revisiting = false;
@@ -318,6 +368,9 @@ static void step_note(uint32_t now_ms)
 {
 	uint32_t dt = now_ms - step_ms0;
 	step_ms0 = now_ms;
+#if CONFIG_SEARCH_HYBRID
+	sh_step(now_ms);
+#endif
 	if (dt >= 1000u)
 		return;
 	step_q4 = step_q4 ? (uint32_t)((int32_t)step_q4 + ((int32_t)(dt * 16u) - (int32_t)step_q4) / 8) : dt * 16u;
@@ -343,6 +396,11 @@ static void probe_here(int16_t lvl, uint32_t now_ms)
 	heard_here = was_call = ended = false;
 	level_known = low_seen = tdma = some = false;
 	ups = 0;
+#if CONFIG_SEARCH_HYBRID
+	sh_probe(watching, now_ms);
+	watching = gapped = false;
+	preads = 0;
+#endif
 }
 
 /* A step's readings are complete (strong against the floor; its level the peak): follow a run, probe its middle, or
@@ -363,6 +421,9 @@ static uint32_t sure_step(bool strong, uint32_t now_ms, bool *hit)
 		}
 		/* nothing there now (the over ended): on past the run, nothing skipped */
 		u.climbing = false;
+#if CONFIG_SEARCH_HYBRID
+		sh_unsettled(s.at_hz, now_ms);	/* fast: read again between steps for a while */
+#endif
 		if (sure_wide_floor(&u, &floor_q4))
 			s.floor_dbm = (int16_t)(floor_q4 / 16);
 		revisiting = false;
@@ -375,6 +436,10 @@ static uint32_t sure_step(bool strong, uint32_t now_ms, bool *hit)
 	sure_floor(&u, &floor_q4, lvl, strong);
 	s.floor_dbm = (int16_t)(floor_q4 / 16);
 	bool cand = strong && !skirt;
+#if CONFIG_SEARCH_HYBRID
+	if (cand)
+		sh_seen(s.at_hz, lvl, now_ms);
+#endif
 	if (revisiting && cand && !skipped(s.at_hz, now_ms)) {
 		probe_here(lvl, now_ms);	/* a find read again: its own frequency, no run */
 		end_write();
@@ -384,7 +449,19 @@ static uint32_t sure_step(bool strong, uint32_t now_ms, bool *hit)
 	if (!revisiting && (u.climbing || cand)) {
 		stage = ST_QUICK;
 		prev_hz = 0;
+#if CONFIG_SEARCH_HYBRID
+		bool was = u.climbing;
+		uint32_t before = was ? sure_target(&u, s.step_hz) : 0u, lo0 = u.run_lo;
+#endif
 		int r = sure_climb(&u, s.at_hz, lvl, cand);
+#if CONFIG_SEARCH_HYBRID
+		/* fast: the first weaker run a stronger one ended (classic forgets it): a carrier of its own may be there (a
+		 * weak digital signal just below a strong FM one, whose run took it in). Kept for the run's end (below) */
+		if (!was)
+			sup_hz = 0;
+		else if (sh_fast() && r == SURE_MORE && u.run_lo == s.at_hz && u.run_lo != lo0 && sup_hz == 0)
+			sup_hz = before;
+#endif
 		if (r == SURE_WIDE && !sure_peaked(&u)) {
 			/* the band's level raised, no carrier in it: the floor (one step clearly over the rest: probed below) */
 			if (sure_wide_floor(&u, &floor_q4))
@@ -402,9 +479,20 @@ static uint32_t sure_step(bool strong, uint32_t now_ms, bool *hit)
 		 * step after the run. SURE_WIDE with one step clearly over the rest: that step (never hidden, hole hunt A3);
 		 * the run's level becomes the floor when it ends */
 		uint32_t t = sure_target(&u, s.step_hz);
-		resume_hz = u.run_hi + s.step_hz <= s.hi_hz ? u.run_hi + s.step_hz : next_step(u.run_hi);
+#if CONFIG_SEARCH_HYBRID
+		/* fast: that weaker run, two steps or more below the target (one step below is the target's own skirt, as
+		 * in most cases two steps are not: 45 dB down), is watched: read again between steps and probed on its own
+		 * frequency if still strong */
+		if (sup_hz != 0 && sup_hz + 2u * s.step_hz <= t)
+			sh_unsettled(sup_hz, now_ms);
+		sup_hz = 0;
+#endif
+		resume_hz = u.run_hi + s.step_hz <= s.hi_hz ? u.run_hi + s.step_hz : next_step(u.run_hi, now_ms);
 		revisiting = true;
 		if (skipped(t, now_ms)) {
+#if CONFIG_SEARCH_HYBRID
+			sh_skipped();
+#endif
 			if (sure_wide_floor(&u, &floor_q4))
 				s.floor_dbm = (int16_t)(floor_q4 / 16);	/* the band's level raised, no carrier: the floor */
 			sure_set_skirt(&u, now_ms, s.sweeps);	/* a carrier known not to be ours: its steps passed over */
@@ -452,6 +540,36 @@ static void level_note(int16_t lvl, uint32_t now_ms)
 		low_seen = true;
 	}
 	level_known = true;
+#if CONFIG_SEARCH_HYBRID
+	if (!on)
+		gapped = true;
+	if (preads < 255u)
+		preads++;
+#endif
+}
+#endif
+
+#if CONFIG_SEARCH_HYBRID
+bool dmrs_sampling(uint32_t now_ms)
+{
+	return sh_fast() && s.phase == DMRS_SWEEP && stage == ST_QUICK && now_ms - tuned_ms >= DMRS_SAMPLE_MS &&
+	       now_ms - tuned_ms < 250u;
+}
+
+void dmrs_sample(int16_t rssi_dbm, uint32_t now_ms)
+{
+	if (!dmrs_sampling(now_ms))
+		return;
+	if (rssi_dbm == 0)
+		rssi_dbm = -140;
+	uint8_t at = (uint8_t)(now_ms - tuned_ms);
+	if (fn == 0 || rssi_dbm > fpeak)
+		fpeak = rssi_dbm;
+	if (fn == 0)
+		ffirst = at;
+	flast = at;
+	if (fn < 255u)
+		fn++;
 }
 #endif
 
@@ -477,6 +595,19 @@ uint32_t dmrs_sweep(int16_t rssi_dbm, uint32_t now_ms, bool *hit)
 	if (rssi_dbm == 0)
 		rssi_dbm = -140;
 	int16_t floor = (int16_t)(floor_q4 / 16);
+#if CONFIG_SEARCH_HYBRID
+	if (sh_fast() && stage == ST_QUICK) {
+		/* fast: the samples since DMRS_SAMPLE_MS (the 10 ms tick's and the polls') cover DMRS_SPAN_MS and none came
+		 * near a hit (half its margin, as the quick reading): a quiet step, two polls instead of three. Anything
+		 * else: the readings below, as classic */
+		dmrs_sample(rssi_dbm, now_ms);
+		if (fn != 0 && (unsigned)(flast - ffirst) >= DMRS_SPAN_MS &&
+		    !(fpeak >= DMRS_HIT_MIN_DBM - DMRS_HIT_DB / 2 && fpeak - floor >= DMRS_HIT_DB / 2)) {
+			peak = low = fpeak;
+			return sure_step(false, now_ms, hit);
+		}
+	}
+#endif
 #if CONFIG_SEARCH_FAST
 	if (now_ms - tuned_ms < DMRS_SETTLE_MS) {
 		/* The quick reading: it only marks the step for more readings, it never makes a hit by itself. Half the hit's
@@ -679,7 +810,7 @@ static uint32_t resume(uint32_t now_ms)
 		revisiting = false;
 		s.at_hz = resume_hz;
 	} else {
-		s.at_hz = next_step(s.at_hz);
+		s.at_hz = next_step(s.at_hz, now_ms);
 	}
 	read_ms = now_ms;
 	reads_seen = reads;
@@ -695,6 +826,10 @@ uint32_t dmrs_probe(const dmrs_heard_t *h, uint32_t now_ms)
 	uint32_t hz = 0;
 	begin_write();
 #if CONFIG_SEARCH_SURE
+#if CONFIG_SEARCH_HYBRID
+	if ((h->bursts != 0 || dmr) && !some)
+		sh_sync(now_ms - hit_ms);	/* the first frame since the mode's window began */
+#endif
 	if (h->bursts != 0 || dmr)
 		some = true;	/* frames of the mode probed (one is not enough to name it): this frequency is never skipped */
 	if (h->rssi_dbm != 0)
@@ -704,6 +839,9 @@ uint32_t dmrs_probe(const dmrs_heard_t *h, uint32_t now_ms)
 		if (!heard_here) {
 			heard_here = true;
 			s.found_dmr++;
+#if CONFIG_SEARCH_HYBRID
+			sh_found(s.at_hz, now_ms);
+#endif
 		}
 		note(h, h->call && !was_call, now_ms);
 	}
@@ -721,12 +859,23 @@ uint32_t dmrs_probe(const dmrs_heard_t *h, uint32_t now_ms)
 				end_ms = now_ms;
 			}
 			leave = now_ms - end_ms >= DMRS_HANG_MS;	/* a reply in the hang plays too */
+#if CONFIG_SEARCH_HYBRID
+			if (leave)
+				sh_end(SH_END_FOUND, false, s.at_hz, now_ms);
+#endif
 		} else if (!heard_here) {
 #if CONFIG_SEARCH_SURE
 			/* The carrier went off the air (its level under the hit's half margin for SURE_GONE_MS): the over ended
 			 * before the mode was heard. On at once, nothing skipped, no other mode tried */
 			bool gone = level_known && now_ms - on_ms >= SURE_GONE_MS;
 			leave = gone || now_ms - hit_ms >= window_ms();
+#if CONFIG_SEARCH_HYBRID
+			/* fast: a steady carrier (every level reading on, none in a gap: no direct mode TDMA) with no burst in
+			 * DMRS_EARLY_MS is no repeater either (a sync at least every 180 ms there): on (dmrsearch.h) */
+			bool early = sh_fast() && s.mode == DMRS_MODE_DMR && !leave && !tdma && !tdma_hint && !some &&
+				     level_known && !gapped && preads >= DMRS_EARLY_READS && now_ms - hit_ms >= DMRS_EARLY_MS;
+			leave = leave || early;
+#endif
 #else
 			const bool gone = false;
 			(void)gone;
@@ -736,6 +885,10 @@ uint32_t dmrs_probe(const dmrs_heard_t *h, uint32_t now_ms)
 			if (leave && !gone && s.kind == DMRS_KIND_ALL) {
 				uint8_t m = next_mode();
 				if (m != DMRS_MODES) {
+#if CONFIG_SEARCH_HYBRID
+					preads = 0;
+					gapped = false;
+#endif
 					s.mode = m;	/* not this mode: the next one, on the same frequency */
 					held = false;
 					hit_ms = now_ms;
@@ -749,6 +902,10 @@ uint32_t dmrs_probe(const dmrs_heard_t *h, uint32_t now_ms)
 				}
 			}
 #endif
+#if CONFIG_SEARCH_HYBRID
+			if (leave)
+				sh_end(gone ? SH_END_GONE : some ? SH_END_PARTIAL : SH_END_NOSYNC, early, s.at_hz, now_ms);
+#endif
 #if CONFIG_SEARCH_SURE
 			if (leave && !gone && !some)
 #else
@@ -758,6 +915,10 @@ uint32_t dmrs_probe(const dmrs_heard_t *h, uint32_t now_ms)
 								 * digital search: none of its modes (FM, a beacon, data) */
 		} else {
 			leave = now_ms - hit_ms >= DMRS_LATE_MS;	/* DMR, nothing to play: idle, data, encrypted */
+#if CONFIG_SEARCH_HYBRID
+			if (leave)
+				sh_end(SH_END_FOUND, false, s.at_hz, now_ms);
+#endif
 		}
 		if (leave)
 			hz = resume(now_ms);

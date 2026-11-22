@@ -567,7 +567,18 @@ pub fn slog_searches(lang: &str, book: &SearchLogBook) -> String {
     if book.missed() > 0 {
         text = format!("{text} {}", i18n::tf(lang, "slog_missed", &book.missed().to_string()));
     }
+    if let Some(stats) = slog_stats_line(lang, book) {
+        text = format!("{text}\n{stats}");
+    }
     text
+}
+
+/// The search statistics line of the engine shown ("P25: Fast | pass 4.1 s (161 steps) | ..."); None while no
+/// statistics are known (an older firmware sends none).
+pub fn slog_stats_line(lang: &str, book: &SearchLogBook) -> Option<String> {
+    let st = book.shown_stats()?;
+    let dec = if lang == "en" { '.' } else { ',' };
+    Some(format!("{}: {}", book.stats_engine?, st.describe(&|k| i18n::t(lang, k), dec)))
 }
 
 fn show_slog(ui: &AppWindow, status: Option<String>) {
@@ -619,16 +630,19 @@ fn slog_line(ui: &AppWindow, line: String) {
     }
     let Some(poll) = done else { return };
     let now = searchlog::local_stamp();
-    let (changed, path, lines) = with(|s| {
+    let (changed, path, lines, stats) = with(|s| {
         let changed = s.slog_book.add(&poll, now);
         let started = *s.slog_started.get_or_insert(now);
         let logs = s.paths.logs();
         let path = s.slog_file.get_or_insert_with(|| searchlog::session_path(&logs, started)).clone();
-        (changed, path, s.slog_book.groups())
+        let stats: Vec<(&str, searchlog::SearchStats)> =
+            s.slog_book.all_stats_seen().into_iter().map(|(n, st)| (n, st.clone())).collect();
+        (changed, path, s.slog_book.groups(), stats)
     });
+    let stats: Vec<(&str, &searchlog::SearchStats)> = stats.iter().map(|(n, st)| (*n, st)).collect();
     if changed {
         let (sep, dec) = searchlog::csv_format();
-        match searchlog::write(&path, &lines, sep, dec) {
+        match searchlog::write_with_stats(&path, &lines, sep, dec, &stats) {
             Ok(w) => {
                 if w.locked {
                     let note = trf("slog_locked", &w.path.display().to_string());

@@ -728,6 +728,7 @@ def main():
         "CONFIG_SEARCH_FAST="+("y" if args.plus else "n"),	# DDM32 Plus faster searches (round 15 item 2, tools/plus_scan.py)
         "CONFIG_MWATCH_FAST="+("y" if args.plus else "n"),	# DDM32 Plus faster multi-watch ring (round 15 item 3, tools/plus_scan.py)
         "CONFIG_SEARCH_SURE="+("y" if args.plus else "n"),	# DDM32 Plus surer searches (searchfix, tools/plus_scan.py)
+        "CONFIG_SEARCH_HYBRID="+("y" if args.plus else "n"),	# DDM32 Plus faster searches, counters (fastsrch, tools/plus_scan.py)
         "CONFIG_AIR_PROV="+("y" if args.plus else "n"),	# DDM32 Plus airfields by province (round 16, tools/plus_airprov.py)
         "CONFIG_SPECTRUM_COLOR="+("y" if args.plus else "n"),	# DDM32 Plus spectrum in colour (round 16, tools/plus_airprov.py)
         "CONFIG_SSTV_TX="+("y" if args.plus else "n"),	# DDM32 Plus SSTV send (docs/plus.md, tools/plus_sstvtx.py)

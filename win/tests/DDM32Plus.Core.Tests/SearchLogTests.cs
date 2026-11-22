@@ -384,6 +384,140 @@ public sealed class SearchLogTests : IDisposable
         Assert.False(SearchLogBook.HasSearchLog(["p25s.built=0", "dmrs.built=0", "alls.built=0"]));
         Assert.False(SearchLogBook.HasSearchLog([]));
     }
+
+    // ---- search statistics (firmware beta.9: the X.st line) ----
+
+    private const string St = "fast,60000,4,4100,161,12,3,7,1,1,4,2,3,3800,6200,6200,1400,420,810";
+
+    private static string[] WithSt(string p25St, string dmrSt = "", bool dmrOn = true)
+    {
+        var l = Poll(1, "p25s.f0=433500000,456,655,1234567,1,30,1", 0, "").ToList();
+        if (p25St.Length > 0)
+            l.Insert(l.IndexOf("p25s.seq=1") + 1, "p25s.st=" + p25St);
+        if (dmrSt.Length > 0)
+            l.Add("dmrs.st=" + dmrSt);
+        if (!dmrOn)
+            l[l.IndexOf("dmrs.on=1")] = "dmrs.on=0";
+        return [.. l];
+    }
+
+    private static Dictionary<string, string> Resx(string name)
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d is not null && !File.Exists(Path.Combine(d.FullName, "DDM32Plus.sln")))
+            d = d.Parent;
+        return System.Xml.Linq.XDocument.Load(Path.Combine(d!.FullName, "src", "DDM32Plus", "Resources", name)).Root!
+            .Elements("data").ToDictionary(e => (string)e.Attribute("name")!, e => (string)e.Element("value")!);
+    }
+
+    [Fact]
+    public void StatsLineIsParsedTolerantly()
+    {
+        var s = SearchStats.Parse(St)!;
+        Assert.Equal(("fast", 60000L, 4L, 4100L, 161L, 12L), (s.Algo, s.UpMs, s.Passes, s.PassMs, s.PassSteps, s.Probes));
+        Assert.Equal((3L, 7L, 1L, 1L, 4L, 2L, 3L), (s.Found, s.NoSync, s.Partial, s.Gone, s.Skipped, s.Early, s.Watch));
+        Assert.Equal((3800L, 6200L, 6200L, 1400L, 420L, 810L), (s.ProbeMs, s.SweepMs, s.FirstMs, s.SeenMs, s.SyncLast, s.SyncMax));
+        Assert.Equal(38L, s.ProbingPercent);
+        Assert.Equal("classic", SearchStats.Parse(St.Replace("fast", "Classic"))!.Algo);
+        Assert.NotNull(SearchStats.Parse(St + ",99,extra"));          // extra trailing fields: the first 19 count
+        Assert.Null(SearchStats.Parse(St[..St.LastIndexOf(',')]));    // 18 fields
+        Assert.Null(SearchStats.Parse(St.Replace("4100", "x")));      // not a number
+        Assert.Null(SearchStats.Parse(St.Replace("4100", "-1")));
+        Assert.Null(SearchStats.Parse(""));
+        Assert.Null(SearchStats.Parse("garbage"));
+        Assert.Null(SearchStats.Parse(St.Replace("fast", "")));
+    }
+
+    [Fact]
+    public void StatsLineTextInBothLanguages()
+    {
+        var s = SearchStats.Parse(St)!;
+        var en = Resx("Strings.resx");
+        var tr = Resx("Strings.tr.resx");
+        Assert.Equal("Fast | pass 4.1 s (161 steps) | probes 12: found 3, no sync 7, partial 1, gone 1 | skipped 4, early 2, " +
+                     "watch 3 | probing 38% | first find 6.2 s | seen->found 1.4 s | sync 0.42 s (max 0.81 s)",
+            s.Describe(k => en[k], CultureInfo.InvariantCulture));
+        Assert.Equal("Klasik | tur 4,1 sn (161 adım) | deneme 12: bulundu 3, senk yok 7, kısmi 1, kayboldu 1 | atlandı 4, erken 2, " +
+                     "izleme 3 | deneme payı %38 | ilk bulma 6,2 sn | görülme->bulma 1,4 sn | senk 0,42 sn (en çok 0,81 sn)",
+            (s with { Algo = "classic" }).Describe(k => tr[k], new CultureInfo("tr-TR")));
+        // nothing known yet: the parts without a value are left out
+        var none = SearchStats.Parse("fast,500,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")!;
+        Assert.Equal("Fast | probes 0: found 0, no sync 0, partial 0, gone 0 | skipped 0, early 0, watch 0",
+            none.Describe(k => en[k], CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void BookKeepsTheLatestStatsPerEngineAndShowsTheRunningOne()
+    {
+        var b = new SearchLogBook();
+        Assert.Null(b.ShownStats);
+        b.Add(WithSt(St, "classic,1000,1,2000,10,1,0,0,1,0,0,0,0,10,20,0,0,0,0"), T0);
+        Assert.Equal("P25", b.StatsEngine);              // both run: P25 first
+        Assert.Equal("fast", b.P25Stats!.Algo);
+        Assert.Equal("classic", b.DmrStats!.Algo);
+        b.Add(WithSt("", "classic,2000,1,2000,10,1,0,0,1,0,0,0,0,10,20,0,0,0,0"), T0.AddSeconds(1));
+        Assert.Equal(60000L, b.P25Stats!.UpMs);          // kept when a poll sends none
+        Assert.Equal(2000L, b.DmrStats!.UpMs);
+        // P25 stopped (its line stays), DMR runs: DMR is shown
+        var l = WithSt(St, "classic,3000,1,2000,10,1,0,0,1,0,0,0,0,10,20,0,0,0,0").ToList();
+        l[l.IndexOf("p25s.on=1")] = "p25s.on=0";
+        b.Add(l, T0.AddSeconds(2));
+        Assert.Equal("DMR", b.StatsEngine);
+        // both stopped: the last shown stays
+        l[l.IndexOf("dmrs.on=1")] = "dmrs.on=0";
+        b.Add(l, T0.AddSeconds(3));
+        Assert.Equal("DMR", b.StatsEngine);
+        Assert.Equal(["P25", "DMR"], b.AllStatsSeen.Select(e => e.Engine));
+        // garbage in the line changes nothing
+        b.Add(WithSt("fast,1,2"), T0.AddSeconds(4));
+        Assert.Equal(60000L, b.P25Stats!.UpMs);
+    }
+
+    [Fact]
+    public void CsvFooterHasOneStatsRowPerEngineAndOnlyWithStats()
+    {
+        var b = new SearchLogBook();
+        b.Add(WithSt(St, "classic,1000,1,2000,10,1,0,0,1,0,0,0,0,10,20,0,0,0,0"), T0);
+        var path = Path.Combine(dir, "s.csv");
+        SearchLogBook.Write(path, b.Groups, ',', ".", b.AllStatsSeen);
+        var lines = File.ReadAllLines(path, Encoding.UTF8);
+        Assert.Equal(4, lines.Length);                       // header, one data row, two stats rows
+        Assert.Equal("stats,P25,algo=fast,up_ms=60000,passes=4,pass_ms=4100,pass_steps=161,probes=12,found=3,nosync=7," +
+                     "partial=1,gone=1,skipped=4,early=2,watch=3,probe_ms=3800,sweep_ms=6200,first_ms=6200,seen_ms=1400," +
+                     "sync_last=420,sync_max=810", lines[2].TrimStart('﻿'));
+        Assert.StartsWith("stats,DMR,algo=classic,up_ms=1000,", lines[3]);
+        Assert.Equal(SearchLogBook.CsvRow(b.Groups[0]), lines[1]);   // data rows unchanged
+        // Turkish Excel: the list separator between the cells, same quoting rules
+        Assert.StartsWith("stats;P25;algo=fast;up_ms=60000;", SearchLogBook.CsvStatsRow("P25", b.P25Stats!, ';'));
+        // no stats (an older firmware): exactly the file as before
+        var old = new SearchLogBook();
+        old.Add(Poll(1, "p25s.f0=433500000,456,655,1234567,1,30,1"), T0);
+        Assert.Null(old.ShownStats);
+        Assert.Empty(old.AllStatsSeen);
+        var p2 = Path.Combine(dir, "old.csv");
+        SearchLogBook.Write(p2, old.Groups, ',', ".", old.AllStatsSeen);
+        var p3 = Path.Combine(dir, "old2.csv");
+        SearchLogBook.Write(p3, old.Groups);
+        Assert.Equal(File.ReadAllBytes(p3), File.ReadAllBytes(p2));
+        Assert.Equal(2, File.ReadAllLines(p2).Length);
+    }
+
+    [Fact]
+    public void StatsDoNotChangeTheLogItself()
+    {
+        var with = new SearchLogBook();
+        var without = new SearchLogBook();
+        for (var i = 0; i < 4; i++)
+        {
+            var line = $"p25s.f0=433500000,456,655,1234567,{i + 1},0,1";
+            var a = Poll(i + 1, line).ToList();
+            a.Insert(a.IndexOf($"p25s.seq={i + 1}") + 1, "p25s.st=" + St);
+            Assert.Equal(without.Add(Poll(i + 1, line), T0.AddSeconds(i)), with.Add(a, T0.AddSeconds(i)));
+            Assert.Equal(SearchLogBook.HasSearchLog(Poll(i + 1, line)), SearchLogBook.HasSearchLog(a));
+        }
+        Assert.Equal((without.TotalCalls, without.Missed, without.Restarts), (with.TotalCalls, with.Missed, with.Restarts));
+        Assert.Equal(without.Groups.Select(g => g.Calls), with.Groups.Select(g => g.Calls));
+    }
 }
 
 /// <summary>The search log reader (DebugReaders.SearchLog) on a fake radio: an older firmware is told, a silent radio

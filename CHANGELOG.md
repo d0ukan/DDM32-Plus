@@ -26,6 +26,19 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   one: away from home it would be the wrong place). The source shows in the titles ("Pos: GPS" / "Pos: typed"). One
   line turns the fallback off: `SAT_TYPED_POS` in `sat.h` (the owner has not confirmed it yet). The time still comes from the GPS alone: the radio has no clock of its own, so with no
   GPS time nothing can be predicted. The Satellites page's hint now reads "Needs a GPS fix or a typed position".
+- Faster searches (owner's request 2026-11-23; host-modelled, not yet measured on the radio, rows FS-1..FS-8;
+  docs/plus.md "Faster searches (beta.9 candidate)"). First the measurement: P25, DMR and All digital search now count
+  what they do (passes and their time, probes and how each ended, time probing against sweeping, the time from a
+  carrier first seen to its find, a found probe's wait for its first frame) and the PC programmers' Search log page
+  shows it as a stats line (the CSV ends with a `stats` row). Held 0 on a search screen switches between the new
+  "fast" algorithm (default) and beta.8's ("classic"), so the same signal can be compared both ways. Fast: the DMR and
+  All digital sweeps read a quiet step in 50 ms instead of 75 (samples on the 10 ms tick, their peak); carriers left
+  undecided (the over ended during the probe or before it, a weak signal just below a strong one) are read again
+  between steps for 30 s instead of a whole pass later; a DMR probe of a steady carrier with no burst ends at 0.4 s
+  instead of 0.6; a steady carrier found not digital twice is skipped 2 minutes instead of 30 s. Host model: the owner's
+  room radio found in a median 1.3 s instead of 2.6, a 10 MHz DMR pass 40 s instead of 60, and a weak P25 / DMR just
+  below a strong FM carrier found (beta.8 almost never found it). FLASH +3,292 B (879,944 B, 97.65 %), RAM +192 B
+  (2,080 B free).
 
 ## v1.0.0-beta.8 (2026-11-22, beta: not yet confirmed on the radio)
 

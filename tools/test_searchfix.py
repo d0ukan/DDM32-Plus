@@ -9,7 +9,13 @@ tools/test_classic.py after tools/test_scan.py (the build tree prepared, ASan / 
   200 transmitters a scenario (the owner's 436.275 test among them): found in 60 s, the time to find, probes a minute,
   steps a second; the table printed for docs/plus.md and the figures checked;
 - the real radio state machine's P25, DMR and all digital search suites built with the switch (as
-  tools/test_classic.py's test_radio_allsearch, OUT/classic_dispatch.inc as it wrote it)."""
+  tools/test_classic.py's test_radio_allsearch, OUT/classic_dispatch.inc as it wrote it).
+
+fastsrch (CONFIG_SEARCH_HYBRID, radio/searchhy.h, docs/plus.md "Faster searches (beta.9 candidate)"): the fast
+algorithm step by step against classic (tests/plus/test_searchhy.c); the searchfix engine tests again in the hybrid
+build on classic (SEARCHHY_CLASSIC: classic is beta.8's engine); the model built with the switch and run
+classic and fast (classic's original rows must equal the build without the switch, figure for figure), the table
+printed (host-modelled, not measured); the radio state machine suites again with the switch (fast, the default)."""
 import shlex
 import subprocess
 
@@ -19,6 +25,11 @@ def run(args, **kw):
 
 
 SWITCHES = ['-DCONFIG_SEARCH_FAST=1', '-DCONFIG_SEARCH_SURE=1']
+HYBRID = ['-DCONFIG_SEARCH_HYBRID=1']
+# the model rows fastsrch added (after the original ones): before -> sure is printed for them, not checked (p25-fmnext
+# shows a hole of the surer engine: a weak P25 just below a strong FM carrier is taken into the FM carrier's run and
+# never probed; the fast algorithm's watch of a superseded run is the fix)
+FASTSRCH_ROWS = ('p25-rpt', 'p25-fmnext', 'p25-wide10', 'dmr-fmnext', 'dmr-wide10', 'all-p25-fmnext', 'all-wide10')
 
 
 def engine_tests(ROOT, APP, OUT, flags):
@@ -29,6 +40,81 @@ def engine_tests(ROOT, APP, OUT, flags):
              ROOT / 'tests/plus/test_searchsure.c', APP / 'core/radio/p25search.c', APP / 'core/radio/dmrsearch.c',
              '-o', exe], cwd=ROOT)
         run([exe], cwd=ROOT)
+        # fastsrch: the fast algorithm against classic; and the tests above on classic in the hybrid build
+        exe = OUT / f'test_searchhy_{kind}'
+        run(['clang', *flags, '-DCONFIG_P25_SEARCH=1', '-DCONFIG_DMR_SEARCH=1', *SWITCHES, *HYBRID,
+             f'-DCONFIG_ALL_SEARCH={kind}', f'-DCONFIG_YSF={kind}', f'-DCONFIG_NXDN={kind}',
+             ROOT / 'tests/plus/test_searchhy.c', APP / 'core/radio/p25search.c', APP / 'core/radio/dmrsearch.c',
+             APP / 'core/radio/searchhy.c', '-o', exe], cwd=ROOT)
+        run([exe], cwd=ROOT)
+        exe = OUT / f'test_searchsure_classic_{kind}'
+        run(['clang', *flags, '-DCONFIG_P25_SEARCH=1', '-DCONFIG_DMR_SEARCH=1', *SWITCHES, *HYBRID,
+             f'-DCONFIG_ALL_SEARCH={kind}', f'-DCONFIG_YSF={kind}', f'-DCONFIG_NXDN={kind}', '-DSEARCHHY_CLASSIC=1',
+             ROOT / 'tests/plus/test_searchsure.c',
+             APP / 'core/radio/p25search.c', APP / 'core/radio/dmrsearch.c', APP / 'core/radio/searchhy.c',
+             '-o', exe], cwd=ROOT)
+        run([exe], cwd=ROOT)
+
+
+def hybrid_model(ROOT, APP, OUT, flags, sure):
+    """fastsrch: the model built with SEARCH_HYBRID, run classic and fast (host-modelled figures)"""
+    exe = OUT / 'test_search_hybrid'
+    run(['clang', *flags, '-DCONFIG_P25_SEARCH=1', '-DCONFIG_DMR_SEARCH=1', *SWITCHES, *HYBRID,
+         '-DCONFIG_ALL_SEARCH=1', '-DCONFIG_YSF=1', '-DCONFIG_NXDN=1',
+         ROOT / 'tests/plus/test_search_sure.c', APP / 'core/radio/p25search.c', APP / 'core/radio/dmrsearch.c',
+         APP / 'core/radio/searchhy.c', '-lm', '-o', exe], cwd=ROOT)
+    res = {}
+    for algo in ('classic', 'fast'):
+        out = run([exe, algo], cwd=ROOT, capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            w = line.split()
+            if w[:1] == ['MODEL']:
+                res[(w[1], w[2])] = [float(x) for x in w[3:]]
+            elif line.startswith('FAIL'):
+                raise SystemExit(line)
+    names = [k[1] for k in res if k[0] == 'classic']
+    print('Faster searches model (HOST-MODELLED, not measured; classic -> fast). 60 s rows: found of 200, median / '
+          '90th pct s to the first find (99 = not within 60 s), probes a minute, steps a second (no transmitter). '
+          'fpm rows (40 searches of 120 s): found, median s to the first find, probes a minute, calls caught a minute')
+    for n in names:
+        c, f = res[('classic', n)], res[('fast', n)]
+        if n.startswith('fpm-'):
+            print(f'  {n:22s} found {c[0]:3.0f} -> {f[0]:3.0f}  median {c[1]:4.1f} -> {f[1]:4.1f}  probes/min '
+                  f'{c[3]:4.1f} -> {f[3]:4.1f}  calls/min {c[5]:5.2f} -> {f[5]:5.2f}')
+        else:
+            print(f'  {n:22s} found {c[0]:3.0f} -> {f[0]:3.0f}  median {c[1]:4.1f} -> {f[1]:4.1f}  p90 {c[2]:4.1f} -> '
+                  f'{f[2]:4.1f}  probes/min {c[3]:4.1f} -> {f[3]:4.1f}  steps/s {c[4]:4.1f} -> {f[4]:4.1f}')
+    # classic in the hybrid build is beta.8's engine: its original rows equal the build without the switch
+    for n, v in sure.items():
+        assert res[('classic', n)][:5] == v[:5], (n, res[('classic', n)], v)
+    for n in names:
+        c, f = res[('classic', n)], res[('fast', n)]
+        if n.endswith('433200'):
+            assert c[0] == 0 and f[0] == 0, (n, c, f)
+            continue
+        if n.startswith('fpm-'):
+            assert f[5] >= c[5] * 0.95 - 0.05, (n, c, f)	# calls caught a minute: never clearly fewer
+            continue
+        # never clearly fewer finds (6 of 200: the random overs against the pass; p25-busy loses about 5 in its first
+        # minute to the watched lower neighbours of six FM carriers, each a 1.2 s P25 probe, and gains them back once
+        # those are skipped for minutes: fpm-p25-busy below), never clearly slower to the median
+        assert f[0] >= c[0] - 6, (n, c, f)
+        assert f[1] <= c[1] + 1.0 or n.endswith('fmnext'), (n, c, f)	# fmnext: classic finds a few, early (pass luck)
+        if 'busy' not in n and 'fmnext' not in n:
+            assert f[4] >= c[4] - 0.5, (n, c, f)	# never a slower sweep over a band of no carriers
+    fast = {n: res[('fast', n)] for n in names}
+    # the DMR and all digital sweeps: a quiet step in two polls (13.3 -> 20 steps a second)
+    for n in ('dmr-direct', 'dmr-repeater', 'all-dmr-direct'):
+        assert fast[n][4] >= 19.0, (n, fast[n])
+    for n in ('dmr-owner-436275', 'all-owner-436275'):
+        assert fast[n][0] >= 190 and fast[n][1] <= 4.0, (n, fast[n])
+    # a weak P25 / DMR just below a strong FM carrier: found (classic: hardly ever, the FM carrier's run took it in)
+    for n in ('p25-fmnext', 'dmr-fmnext', 'all-p25-fmnext'):
+        assert fast[n][0] >= 150, (n, fast[n])
+    # a busy band: no fewer calls caught a minute once the busy carriers are skipped
+    for n in ('fpm-p25-busy', 'fpm-dmr-busy', 'fpm-all-busy'):
+        assert fast[n][5] >= res[('classic', n)][5] - 0.1, (n, fast[n])
+    return res
 
 
 def search_model(ROOT, APP, OUT, flags):
@@ -57,12 +143,15 @@ def search_model(ROOT, APP, OUT, flags):
             # outside the owner's typed range 436.0-436.5: never found, by either (the range is applied as typed)
             assert b[0] == 0 and a[0] == 0, (n, b, a)
             continue
+        if n in FASTSRCH_ROWS or n.startswith('fpm-'):
+            continue	# fastsrch's rows: classic -> fast is what they compare (hybrid_model); before -> sure shown only
         # never fewer finds than before (3 of 200: the random overs against the pass), never slower to the median
         assert a[0] >= b[0] - 3, (n, b, a)
         assert a[1] <= b[1] + 1.0, (n, b, a)
         # never a sweep slower than before over a band without the transmitter
         assert a[4] >= b[4] - 0.5, (n, b, a)
     sure = {n: res[('sure', n)] for n in names}
+    hybrid_model(ROOT, APP, OUT, flags, sure)
     # the owner's case: the other radio in the room on 436.275, the range typed as 436.000(.010)-436.500
     for n in ('dmr-owner-436275', 'dmr-owner-offgrid', 'all-owner-436275'):
         assert sure[n][0] >= 190 and sure[n][1] <= 4.0, (n, sure[n])
@@ -75,7 +164,7 @@ def search_model(ROOT, APP, OUT, flags):
     assert sure['p25-overs'][4] >= 39.0 and sure['dmr-direct'][4] >= 13.0, (sure['p25-overs'], sure['dmr-direct'])
 
 
-def radio_tests(ROOT, APP, OUT, host):
+def radio_tests(ROOT, APP, OUT, host, hybrid=False):
     fixture = (host / 'radioCoreTest.c').read_text().replace('int main(void)', 'int upstream_radio_main(void)')
     fixture = fixture.replace('const board_t board = {', 'const board_t board = {\n\t.native_modem=&classic_ops,')
     wrapper = OUT / 'radioCoreSearchfix.c'
@@ -84,7 +173,8 @@ def radio_tests(ROOT, APP, OUT, host):
     command = run(['make', '-Bn', 'radioCoreTest', 'SANITIZE=1'], cwd=host, capture_output=True, text=True).stdout
     argv = shlex.split(next(line for line in command.splitlines() if ' -o radioCoreTest ' in line))
     argv[argv.index('radioCoreTest.c')] = str(wrapper)
-    argv[argv.index('-o') + 1] = str(OUT / 'test_radio_searchfix')
+    exe = OUT / ('test_radio_searchhy' if hybrid else 'test_radio_searchfix')
+    argv[argv.index('-o') + 1] = str(exe)
     radio = APP / 'core/radio'
     argv += ['-I' + str(OUT), '-I' + str(host), '-I' + str(ROOT / 'tests/native/stubs'), '-I' + str(APP / 'core'),
              '-I' + str(ROOT / 'src/modem'), '-I' + str(ROOT / 'integration/radiofoundry'),
@@ -96,8 +186,10 @@ def radio_tests(ROOT, APP, OUT, host):
              '-DCONFIG_DMR_SEARCH=1', '-DCONFIG_ALL_SEARCH=1', '-I' + str(ROOT / 'tests/classic'),
              '-I' + str(ROOT / 'tests/plus'),
              *(str(radio / f) for f in ('spectrum.c', 'fox.c', 'cw_beacon.c', 'p25search.c', 'dmrsearch.c'))]
+    if hybrid:
+        argv += [*HYBRID, str(radio / 'searchhy.c')]	# fastsrch: the suites on the fast algorithm (the default)
     run(argv, cwd=host)
-    run([OUT / 'test_radio_searchfix'], cwd=host)
+    run([exe], cwd=host)
 
 
 def main(ROOT, APP, OUT, flags, host, only=None):
@@ -107,3 +199,4 @@ def main(ROOT, APP, OUT, flags, host, only=None):
         search_model(ROOT, APP, OUT, flags)
     if not only or 'radio' in only:
         radio_tests(ROOT, APP, OUT, host)
+        radio_tests(ROOT, APP, OUT, host, hybrid=True)

@@ -10,6 +10,12 @@
 #endif
 #include "radio/searchsure.h"
 #endif
+#if CONFIG_SEARCH_HYBRID
+#if !CONFIG_SEARCH_SURE
+#error "SEARCH_HYBRID builds on SEARCH_SURE"
+#endif
+#include "radio/searchhy.h"
+#endif
 
 static p25s_view_t s;
 static uint32_t tuned_ms;
@@ -44,6 +50,11 @@ static uint32_t prev_hz, back_from;
 static sure_t u;
 static bool level_known;
 static uint32_t on_ms, step_ms0, step_q4;
+#endif
+#if CONFIG_SEARCH_HYBRID
+/* The faster search (radio/searchhy.h): the revisit read now is a watched carrier's; whose turn the next revisit is */
+static bool watching, watch_turn;
+static uint32_t sup_hz;		/* the first weaker run a stronger one ended in the run followed now, 0 = none */
 #endif
 
 static void begin_write(void) { seq++; __asm__ volatile("" ::: "memory"); }
@@ -87,7 +98,12 @@ static void add_skip(uint32_t hz, uint32_t now_ms)
 				pick = i;
 	}
 	skip[pick].hz = hz;
+#if CONFIG_SEARCH_HYBRID
+	/* fast: not P25 twice in a row (a busy FM carrier, a beacon): skipped for minutes (radio/searchhy.h) */
+	skip[pick].until_ms = now_ms + (again ? (sh_fast() ? SH_REJECT_MS : P25S_SKIP_LONG_MS) : P25S_SKIP_MS);
+#else
 	skip[pick].until_ms = now_ms + (again ? P25S_SKIP_LONG_MS : P25S_SKIP_MS);
+#endif
 }
 #else
 	unsigned pick = 0;
@@ -120,13 +136,17 @@ static uint32_t revisit_pick(uint32_t now_ms)
 }
 
 /* The next step after `hz`, wrapping to the bottom (a full sweep) */
-static uint32_t next_step(uint32_t hz)
+static uint32_t next_step(uint32_t hz, uint32_t now_ms)
 {
 	uint32_t n = hz + s.step_hz;
 	if (n > s.hi_hz) {
 		n = s.lo_hz;
 		s.sweeps++;
+#if CONFIG_SEARCH_HYBRID
+		sh_pass(now_ms);
+#endif
 	}
+	(void)now_ms;
 	return n;
 }
 
@@ -135,12 +155,28 @@ static uint32_t advance(uint32_t now_ms)
 {
 	if (revisiting) {
 		revisiting = false;
+#if CONFIG_SEARCH_HYBRID
+		watching = false;
+#endif
 		return resume_hz;
 	}
-	uint32_t n = next_step(s.at_hz);
+	uint32_t n = next_step(s.at_hz, now_ms);
 	if (++since_revisit >= P25S_REVISIT_STEPS) {
 		since_revisit = 0;
+#if CONFIG_SEARCH_HYBRID
+		/* fast: the found list and the watched carriers take turns (either alone when the other has none) */
+		bool first = sh_fast() && (watch_turn = !watch_turn);
+		uint32_t r = first ? sh_watch_pick(s.lo_hz, s.hi_hz, now_ms, skipped) : 0u;
+		watching = r != 0;
+		if (r == 0)
+			r = revisit_pick(now_ms);
+		if (r == 0 && sh_fast() && !first) {
+			r = sh_watch_pick(s.lo_hz, s.hi_hz, now_ms, skipped);
+			watching = r != 0;
+		}
+#else
 		uint32_t r = revisit_pick(now_ms);
+#endif
 		if (r != 0 && r != n) {
 			resume_hz = n;
 			revisiting = true;
@@ -180,6 +216,10 @@ uint32_t p25s_start(uint32_t lo_hz, uint32_t hi_hz, uint32_t step_hz, uint32_t n
 	s.phase = P25S_SWEEP;
 	s.floor_dbm = -125;
 	end_write();
+#if CONFIG_SEARCH_HYBRID
+	sh_start(SH_P25, now_ms);
+	watching = watch_turn = false;
+#endif
 	floor_q4 = -125 * 16;
 	memset(skip, 0, sizeof skip);
 	revisiting = false;
@@ -207,6 +247,9 @@ static void step_note(uint32_t now_ms)
 {
 	uint32_t dt = now_ms - step_ms0;
 	step_ms0 = now_ms;
+#if CONFIG_SEARCH_HYBRID
+	sh_step(now_ms);
+#endif
 	if (dt >= 1000u)
 		return;
 	step_q4 = step_q4 ? (uint32_t)((int32_t)step_q4 + ((int32_t)(dt * 16u) - (int32_t)step_q4) / 8) : dt * 16u;
@@ -221,6 +264,10 @@ static void probe_here(int16_t lvl, uint32_t now_ms)
 		u.run_lvl = lvl;
 	}
 	u.climbing = false;
+#if CONFIG_SEARCH_HYBRID
+	sh_probe(watching, now_ms);
+	watching = false;
+#endif
 	s.phase = P25S_PROBE;
 	s.hits++;
 	held = false;
@@ -246,6 +293,9 @@ static uint32_t sure_step(bool strong, int16_t lvl, uint32_t now_ms, bool *hit)
 			return 0;
 		}
 		u.climbing = false;	/* nothing there now (the over ended): on past the run, nothing skipped */
+#if CONFIG_SEARCH_HYBRID
+		sh_unsettled(s.at_hz, now_ms);	/* fast: read again between steps for a while */
+#endif
 		if (sure_wide_floor(&u, &floor_q4))
 			s.floor_dbm = (int16_t)(floor_q4 / 16);
 		revisiting = false;
@@ -258,6 +308,10 @@ static uint32_t sure_step(bool strong, int16_t lvl, uint32_t now_ms, bool *hit)
 	sure_floor(&u, &floor_q4, lvl, strong);
 	s.floor_dbm = (int16_t)(floor_q4 / 16);
 	bool cand = strong && !skirt;
+#if CONFIG_SEARCH_HYBRID
+	if (cand)
+		sh_seen(s.at_hz, lvl, now_ms);
+#endif
 	if (revisiting && cand && !skipped(s.at_hz, now_ms)) {
 		probe_here(lvl, now_ms);	/* a find read again: its own frequency, no run */
 		end_write();
@@ -267,7 +321,19 @@ static uint32_t sure_step(bool strong, int16_t lvl, uint32_t now_ms, bool *hit)
 	if (!revisiting && (u.climbing || cand)) {
 		stage = ST_QUICK;
 		prev_hz = 0;
+#if CONFIG_SEARCH_HYBRID
+		bool was = u.climbing;
+		uint32_t before = was ? sure_target(&u, s.step_hz) : 0u, lo0 = u.run_lo;
+#endif
 		int r = sure_climb(&u, s.at_hz, lvl, cand);
+#if CONFIG_SEARCH_HYBRID
+		/* fast: the first weaker run a stronger one ended (classic forgets it): a carrier of its own may be there (a
+		 * weak digital signal just below a strong FM one, whose run took it in). Kept for the run's end (below) */
+		if (!was)
+			sup_hz = 0;
+		else if (sh_fast() && r == SURE_MORE && u.run_lo == s.at_hz && u.run_lo != lo0 && sup_hz == 0)
+			sup_hz = before;
+#endif
 		if (r == SURE_WIDE && !sure_peaked(&u)) {
 			/* the band's level raised, no carrier in it: the floor (one step clearly over the rest: probed below) */
 			if (sure_wide_floor(&u, &floor_q4))
@@ -285,9 +351,20 @@ static uint32_t sure_step(bool strong, int16_t lvl, uint32_t now_ms, bool *hit)
 		 * step after the run. SURE_WIDE with one step clearly over the rest: that step (never hidden, hole hunt A3);
 		 * the run's level becomes the floor when it ends */
 		uint32_t t = sure_target(&u, s.step_hz);
-		resume_hz = u.run_hi + s.step_hz <= s.hi_hz ? u.run_hi + s.step_hz : next_step(u.run_hi);
+#if CONFIG_SEARCH_HYBRID
+		/* fast: that weaker run, two steps or more below the target (one step below is the target's own skirt, as
+		 * in most cases two steps are not: 45 dB down), is watched: read again between steps and probed on its own
+		 * frequency if still strong */
+		if (sup_hz != 0 && sup_hz + 2u * s.step_hz <= t)
+			sh_unsettled(sup_hz, now_ms);
+		sup_hz = 0;
+#endif
+		resume_hz = u.run_hi + s.step_hz <= s.hi_hz ? u.run_hi + s.step_hz : next_step(u.run_hi, now_ms);
 		revisiting = true;
 		if (skipped(t, now_ms)) {
+#if CONFIG_SEARCH_HYBRID
+			sh_skipped();
+#endif
 			if (sure_wide_floor(&u, &floor_q4))
 				s.floor_dbm = (int16_t)(floor_q4 / 16);	/* the band's level raised, no carrier: the floor */
 			sure_set_skirt(&u, now_ms, s.sweeps);	/* a carrier known not to be P25: its steps passed over */
@@ -452,8 +529,12 @@ void p25s_probe_found(uint16_t nac, uint16_t tg, uint32_t src, uint32_t now_ms)
 	if (nac > 0xFFFu)
 		nac = P25S_NAC_NONE;	/* no NAC known (the receiver's "any" after a terminator or a damaged frame) */
 	begin_write();
-	if (!s.playing)
+	if (!s.playing) {
 		s.probes_p25++;
+#if CONFIG_SEARCH_HYBRID
+		sh_found(s.at_hz, now_ms);
+#endif
+	}
 	s.playing = true;
 	bool fresh = false, call, moved = false, undone = false;
 	if (held && fits(&s.found[0], nac, tg)) {
@@ -495,6 +576,10 @@ uint32_t p25s_probe_done(bool was_p25, uint32_t now_ms)
 {
 	if (s.phase != P25S_PROBE)
 		return 0;
+#if CONFIG_SEARCH_HYBRID
+	sh_end(was_p25 ? SH_END_FOUND : p25s_carrier_gone(now_ms) ? SH_END_GONE : SH_END_NOSYNC, false, s.at_hz, now_ms);
+	watching = false;
+#endif
 #if CONFIG_SEARCH_SURE
 	if (!was_p25 && !p25s_carrier_gone(now_ms))	/* a carrier that went off the air may have been P25 */
 #else
@@ -515,7 +600,7 @@ uint32_t p25s_probe_done(bool was_p25, uint32_t now_ms)
 		revisiting = false;	/* a revisit's probe: the sweep goes on where it was */
 		s.at_hz = resume_hz;
 	} else {
-		s.at_hz = next_step(s.at_hz);
+		s.at_hz = next_step(s.at_hz, now_ms);
 	}
 	end_write();
 #if CONFIG_SEARCH_FAST

@@ -601,8 +601,11 @@ __pycache__/
 !/tests/plus/test_ui_mwfast.c
 # branch searchfix: surer P25 / DMR / all digital searches (tools/plus_scan.py SEARCH_SURE)
 !/integration/radiofoundry/spectrum/searchsure.h
+!/integration/radiofoundry/spectrum/searchhy.h
+!/integration/radiofoundry/spectrum/searchhy.c
 !/tools/test_searchfix.py
 !/tests/plus/test_searchsure.c
+!/tests/plus/test_searchhy.c
 !/tests/plus/test_search_sure.c
 # DDM32 Plus Windows program (win/README.md): sources, tests, docs and screenshots; never bin/, obj/ or publish output
 !/win/*.sln

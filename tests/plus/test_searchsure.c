@@ -10,6 +10,9 @@
 #include <string.h>
 #include "radio/p25search.h"
 #include "radio/dmrsearch.h"
+#if CONFIG_SEARCH_HYBRID
+#include "radio/searchhy.h"	/* fastsrch: run on classic in the hybrid build (SEARCHHY_CLASSIC, tools/test_searchfix.py) */
+#endif
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { failures++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -274,6 +277,9 @@ static void test_p25(void)
 
 int main(void)
 {
+#if CONFIG_SEARCH_HYBRID
+	sh_set_fast(false);
+#endif
 	test_dmr();
 #if CONFIG_ALL_SEARCH
 	test_all();

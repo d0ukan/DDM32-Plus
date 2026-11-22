@@ -48,6 +48,25 @@
  * call's sync comes once per 360 ms superframe, so two superframes (one sync lost) plus the stack's start fit */
 #define DMRS_PROBE_LONG_MS	1100u
 #endif
+#if CONFIG_SEARCH_HYBRID
+/* DDM32 Plus faster search (radio/searchhy.h, docs/plus.md "Faster searches"), the "fast" algorithm:
+ *  - a sweep step's level is the peak of samples from DMRS_SAMPLE_MS after the retune, taken on the radio task's 10 ms
+ *    tick (radio_sm_tick: dmrs_sampling / dmrs_sample) and at its polls; once they span DMRS_SPAN_MS with none near a
+ *    hit, the step is quiet at the second poll (50 ms; classic: the third, 75 ms). A direct mode burst is on air
+ *    27.5-30 ms in every 60, its gap 30-32.5 ms: a span of 30 ms with samples 10 ms apart meets a burst unless the
+ *    gap is longer than the span (at most 2.5 ms of 60: a step whose samples all fall in it reads quiet, about 4 % of
+ *    the time; the next pass reads it again). A sample near a hit hands the step to classic's settled readings.
+ *    DMRS_SAMPLE_MS follows OpenDMR's reading 10 ms after a retune on the same FD6818 (code reading, not measured
+ *    here; the search log's stats show it: steps a second, hits);
+ *  - a DMR probe of a steady carrier (DMRS_EARLY_READS level readings or more, none in a gap: no direct mode TDMA; no
+ *    burst, no TDMA hint from the sweep) ends after DMRS_EARLY_MS instead of DMRS_PROBE_MS: a repeater sends a sync at
+ *    least every 180 ms (both slots in voice: each slot's burst A every 360 ms), so 400 ms holds the modem's start and
+ *    one sync with about 100 ms to spare. Not for P25 / YSF / NXDN (the native receiver's lock time is not measured) */
+#define DMRS_SAMPLE_MS		10u
+#define DMRS_SPAN_MS		30u
+#define DMRS_EARLY_MS		400u
+#define DMRS_EARLY_READS	8u
+#endif
 #define DMRS_MIN_BURSTS		2u	/* bursts with a good check that make it DMR */
 #define DMRS_LATE_MS		1500u	/* DMR without a call to play: held this long from the hit for one (late entry
 					 * takes the call's LC from the second superframe at worst), then on */
@@ -155,6 +174,11 @@ typedef struct {
 bool dmrs_peek(unsigned i, dmrs_peek_t *out);
 
 void radio_req_dmr_search(uint32_t lo_hz, uint32_t hi_hz);	/* lo 0 = stop */
+#if CONFIG_SEARCH_HYBRID
+/* The radio task's 10 ms tick: whether the sweep takes a sample now, and the sample (DMRS_SAMPLE_MS) */
+bool dmrs_sampling(uint32_t now_ms);
+void dmrs_sample(int16_t rssi_dbm, uint32_t now_ms);
+#endif
 
 #if CONFIG_ALL_SEARCH
 /* The all digital search's side of the same calls. Snapshot and peek of a kind that is not running read as stopped

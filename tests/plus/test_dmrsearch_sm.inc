@@ -23,13 +23,24 @@ static int16_t (*ds_band)(uint32_t) = ds_level;
 #define ds_level(hz) ds_band(hz)
 #endif
 
-/* One radio poll with the screen looking: the fake receiver's level follows the frequency it is on */
+/* One radio poll with the screen looking: the fake receiver's level follows the frequency it is on, and (fastsrch,
+ * CONFIG_SEARCH_HYBRID) the time in 5 ms slices, so the 10 ms tick's samples see a direct mode carrier's bursts and
+ * gaps as the radio would */
 static void ds_poll(void)
 {
     dmrs_view_t v;
     dmrs_snapshot(&v);
+#if CONFIG_SEARCH_HYBRID
+    for (uint32_t t = 0; t < RADIO_POLL_MS; t += 5u) {
+        now += 5u;
+        hw.st.rssi_dbm = ds_level(hw.rx_hz);	/* the level at the slice's end, when run() acts */
+        now -= 5u;
+        run(5u);
+    }
+#else
     hw.st.rssi_dbm = ds_level(hw.rx_hz);
     run(RADIO_POLL_MS);
+#endif
 }
 static void ds_wait(uint32_t ms) { for (uint32_t t = 0; t < ms; t += RADIO_POLL_MS) ds_poll(); }
 

@@ -3,7 +3,7 @@
 //! the health light and the live facts.
 use ddm32_core::codeplug::{Codeplug, Table, TR};
 use ddm32_core::radio::live;
-use ddm32_gui::radio_pages::{health_view, live_view, table_view};
+use ddm32_gui::radio_pages::{health_view, live_view, slog_searches, slog_stats_line, table_view};
 use std::io::Read;
 
 fn fixtures() -> std::path::PathBuf {
@@ -86,4 +86,36 @@ fn listing_windows_devices_opens_nothing() {
     // only reads the device list (SetupAPI); empty on other systems
     let devices = ddm32_core::radio::cable::list_devices();
     assert!(devices.iter().all(|d| d.device_id.to_uppercase().contains("VID_1A86")));
+}
+
+#[test]
+fn the_search_log_shows_a_stats_line_in_both_languages_and_none_without_stats() {
+    use ddm32_core::radio::searchlog::{SearchLogBook, Stamp};
+    let st = "fast,60000,4,4100,161,12,3,7,1,1,4,2,3,3800,6200,6200,1400,420,810";
+    let mut lines: Vec<String> =
+        ["p25s.on=1", "p25s.at=433512500", "p25s.seq=1"].iter().map(|s| s.to_string()).collect();
+    let mut b = SearchLogBook::new();
+    b.add(&lines, Stamp(1_795_298_400));
+    // an older firmware: no stats line, the searches text as before
+    assert_eq!(None, slog_stats_line("en", &b));
+    assert!(!slog_searches("en", &b).contains('\n'));
+    lines.push(format!("p25s.st={st}"));
+    b.add(&lines, Stamp(1_795_298_401));
+    assert_eq!(
+        Some(
+            "P25: Fast | pass 4.1 s (161 steps) | probes 12: found 3, no sync 7, partial 1, gone 1 | skipped 4, early 2, watch 3 \
+             | probing 38% | first find 6.2 s | seen->found 1.4 s | sync 0.42 s (max 0.81 s)"
+                .to_string()
+        ),
+        slog_stats_line("en", &b)
+    );
+    assert_eq!(
+        Some(
+            "P25: Hızlı | tur 4,1 sn (161 adım) | deneme 12: bulundu 3, senk yok 7, kısmi 1, kayboldu 1 | atlandı 4, erken 2, \
+             izleme 3 | deneme payı %38 | ilk bulma 6,2 sn | görülme->bulma 1,4 sn | senk 0,42 sn (en çok 0,81 sn)"
+                .to_string()
+        ),
+        slog_stats_line("tr", &b)
+    );
+    assert!(slog_searches("tr", &b).ends_with(&slog_stats_line("tr", &b).unwrap()));
 }

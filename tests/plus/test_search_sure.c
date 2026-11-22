@@ -20,13 +20,22 @@
  *   - the native P25 receiver: hands over 50 ms after the hit, starts in 250-1000 ms (the zone scan's measured range
  *     is "under 700 ms"; the slow tail is the case that was skipped), a frame every 180 ms while keyed.
  * Looking into a case: SURE_DEBUG=<scenario> prints the misses, SURE_TRACE=<hz> the engine's phases for that
- * transmitter (SURE_VERBOSE=1 every reading within 100 kHz of it). */
+ * transmitter (SURE_VERBOSE=1 every reading within 100 kHz of it).
+ * DDM32 Plus faster searches (CONFIG_SEARCH_HYBRID, radio/searchhy.h, branch fastsrch): built with the switch, the
+ * first argument picks the algorithm ("fast" or "classic", the engine's name in the output); the radio task's 10 ms tick
+ * hands the DMR engine its samples (dmrs_sampling / dmrs_sample) between the polls. After the 60 s rows above, rows
+ * named "fpm-..." keep each search running 120 s and print, in the last column, the calls caught a minute (the engine's
+ * seq: one per over found and counted). The rows after the original ones (p25-rpt, p25-fmnext, *-wide10) are added at
+ * the end of their group so the original rows' figures stay identical to the build without the switch. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "radio/p25search.h"
 #include "radio/dmrsearch.h"
+#if CONFIG_SEARCH_HYBRID
+#include "radio/searchhy.h"
+#endif
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { failures++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -47,6 +56,8 @@ static double tau, reading, floor_dbm = -124.0, ceiling = 0.0;
 static uint32_t now, tuned_hz, filt_ms, tuned_at;
 static unsigned seed = 4242u, case_seed = 991u;
 static bool all_kind;
+static bool keep_going;		/* fpm rows: the search runs on after a find */
+static uint16_t seq0, seq1;	/* the engine's calls counted at the run's start and end */
 static const char *trace_name = "";
 static uint32_t trace_hz;	/* SURE_TRACE=<hz>: the engine's phases for that transmitter */
 
@@ -117,6 +128,24 @@ static void retune(uint32_t hz)
 {
 	tuned_hz = hz;
 	tuned_at = now;
+}
+
+/* The radio task's 10 ms tick between two polls (from the last poll to now): the DMR sweep's samples */
+static uint32_t tick_from;
+static void ticks(void)
+{
+#if CONFIG_SEARCH_HYBRID
+	uint32_t until = now;
+	for (uint32_t t = tick_from + 1u; t <= until; t++) {
+		if (t % 10u != 7u)
+			continue;
+		now = t;
+		if (dmrs_sampling(now))
+			dmrs_sample(read_now(), now);
+	}
+	now = until;
+#endif
+	tick_from = now;
 }
 
 /* --- the DMR modem --- */
@@ -280,6 +309,8 @@ static void all_poll(unsigned *nsteps)
 {
 	dmrs_view_t v;
 	dmrs_snapshot_all(&v);
+	if (dmrs_phase() != DMRS_SWEEP)
+		tick_from = now;
 	if (native) {
 		if (now < native_at)
 			return;
@@ -315,6 +346,7 @@ static void all_poll(unsigned *nsteps)
 	bool ysf;
 	if (dmrs_phase() == DMRS_SWEEP) {
 		bool hit;
+		ticks();
 		uint32_t hz = dmrs_sweep(read_now(), now, &hit);
 		if (hit)
 			dmr_setup();
@@ -364,6 +396,17 @@ static uint32_t dmr_run(uint32_t lo, uint32_t hi, uint32_t ms, const sig_t *want
 	synced_at = 0;
 	dmr_looked = now;
 	ready = now + 60u;
+	tick_from = now;
+	{
+		dmrs_peek_t pk;
+#if CONFIG_ALL_SEARCH
+		if (all_kind)
+			(void)dmrs_peek_all(0u, &pk);
+		else
+#endif
+			(void)dmrs_peek(0u, &pk);
+		seq0 = pk.seq;
+	}
 	while ((int32_t)(end - now) > 0) {
 		now += 24u + rnd() % 3u;
 #if CONFIG_ALL_SEARCH
@@ -376,10 +419,12 @@ static uint32_t dmr_run(uint32_t lo, uint32_t hi, uint32_t ms, const sig_t *want
 			uint32_t hz;
 			if (dmrs_phase() == DMRS_SWEEP) {
 				bool hit;
+				ticks();
 				hz = dmrs_sweep(read_now(), now, &hit);
 				if (hz != 0)
 					nsteps++;
 			} else {
+				tick_from = now;
 				dmrs_heard_t h;
 				dmr_modem(ready);
 				dmr_heard(&h);
@@ -407,10 +452,21 @@ static uint32_t dmr_run(uint32_t lo, uint32_t hi, uint32_t ms, const sig_t *want
 				at = dmrs_at_hz();
 			}
 		}
-		if (want && dmr_found_at(want->hz, t_start)) {
+		if (want && !found_ms && dmr_found_at(want->hz, t_start)) {
 			found_ms = now - t_start;
-			break;
+			if (!keep_going)
+				break;
 		}
+	}
+	{
+		dmrs_peek_t pk;
+#if CONFIG_ALL_SEARCH
+		if (all_kind)
+			(void)dmrs_peek_all(0u, &pk);
+		else
+#endif
+			(void)dmrs_peek(0u, &pk);
+		seq1 = pk.seq;
 	}
 #if CONFIG_ALL_SEARCH
 	if (all_kind)
@@ -436,6 +492,9 @@ static uint32_t p25_run(uint32_t lo, uint32_t hi, uint32_t ms, const sig_t *want
 	bool native25 = false, was_p25 = false;
 	unsigned nsteps = 0;
 	const uint32_t probe_ms = CONFIG_SEARCH_SURE ? 1200u : 700u;	/* native_lab.c P25S_PROBE_MS */
+	p25s_peek_t pk;
+	(void)p25s_peek(0u, &pk);
+	seq0 = pk.seq;
 	while ((int32_t)(end - now) > 0) {
 		now += 24u + rnd() % 3u;
 		p25s_snapshot(&v);
@@ -485,15 +544,17 @@ static uint32_t p25_run(uint32_t lo, uint32_t hi, uint32_t ms, const sig_t *want
 				}
 			}
 		}
-		if (want) {
+		if (want && !found_ms) {
 			p25s_snapshot(&v);
 			for (unsigned i = 0; i < v.found_n && !found_ms; i++)
 				if (offset(v.found[i].hz, want->hz) <= 1500u && (int32_t)(v.found[i].heard_ms - t_start) >= 0)
 					found_ms = now - t_start;
-			if (found_ms)
+			if (found_ms && !keep_going)
 				break;
 		}
 	}
+	(void)p25s_peek(0u, &pk);
+	seq1 = pk.seq;
 	p25s_snapshot(&v);
 	if (probes)
 		*probes += v.hits;
@@ -516,6 +577,9 @@ typedef struct {
 	double tau;
 	uint32_t lo, hi, at;	/* the range (0: 433-435 MHz) and a fixed frequency (0: a random step) */
 } scen_t;
+
+/* fastsrch: a "-fmnext" scenario has a strong FM carrier (-60 dBm) 25 kHz above the transmitter */
+static double next_dbm(const scen_t *sc) { return strstr(sc->name, "fmnext") ? -60.0 : 0.0; }
 
 static void scenario(const char *eng, int engine, const scen_t *sc, int trials)
 {
@@ -541,6 +605,13 @@ static void scenario(const char *eng, int engine, const scen_t *sc, int trials)
 			s->over = 5000u + crnd() % 15001u;
 			s->pause = 3000u + crnd() % 7001u;
 			s->t0 = now - crnd() % (s->over + s->pause);
+		}
+		if (next_dbm(sc) != 0.0) {
+			sig_t *c = &sigs[nsig++];
+			memset(c, 0, sizeof *c);
+			c->hz = s->hz + 25000u;
+			c->dbm = next_dbm(sc);
+			c->mode = M_FM;
 		}
 		for (int f = 0; f < sc->fm && nsig < NSIG_MAX; f++) {
 			sig_t *c = &sigs[nsig++];
@@ -579,15 +650,83 @@ static void scenario(const char *eng, int engine, const scen_t *sc, int trials)
 	now += 40000u;
 }
 
+/* Calls caught a minute: `trials` searches of 120 s each that run on after a find (the transmitter keyed in overs);
+ * printed as MODEL <engine> fpm-<scenario> <found> <median s to the first find> 0 <probes a minute> 0 <calls a minute> */
+static void scenario_fpm(const char *eng, int engine, const scen_t *sc, int trials)
+{
+	static res_t r;
+	memset(&r, 0, sizeof r);
+	floor_dbm = sc->nf;
+	ceiling = sc->ceil;
+	tau = sc->tau;
+	uint32_t lo = sc->lo ? sc->lo : 433000000u, hi = sc->hi ? sc->hi : 435000000u;
+	uint32_t n = (hi - lo) / 12500u + 1u;
+	unsigned probes = 0, calls = 0;
+	double ran = 0;
+	keep_going = true;
+	for (int k = 0; k < trials; k++) {
+		nsig = 1;
+		sig_t *s = &sigs[0];
+		memset(s, 0, sizeof *s);
+		s->hz = sc->at ? sc->at : lo + 12500u * (n / 8u + crnd() % (n - n / 4u)) + (sc->half ? 6250u : 0u);
+		s->dbm = sc->lo_dbm + (double)(crnd() % 1000u) / 999.0 * (sc->hi_dbm - sc->lo_dbm);
+		s->mode = sc->mode;
+		s->phase = crnd() % 60u;
+		s->over = 5000u + crnd() % 15001u;
+		s->pause = 3000u + crnd() % 7001u;
+		s->t0 = now - crnd() % (s->over + s->pause);
+		if (next_dbm(sc) != 0.0) {
+			sig_t *c = &sigs[nsig++];
+			memset(c, 0, sizeof *c);
+			c->hz = s->hz + 25000u;
+			c->dbm = next_dbm(sc);
+			c->mode = M_FM;
+		}
+		for (int f = 0; f < sc->fm && nsig < NSIG_MAX; f++) {
+			sig_t *c = &sigs[nsig++];
+			memset(c, 0, sizeof *c);
+			do
+				c->hz = lo + 12500u * (crnd() % n);
+			while (offset(c->hz, s->hz) < 100000u);
+			c->dbm = -95.0 + (double)(crnd() % 30u);
+			c->mode = M_FM;
+		}
+		uint32_t t0 = now, got;
+		if (engine == 0)
+			got = p25_run(lo, hi, 120000u, s, &probes, NULL);
+		else
+			got = dmr_run(lo, hi, 120000u, s, &probes, NULL);
+		ran += (now - t0) / 1000.0;
+		calls += (uint16_t)(seq1 - seq0);
+		if (got) {
+			r.t[r.found] = got / 1000.0;
+			r.found++;
+		}
+		now += 40000u;
+	}
+	keep_going = false;
+	qsort(r.t, (size_t)r.found, sizeof r.t[0], cmp_d);
+	printf("MODEL %s fpm-%s %d %.1f 0 %.1f 0 %.2f\n", eng, sc->name, r.found, r.found ? r.t[r.found / 2] : 99.0,
+	       ran > 0 ? probes * 60.0 / ran : 0.0, ran > 0 ? calls * 60.0 / ran : 0.0);
+}
+
 /* The owner's beta.7 test (2026-11-21): the other radio on DMR direct mode (TG 1, CC 1, TS1), LOW power in the same
  * room, on 436.275 (or 433.200), the search on a typed range of about 436.000-436.500 MHz: a reading at the ceiling
  * for 50 kHz around it, the skirt beyond (the strong-signal profile); 433.200 lies outside the range */
 #define OWNER_LO 436000000u
 #define OWNER_HI 436500000u
 
-int main(void)
+int main(int argc, char **argv)
 {
 	const char *eng = CONFIG_SEARCH_SURE ? "sure" : "before";
+#if CONFIG_SEARCH_HYBRID
+	bool fast = argc > 1 && strcmp(argv[1], "fast") == 0;
+	sh_set_fast(fast);
+	eng = fast ? "fast" : "classic";
+#else
+	(void)argc;
+	(void)argv;
+#endif
 	now = 100000u;
 	if (getenv("SURE_TRACE"))
 		trace_hz = (uint32_t)strtoul(getenv("SURE_TRACE"), NULL, 10);
@@ -631,6 +770,61 @@ int main(void)
 	};
 	for (unsigned i = 0; i < sizeof alls / sizeof alls[0]; i++)
 		scenario(eng, 1, &alls[i], trials);
+	all_kind = false;
+#endif
+	/* fastsrch rows (after the original ones, whose figures stay as without the switch): a P25 repeater (always
+	 * keyed), a weak P25 / DMR with a strong FM carrier 25 kHz above it, 430-440 MHz */
+	static const scen_t new_p25[] = {
+		{ "p25-rpt", M_P25, -110, -60, false, false, -124, 0, 0, 5, 0, 0, 0 },
+		{ "p25-fmnext", M_P25, -110, -100, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "p25-wide10", M_P25, -110, -60, false, true, -124, 0, 0, 5, 430000000u, 440000000u, 0 },
+	};
+	static const scen_t new_dmr[] = {
+		{ "dmr-fmnext", M_DMRDIR, -110, -100, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "dmr-wide10", M_DMRDIR, -110, -60, false, true, -124, 0, 0, 5, 430000000u, 440000000u, 0 },
+	};
+	for (unsigned i = 0; i < sizeof new_p25 / sizeof new_p25[0]; i++)
+		scenario(eng, 0, &new_p25[i], trials);
+	for (unsigned i = 0; i < sizeof new_dmr / sizeof new_dmr[0]; i++)
+		scenario(eng, 1, &new_dmr[i], trials);
+#if CONFIG_ALL_SEARCH
+	all_kind = true;
+	static const scen_t new_all[] = {
+		{ "all-p25-fmnext", M_P25, -110, -100, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "all-wide10", M_DMRDIR, -110, -60, false, true, -124, 0, 0, 5, 430000000u, 440000000u, 0 },
+	};
+	for (unsigned i = 0; i < sizeof new_all / sizeof new_all[0]; i++)
+		scenario(eng, 1, &new_all[i], trials);
+	all_kind = false;
+#endif
+	/* fastsrch: calls caught a minute (searches left running 120 s) */
+	static const scen_t fpm_p25[] = {
+		{ "p25-overs", M_P25, -110, -60, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "p25-busy", M_P25, -100, -60, false, true, -124, 0, 6, 5, 0, 0, 0 },
+		{ "p25-fmnext", M_P25, -110, -100, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "p25-wide10", M_P25, -110, -60, false, true, -124, 0, 0, 5, 430000000u, 440000000u, 0 },
+	};
+	static const scen_t fpm_dmr[] = {
+		{ "dmr-strong", M_DMRDIR, -70, -50, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "dmr-owner-436275", M_DMRDIR, -30, -15, false, true, -124, -45, 0, 5, OWNER_LO, OWNER_HI, 436275000u },
+		{ "dmr-busy", M_DMRDIR, -100, -60, false, true, -124, 0, 6, 5, 0, 0, 0 },
+		{ "dmr-fmnext", M_DMRDIR, -110, -100, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "dmr-wide10", M_DMRDIR, -110, -60, false, true, -124, 0, 0, 5, 430000000u, 440000000u, 0 },
+	};
+	const int ftrials = 40;
+	for (unsigned i = 0; i < sizeof fpm_p25 / sizeof fpm_p25[0]; i++)
+		scenario_fpm(eng, 0, &fpm_p25[i], ftrials);
+	for (unsigned i = 0; i < sizeof fpm_dmr / sizeof fpm_dmr[0]; i++)
+		scenario_fpm(eng, 1, &fpm_dmr[i], ftrials);
+#if CONFIG_ALL_SEARCH
+	all_kind = true;
+	static const scen_t fpm_all[] = {
+		{ "all-busy", M_DMRDIR, -100, -60, false, true, -124, 0, 6, 5, 0, 0, 0 },
+		{ "all-p25-fmnext", M_P25, -110, -100, false, true, -124, 0, 0, 5, 0, 0, 0 },
+		{ "all-wide10", M_DMRDIR, -110, -60, false, true, -124, 0, 0, 5, 430000000u, 440000000u, 0 },
+	};
+	for (unsigned i = 0; i < sizeof fpm_all / sizeof fpm_all[0]; i++)
+		scenario_fpm(eng, 1, &fpm_all[i], ftrials);
 	all_kind = false;
 #endif
 	CHECK(failures == 0);

@@ -55,6 +55,170 @@ pub struct SearchCall {
     pub id: i64,
 }
 
+/// The search statistics of one engine (firmware beta.9: the X.st line of p25s / dmrs / alls, 19 fields; see
+/// docs/plus.md "Search log on the PC"; SearchStats in SearchLog.cs). `algo`: "fast" or "classic" (as the radio sends
+/// it); times in ms; 0 for pass_ms / first_ms / seen_ms / sync_last / sync_max means none yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchStats {
+    pub algo: String,
+    pub up_ms: i64,
+    pub passes: i64,
+    pub pass_ms: i64,
+    pub pass_steps: i64,
+    pub probes: i64,
+    pub found: i64,
+    pub nosync: i64,
+    pub partial: i64,
+    pub gone: i64,
+    pub skipped: i64,
+    pub early: i64,
+    pub watch: i64,
+    pub probe_ms: i64,
+    pub sweep_ms: i64,
+    pub first_ms: i64,
+    pub seen_ms: i64,
+    pub sync_last: i64,
+    pub sync_max: i64,
+}
+
+/// The CSV keys of the statistics, in the order of `SearchStats::csv_values`.
+pub const STATS_CSV_KEYS: [&str; 19] = [
+    "algo",
+    "up_ms",
+    "passes",
+    "pass_ms",
+    "pass_steps",
+    "probes",
+    "found",
+    "nosync",
+    "partial",
+    "gone",
+    "skipped",
+    "early",
+    "watch",
+    "probe_ms",
+    "sweep_ms",
+    "first_ms",
+    "seen_ms",
+    "sync_last",
+    "sync_max",
+];
+
+impl SearchStats {
+    /// The fields of an X.st value: ALGO,UP_MS,... Fewer than 19 fields, an empty algo or a field that is not a
+    /// (non-negative) number gives None; fields after the 19th are ignored.
+    pub fn parse(text: &str) -> Option<SearchStats> {
+        let p: Vec<&str> = text.split(',').collect();
+        if p.len() < 19 || p[0].trim().is_empty() {
+            return None;
+        }
+        let mut v = [0i64; 19];
+        for i in 1..19 {
+            v[i] = p[i].trim().parse::<i64>().ok().filter(|n| *n >= 0)?;
+        }
+        Some(SearchStats {
+            algo: p[0].trim().to_lowercase(),
+            up_ms: v[1],
+            passes: v[2],
+            pass_ms: v[3],
+            pass_steps: v[4],
+            probes: v[5],
+            found: v[6],
+            nosync: v[7],
+            partial: v[8],
+            gone: v[9],
+            skipped: v[10],
+            early: v[11],
+            watch: v[12],
+            probe_ms: v[13],
+            sweep_ms: v[14],
+            first_ms: v[15],
+            seen_ms: v[16],
+            sync_last: v[17],
+            sync_max: v[18],
+        })
+    }
+
+    /// Share of the time spent probing (percent), None before any time is counted.
+    pub fn probing_percent(&self) -> Option<i64> {
+        let total = self.probe_ms + self.sweep_ms;
+        (total > 0).then(|| (self.probe_ms * 100 + total / 2) / total)
+    }
+
+    /// The CSV cells: the values in the order of `STATS_CSV_KEYS`.
+    pub fn csv_values(&self) -> Vec<String> {
+        let n = [
+            self.up_ms,
+            self.passes,
+            self.pass_ms,
+            self.pass_steps,
+            self.probes,
+            self.found,
+            self.nosync,
+            self.partial,
+            self.gone,
+            self.skipped,
+            self.early,
+            self.watch,
+            self.probe_ms,
+            self.sweep_ms,
+            self.first_ms,
+            self.seen_ms,
+            self.sync_last,
+            self.sync_max,
+        ];
+        std::iter::once(self.algo.clone()).chain(n.iter().map(|x| x.to_string())).collect()
+    }
+
+    /// The page's one line, e.g. "Fast | pass 4.1 s (161 steps) | probes 12: found 3, no sync 7, partial 1, gone 1 |
+    /// skipped 4, early 2, watch 3 | probing 38% | first find 6.2 s | seen->found 1.4 s | sync 0.42 s (max 0.81 s)".
+    /// `text` gives the page's string for a key (slog_stat_*, "{}" placeholders filled in order); `dec` is the
+    /// decimal separator; parts with nothing known yet are left out.
+    pub fn describe(&self, text: &dyn Fn(&str) -> String, dec: char) -> String {
+        let fill = |key: &str, args: &[String]| {
+            let mut s = text(key);
+            for a in args {
+                s = s.replacen("{}", a, 1);
+            }
+            s
+        };
+        let sec = |ms: i64, digits: usize| format!("{:.digits$}", ms as f64 / 1000.0).replace('.', &dec.to_string());
+        let mut parts = vec![match self.algo.as_str() {
+            "fast" => text("slog_stat_fast"),
+            "classic" => text("slog_stat_classic"),
+            other => other.to_string(),
+        }];
+        if self.pass_ms > 0 {
+            parts.push(fill("slog_stat_pass", &[sec(self.pass_ms, 1), self.pass_steps.to_string()]));
+        }
+        parts.push(fill(
+            "slog_stat_probes",
+            &[
+                self.probes.to_string(),
+                self.found.to_string(),
+                self.nosync.to_string(),
+                self.partial.to_string(),
+                self.gone.to_string(),
+            ],
+        ));
+        parts
+            .push(fill("slog_stat_skips", &[self.skipped.to_string(), self.early.to_string(), self.watch.to_string()]));
+        if let Some(pct) = self.probing_percent() {
+            parts.push(fill("slog_stat_probing", &[pct.to_string()]));
+        }
+        if self.first_ms > 0 {
+            parts.push(fill("slog_stat_first", &[sec(self.first_ms, 1)]));
+        }
+        if self.seen_ms > 0 {
+            parts.push(fill("slog_stat_seen", &[sec(self.seen_ms, 1)]));
+        }
+        if self.sync_max > 0 || self.sync_last > 0 {
+            parts.push(fill("slog_stat_sync", &[sec(self.sync_last, 2), sec(self.sync_max, 2)]));
+        }
+        parts.join(" | ")
+    }
+}
+
 /// One line of the log: every call heard on one mode + frequency + code (NAC / CC / DG-ID / RAN) + group, counted
 /// (owner 2026-11-21). first / last: when it was first and last heard; source / caller / slot: the last call's.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +279,14 @@ pub struct SearchLogBook {
     pub all_stopped: Option<Stamp>,
     /// Radio restarts seen (uptime or a search's call sequence went back).
     pub restarts: u32,
+    /// The latest search statistics seen per engine (None: that engine never sent an X.st line; older firmware
+    /// sends none).
+    pub p25_stats: Option<SearchStats>,
+    pub dmr_stats: Option<SearchStats>,
+    pub all_stats: Option<SearchStats>,
+    /// The engine whose statistics the page shows ("P25", "DMR" or "ALL"): one that runs now and has statistics, else
+    /// the last one shown; None while no engine has sent any.
+    pub stats_engine: Option<&'static str>,
 }
 
 fn fields(text: &str, n: usize) -> Option<Vec<i64>> {
@@ -255,6 +427,49 @@ impl SearchLogBook {
         Self::default()
     }
 
+    /// The statistics of `stats_engine`.
+    pub fn shown_stats(&self) -> Option<&SearchStats> {
+        match self.stats_engine {
+            Some("P25") => self.p25_stats.as_ref(),
+            Some("DMR") => self.dmr_stats.as_ref(),
+            Some("ALL") => self.all_stats.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Every engine's statistics seen in this session, in the order P25, DMR, ALL.
+    pub fn all_stats_seen(&self) -> Vec<(&'static str, &SearchStats)> {
+        [("P25", &self.p25_stats), ("DMR", &self.dmr_stats), ("ALL", &self.all_stats)]
+            .into_iter()
+            .filter_map(|(n, s)| s.as_ref().map(|s| (n, s)))
+            .collect()
+    }
+
+    /// The X.st lines of a poll: the latest of each engine is kept (a poll without one leaves it); the page shows the
+    /// engine that runs now.
+    fn take_stats(&mut self, kv: &HashMap<&str, &str>) {
+        let get = |k: &str| kv.get(k).and_then(|v| SearchStats::parse(v));
+        if let Some(s) = get("p25s.st") {
+            self.p25_stats = Some(s);
+        }
+        if let Some(s) = get("dmrs.st") {
+            self.dmr_stats = Some(s);
+        }
+        if let Some(s) = get("alls.st") {
+            self.all_stats = Some(s);
+        }
+        let engines = [
+            ("P25", self.p25_on, self.p25_stats.is_some()),
+            ("DMR", self.dmr_on, self.dmr_stats.is_some()),
+            ("ALL", self.all_on, self.all_stats.is_some()),
+        ];
+        if let Some((n, _, _)) = engines.iter().find(|(_, on, has)| *has && *on == Some(true)) {
+            self.stats_engine = Some(n);
+        } else if self.shown_stats().is_none() {
+            self.stats_engine = engines.iter().find(|(_, _, has)| *has).map(|(n, _, _)| *n);
+        }
+    }
+
     /// Every line, the most recently heard first.
     pub fn groups(&self) -> Vec<SearchGroup> {
         let mut v: Vec<SearchGroup> = self.groups.values().cloned().collect();
@@ -315,6 +530,7 @@ impl SearchLogBook {
         self.dmr_at_hz = num("dmrs.at");
         self.all_at_hz = num("alls.at");
         self.poll += 1;
+        self.take_stats(&kv);
 
         let mut seq_now: Vec<(char, i64)> = vec![];
         if let Some(s) = num("p25s.seq") {
@@ -618,6 +834,28 @@ pub struct CsvWritten {
 /// (Excel locks an open CSV on Windows) the rows go to `side_path`; once the file is free again it is written and the
 /// side file goes.
 pub fn write(path: &Path, lines: &[SearchGroup], sep: char, dec: char) -> std::io::Result<CsvWritten> {
+    write_with_stats(path, lines, sep, dec, &[])
+}
+
+/// The footer row of an engine's statistics: "stats", the engine, then key=value cells.
+pub fn csv_stats_row(engine: &str, st: &SearchStats, sep: char) -> String {
+    ["stats".to_string(), engine.to_string()]
+        .into_iter()
+        .chain(STATS_CSV_KEYS.iter().zip(st.csv_values()).map(|(k, v)| format!("{k}={v}")))
+        .map(|c| csv_cell(&c, sep))
+        .collect::<Vec<_>>()
+        .join(&sep.to_string())
+}
+
+/// `write` with the statistics of the engines that reported any (`SearchLogBook::all_stats_seen`) as footer rows
+/// after the data rows; none: exactly `write`'s file.
+pub fn write_with_stats(
+    path: &Path,
+    lines: &[SearchGroup],
+    sep: char,
+    dec: char,
+    stats: &[(&str, &SearchStats)],
+) -> std::io::Result<CsvWritten> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -626,6 +864,10 @@ pub fn write(path: &Path, lines: &[SearchGroup], sep: char, dec: char) -> std::i
     text.push_str("\r\n");
     for g in lines {
         text.push_str(&csv_row(g, sep, dec));
+        text.push_str("\r\n");
+    }
+    for (engine, st) in stats {
+        text.push_str(&csv_stats_row(engine, st, sep));
         text.push_str("\r\n");
     }
     let tmp = path.with_extension("csv.tmp");

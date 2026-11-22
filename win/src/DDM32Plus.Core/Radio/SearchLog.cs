@@ -30,6 +30,75 @@ public sealed class SearchGroup
     public int Calls { get; set; }
 }
 
+/// <summary>The search statistics of one engine (firmware beta.9: the X.st line of p25s / dmrs / alls, 19 fields; see
+/// docs/plus.md "Search log on the PC"). Algo: "fast" or "classic" (as the radio sends it); times in ms; 0 for
+/// FirstMs / SeenMs / SyncLast / SyncMax / PassMs means none yet.</summary>
+public sealed record SearchStats(string Algo, long UpMs, long Passes, long PassMs, long PassSteps, long Probes, long Found,
+    long NoSync, long Partial, long Gone, long Skipped, long Early, long Watch, long ProbeMs, long SweepMs, long FirstMs,
+    long SeenMs, long SyncLast, long SyncMax)
+{
+    public const int FieldCount = 19;
+
+    /// <summary>The CSV keys of the fields, in order.</summary>
+    public static readonly string[] CsvKeys =
+    [
+        "algo", "up_ms", "passes", "pass_ms", "pass_steps", "probes", "found", "nosync", "partial", "gone", "skipped",
+        "early", "watch", "probe_ms", "sweep_ms", "first_ms", "seen_ms", "sync_last", "sync_max",
+    ];
+
+    /// <summary>The fields of an X.st value: ALGO,UP_MS,... Fewer than 19 fields, an empty algo or a field that is not
+    /// a number gives null; fields after the 19th are ignored.</summary>
+    public static SearchStats? Parse(string text)
+    {
+        var p = text.Split(',');
+        if (p.Length < FieldCount || p[0].Trim().Length == 0)
+            return null;
+        var v = new long[FieldCount];
+        for (var i = 1; i < FieldCount; i++)
+            if (!long.TryParse(p[i].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out v[i]) || v[i] < 0)
+                return null;
+        return new SearchStats(p[0].Trim().ToLowerInvariant(), v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10],
+            v[11], v[12], v[13], v[14], v[15], v[16], v[17], v[18]);
+    }
+
+    /// <summary>Share of the time spent probing (percent), null before any time is counted.</summary>
+    public long? ProbingPercent => ProbeMs + SweepMs > 0 ? (ProbeMs * 100 + (ProbeMs + SweepMs) / 2) / (ProbeMs + SweepMs) : null;
+
+    /// <summary>The CSV cells: the values in the order of <see cref="CsvKeys"/>.</summary>
+    public string[] CsvValues() =>
+    [
+        Algo, .. new[] { UpMs, Passes, PassMs, PassSteps, Probes, Found, NoSync, Partial, Gone, Skipped, Early, Watch,
+            ProbeMs, SweepMs, FirstMs, SeenMs, SyncLast, SyncMax }.Select(n => n.ToString(CultureInfo.InvariantCulture)),
+    ];
+
+    /// <summary>The page's one line, e.g. "Fast | pass 4.1 s (161 steps) | probes 12: found 3, no sync 7, partial 1,
+    /// gone 1 | skipped 4, early 2, watch 3 | probing 38% | first find 6.2 s | seen-&gt;found 1.4 s | sync 0.42 s (max
+    /// 0.81 s)". <paramref name="text"/> gives the page's string for a key (SLog_Stat_*: format strings of the resx
+    /// files); parts with nothing known yet are left out.</summary>
+    public string Describe(Func<string, string> text, CultureInfo culture)
+    {
+        string F(string key, params object[] args) => string.Format(culture, text(key), args);
+        static string Sec(long ms, int digits, CultureInfo c) => (ms / 1000.0).ToString("0." + new string('0', digits), c);
+        var parts = new List<string>
+        {
+            Algo switch { "fast" => text("SLog_Stat_Fast"), "classic" => text("SLog_Stat_Classic"), _ => Algo },
+        };
+        if (PassMs > 0)
+            parts.Add(F("SLog_Stat_Pass", Sec(PassMs, 1, culture), PassSteps));
+        parts.Add(F("SLog_Stat_Probes", Probes, Found, NoSync, Partial, Gone));
+        parts.Add(F("SLog_Stat_Skips", Skipped, Early, Watch));
+        if (ProbingPercent is { } pct)
+            parts.Add(F("SLog_Stat_Probing", pct));
+        if (FirstMs > 0)
+            parts.Add(F("SLog_Stat_First", Sec(FirstMs, 1, culture)));
+        if (SeenMs > 0)
+            parts.Add(F("SLog_Stat_Seen", Sec(SeenMs, 1, culture)));
+        if (SyncMax > 0 || SyncLast > 0)
+            parts.Add(F("SLog_Stat_Sync", Sec(SyncLast, 2, culture), Sec(SyncMax, 2, culture)));
+        return string.Join(" | ", parts);
+    }
+}
+
 /// <summary>What <see cref="SearchLogBook.Write"/> did: the file written and whether the log's own file was held by
 /// another program (Excel), so the rows went to <see cref="SearchLogBook.SidePath"/> instead.</summary>
 public sealed record SearchCsvResult(string Path, bool Locked);
@@ -93,6 +162,24 @@ public sealed class SearchLogBook
     public DateTime? DmrStoppedAt { get; private set; }
     public DateTime? AllStoppedAt { get; private set; }
 
+    /// <summary>The latest search statistics seen per engine (null: that engine never sent an X.st line; older
+    /// firmware sends none).</summary>
+    public SearchStats? P25Stats { get; private set; }
+    public SearchStats? DmrStats { get; private set; }
+    public SearchStats? AllStats { get; private set; }
+
+    /// <summary>The engine whose statistics the page shows ("P25", "DMR" or "ALL"): one that runs now and has
+    /// statistics, else the last one shown; null while no engine has sent any.</summary>
+    public string? StatsEngine { get; private set; }
+
+    /// <summary>The statistics of <see cref="StatsEngine"/>.</summary>
+    public SearchStats? ShownStats => StatsEngine switch { "P25" => P25Stats, "DMR" => DmrStats, "ALL" => AllStats, _ => null };
+
+    /// <summary>Every engine's statistics seen in this session, in the order P25, DMR, ALL.</summary>
+    public IReadOnlyList<(string Engine, SearchStats Stats)> AllStatsSeen =>
+        [.. new (string, SearchStats?)[] { ("P25", P25Stats), ("DMR", DmrStats), ("ALL", AllStats) }
+            .Where(e => e.Item2 is not null).Select(e => (e.Item1, e.Item2!))];
+
     /// <summary>Radio restarts seen (uptime or a search's call sequence went back).</summary>
     public int Restarts { get; private set; }
 
@@ -147,6 +234,7 @@ public sealed class SearchLogBook
         DmrAtHz = Num(kv, "dmrs.at");
         AllAtHz = Num(kv, "alls.at");
         poll++;
+        TakeStats(kv);
 
         var seqNow = new Dictionary<char, long>();
         if (Num(kv, "p25s.seq") is { } ps)
@@ -214,6 +302,31 @@ public sealed class SearchLogBook
             seqs[eng] = s;
         }
         return changed;
+    }
+
+    /// <summary>The X.st lines of a poll: the latest of each engine is kept (a poll without one leaves it); the page
+    /// shows the engine that runs now.</summary>
+    private void TakeStats(Dictionary<string, string> kv)
+    {
+        if (kv.TryGetValue("p25s.st", out var p) && SearchStats.Parse(p) is { } ps)
+            P25Stats = ps;
+        if (kv.TryGetValue("dmrs.st", out var d) && SearchStats.Parse(d) is { } ds)
+            DmrStats = ds;
+        if (kv.TryGetValue("alls.st", out var a) && SearchStats.Parse(a) is { } al)
+            AllStats = al;
+        foreach (var (name, on, st) in new (string, bool?, SearchStats?)[]
+                 {
+                     ("P25", P25On, P25Stats), ("DMR", DmrOn, DmrStats), ("ALL", AllOn, AllStats),
+                 })
+        {
+            if (st is not null && on == true)
+            {
+                StatsEngine = name;
+                return;
+            }
+        }
+        if (ShownStats is null)
+            StatsEngine = AllStatsSeen.Select(e => e.Engine).FirstOrDefault();
     }
 
     /// <summary>One entry of a poll into its line; true when a line changed. A line exists only while it has calls:
@@ -432,6 +545,11 @@ public sealed class SearchLogBook
         return value.IndexOfAny([sep, '"', '\n', '\r']) >= 0 ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;
     }
 
+    /// <summary>The footer row of an engine's statistics: "stats", the engine, then key=value cells.</summary>
+    public static string CsvStatsRow(string engine, SearchStats st, char sep = ',') => string.Join(sep,
+        new[] { "stats", engine }.Concat(SearchStats.CsvKeys.Zip(st.CsvValues(), (k, v) => k + "=" + v))
+            .Select(c => CsvCell(c, sep)));
+
     public static string CsvHeader(char sep = ',') => string.Join(sep, CsvColumns);
 
     public static string CsvRow(SearchGroup g, char sep = ',', string dec = ".") => string.Join(sep, new[]
@@ -462,12 +580,15 @@ public sealed class SearchLogBook
     /// letters; <paramref name="sep"/> between the cells), whole, through a temporary file, so a crash never leaves half a
     /// file. While another program holds the file (Excel locks an open CSV) the rows go to <see cref="SidePath"/> and
     /// the result says so; once the file is free again it is written and the side file goes.</summary>
-    public static SearchCsvResult Write(string path, IEnumerable<SearchGroup> lines, char sep = ',', string dec = ".")
+    public static SearchCsvResult Write(string path, IEnumerable<SearchGroup> lines, char sep = ',', string dec = ".",
+        IEnumerable<(string Engine, SearchStats Stats)>? stats = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
         var sb = new StringBuilder().Append(CsvHeader(sep)).Append("\r\n");
         foreach (var g in lines)
             sb.Append(CsvRow(g, sep, dec)).Append("\r\n");
+        foreach (var (engine, st) in stats ?? [])
+            sb.Append(CsvStatsRow(engine, st, sep)).Append("\r\n");
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(true));
         var side = SidePath(path);

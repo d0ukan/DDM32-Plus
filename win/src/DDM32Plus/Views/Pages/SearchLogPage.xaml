@@ -19,6 +19,7 @@
             </StackPanel>
             <TextBlock x:Name="StatusText" Style="{StaticResource Plain}" />
             <TextBlock x:Name="SearchText" Style="{StaticResource Plain}" Foreground="{StaticResource Grey}" />
+            <TextBlock x:Name="StatsText" Style="{StaticResource Plain}" Foreground="{StaticResource Grey}" Visibility="Collapsed" />
             <TextBlock x:Name="ErrorText" Style="{StaticResource Plain}" Foreground="{StaticResource Grey}" FontSize="{StaticResource Size1}" />
         </StackPanel>
         <DataGrid x:Name="Grid" Margin="0,6,0,0" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"

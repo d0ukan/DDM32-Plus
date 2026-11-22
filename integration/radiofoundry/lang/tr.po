@@ -6642,3 +6642,11 @@ msgstr "Özel "
 #: core/ui/ui_mwatch.inc
 msgid "Pvt"
 msgstr "Özel"
+
+#: core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
+msgid "Search: fast"
+msgstr "Arama: hızlı"
+
+#: core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
+msgid "Search: classic (beta.8)"
+msgstr "Arama: klasik (beta.8)"

@@ -29,6 +29,9 @@ bool ui_air_watch_on(void) __attribute__((weak));
 #include "gfx.h"
 #include "radio/radio.h"
 #include "radio/dmrsearch.h"
+#if CONFIG_SEARCH_HYBRID
+#include "radio/searchhy.h"
+#endif
 #include "ui/ui_scratch.h"
 #if CONFIG_SEARCH_RANGE
 #include "ui/ui_srange.h"
@@ -453,6 +456,18 @@ static bool dmrs_key(const input_event_t *ev)
 					      (ev->action >= ACT_DIGIT_0 && ev->action <= ACT_DIGIT_9))) {
 		ui_srange_open(&rng, ui_view()->ch.rx_hz,
 			       ev->action == ACT_QUICK ? 0 : (char)('0' + (ev->action - ACT_DIGIT_0)));
+		return true;
+	}
+#endif
+#if CONFIG_SEARCH_HYBRID
+	/* DDM32 Plus faster searches (radio/searchhy.h): held 0 switches between the fast algorithm and beta.8's (classic),
+	 * so the owner can compare them on the same signal; a running search starts again with it */
+	if (ev->gesture == GESTURE_LONG && ev->action == ACT_DIGIT_0) {
+		sh_set_fast(!sh_fast_wanted());
+		ui_toast(sh_fast_wanted() ? TR("Search: fast") : TR("Search: classic (beta.8)"));
+		if (on)
+			restart();
+		ui_dirty();
 		return true;
 	}
 #endif

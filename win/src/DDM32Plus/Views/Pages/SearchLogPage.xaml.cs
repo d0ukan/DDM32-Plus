@@ -75,6 +75,9 @@ public partial class SearchLogPage : UserControl, IPage
         ClearButton.IsEnabled = rows.Count > 0 || (csvPath is not null && File.Exists(csvPath));
         StatusText.Text = status.Length > 0 ? status : Loc.T("SLog_NotRunning");
         SearchText.Text = Running ? Searches() : "";
+        var shown = book.ShownStats;
+        StatsText.Text = shown is null ? "" : $"{book.StatsEngine}: " + shown.Describe(Loc.T, Loc.Instance.Culture);
+        StatsText.Visibility = shown is null ? Visibility.Collapsed : Visibility.Visible;
         ErrorText.Text = error;
         ErrorText.Visibility = error.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -222,7 +225,7 @@ public partial class SearchLogPage : UserControl, IPage
             {
                 csvPath ??= SearchLogBook.SessionPath(state.Paths.Logs, started ?? now);
                 var (sep, dec) = SearchLogBook.CsvFormat();
-                var r = SearchLogBook.Write(csvPath, groups, sep, dec);
+                var r = SearchLogBook.Write(csvPath, groups, sep, dec, book.AllStatsSeen);
                 writtenPath = r.Path;
                 error = r.Locked ? Loc.F("SLog_Locked", r.Path) : "";
             }

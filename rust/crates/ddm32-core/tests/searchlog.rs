@@ -9,7 +9,7 @@ use ddm32_core::radio::debug::{
 };
 use ddm32_core::radio::port::{Clock, RadioPort, RawSerial, VirtualClock};
 use ddm32_core::radio::searchlog::{
-    self, has_search_log, parse_all, parse_dmr, parse_p25, CsvWritten, SearchGroup, SearchLogBook, Stamp,
+    self, has_search_log, parse_all, parse_dmr, parse_p25, CsvWritten, SearchGroup, SearchLogBook, SearchStats, Stamp,
 };
 use ddm32_core::radio::tools::ToolContext;
 use ddm32_core::radio::{ToolError, ToolResult};
@@ -708,4 +708,123 @@ fn reconnect_stops_on_cancel_while_waiting() {
     assert!(!port_trouble(&ToolError::no_port_given()));
     assert!(!port_trouble(&ToolError::value("Refused")));
     assert!(!port_trouble(&ToolError::radio_disabled()));
+}
+
+// ---- search statistics (firmware beta.9: the X.st line) ----
+
+const ST: &str = "fast,60000,4,4100,161,12,3,7,1,1,4,2,3,3800,6200,6200,1400,420,810";
+const DMR_ST: &str = "classic,1000,1,2000,10,1,0,0,1,0,0,0,0,10,20,0,0,0,0";
+
+/// A poll with st lines (empty: none); `p25_on` / `dmr_on` set the engines' on flags.
+fn with_st(p25_st: &str, dmr_st: &str, p25_on: bool, dmr_on: bool) -> Vec<String> {
+    let mut l = p(1, "p25s.f0=433500000,456,655,1234567,1,30,1");
+    let on = |b: bool| if b { "1" } else { "0" };
+    let i = l.iter().position(|x| x == "p25s.on=1").unwrap();
+    l[i] = format!("p25s.on={}", on(p25_on));
+    let i = l.iter().position(|x| x == "dmrs.on=1").unwrap();
+    l[i] = format!("dmrs.on={}", on(dmr_on));
+    if !p25_st.is_empty() {
+        let i = l.iter().position(|x| x == "p25s.seq=1").unwrap();
+        l.insert(i + 1, format!("p25s.st={p25_st}"));
+    }
+    if !dmr_st.is_empty() {
+        l.push(format!("dmrs.st={dmr_st}"));
+    }
+    l
+}
+
+#[test]
+fn the_stats_line_is_parsed_tolerantly() {
+    let s = SearchStats::parse(ST).unwrap();
+    assert_eq!(
+        ("fast", 60000, 4, 4100, 161, 12),
+        (s.algo.as_str(), s.up_ms, s.passes, s.pass_ms, s.pass_steps, s.probes)
+    );
+    assert_eq!((3, 7, 1, 1, 4, 2, 3), (s.found, s.nosync, s.partial, s.gone, s.skipped, s.early, s.watch));
+    assert_eq!(
+        (3800, 6200, 6200, 1400, 420, 810),
+        (s.probe_ms, s.sweep_ms, s.first_ms, s.seen_ms, s.sync_last, s.sync_max)
+    );
+    assert_eq!(Some(38), s.probing_percent());
+    assert_eq!("classic", SearchStats::parse(&ST.replace("fast", "Classic")).unwrap().algo);
+    assert!(SearchStats::parse(&format!("{ST},99,extra")).is_some()); // extra trailing fields: the first 19 count
+    assert!(SearchStats::parse(&ST[..ST.rfind(',').unwrap()]).is_none()); // 18 fields
+    assert!(SearchStats::parse(&ST.replace("4100", "x")).is_none());
+    assert!(SearchStats::parse(&ST.replace("4100", "-1")).is_none());
+    assert!(SearchStats::parse("").is_none());
+    assert!(SearchStats::parse("garbage").is_none());
+    assert!(SearchStats::parse(&ST.replace("fast", "")).is_none());
+}
+
+#[test]
+fn the_book_keeps_the_latest_stats_per_engine_and_shows_the_running_one() {
+    let mut b = SearchLogBook::new();
+    assert!(b.shown_stats().is_none());
+    b.add(&with_st(ST, DMR_ST, true, true), T0);
+    assert_eq!(Some("P25"), b.stats_engine); // both run: P25 first
+    assert_eq!("fast", b.p25_stats.as_ref().unwrap().algo);
+    assert_eq!("classic", b.dmr_stats.as_ref().unwrap().algo);
+    b.add(&with_st("", &DMR_ST.replace("1000", "2000"), true, true), at(1));
+    assert_eq!(60000, b.p25_stats.as_ref().unwrap().up_ms); // kept when a poll sends none
+    assert_eq!(2000, b.dmr_stats.as_ref().unwrap().up_ms);
+    // P25 stopped (its line stays), DMR runs: DMR is shown
+    b.add(&with_st(ST, DMR_ST, false, true), at(2));
+    assert_eq!(Some("DMR"), b.stats_engine);
+    // both stopped: the last shown stays
+    b.add(&with_st(ST, DMR_ST, false, false), at(3));
+    assert_eq!(Some("DMR"), b.stats_engine);
+    let seen: Vec<&str> = b.all_stats_seen().iter().map(|(n, _)| *n).collect();
+    assert_eq!(vec!["P25", "DMR"], seen);
+    // garbage in the line changes nothing
+    b.add(&with_st("fast,1,2", "", true, true), at(4));
+    assert_eq!(60000, b.p25_stats.as_ref().unwrap().up_ms);
+}
+
+#[test]
+fn the_csv_footer_has_one_stats_row_per_engine_and_only_with_stats() {
+    let mut b = SearchLogBook::new();
+    b.add(&with_st(ST, DMR_ST, true, true), T0);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.csv");
+    searchlog::write_with_stats(&path, &b.groups(), ',', '.', &b.all_stats_seen()).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.trim_start_matches('\u{feff}').lines().collect();
+    assert_eq!(4, lines.len()); // header, one data row, two stats rows
+    assert_eq!(
+        "stats,P25,algo=fast,up_ms=60000,passes=4,pass_ms=4100,pass_steps=161,probes=12,found=3,nosync=7,partial=1,gone=1,\
+         skipped=4,early=2,watch=3,probe_ms=3800,sweep_ms=6200,first_ms=6200,seen_ms=1400,sync_last=420,sync_max=810",
+        lines[2]
+    );
+    assert!(lines[3].starts_with("stats,DMR,algo=classic,up_ms=1000,"));
+    assert_eq!(searchlog::csv_row(&b.groups()[0], ',', '.'), lines[1]); // data rows unchanged
+                                                                        // Turkish Excel: the list separator between the cells
+    let st = b.p25_stats.as_ref().unwrap();
+    assert!(searchlog::csv_stats_row("P25", st, ';').starts_with("stats;P25;algo=fast;up_ms=60000;"));
+    // no stats (an older firmware): exactly the file as before
+    let mut old = SearchLogBook::new();
+    old.add(&p(1, "p25s.f0=433500000,456,655,1234567,1,30,1"), T0);
+    assert!(old.shown_stats().is_none() && old.all_stats_seen().is_empty());
+    let (p2, p3) = (dir.path().join("old.csv"), dir.path().join("old2.csv"));
+    searchlog::write_with_stats(&p2, &old.groups(), ',', '.', &old.all_stats_seen()).unwrap();
+    searchlog::write(&p3, &old.groups(), ',', '.').unwrap();
+    assert_eq!(std::fs::read(&p3).unwrap(), std::fs::read(&p2).unwrap());
+    assert_eq!(2, std::fs::read_to_string(&p2).unwrap().lines().count());
+}
+
+#[test]
+fn stats_do_not_change_the_log_itself() {
+    let (mut with, mut without) = (SearchLogBook::new(), SearchLogBook::new());
+    for i in 0..4 {
+        let line = format!("p25s.f0=433500000,456,655,1234567,{},0,1", i + 1);
+        let plain = p(i + 1, &line);
+        let mut a = plain.clone();
+        let k = a.iter().position(|x| *x == format!("p25s.seq={}", i + 1)).unwrap();
+        a.insert(k + 1, format!("p25s.st={ST}"));
+        assert_eq!(without.add(&plain, at(i)), with.add(&a, at(i)));
+        assert_eq!(has_search_log(&plain), has_search_log(&a));
+    }
+    assert_eq!(
+        (without.total_calls(), without.missed(), without.restarts),
+        (with.total_calls(), with.missed(), with.restarts)
+    );
 }
