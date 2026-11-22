@@ -18,6 +18,15 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
     hotspot (and its CW ID), an APRS beacon that waited for a clear channel, and DOTA (after RadioFoundry f4b19e9; no
     band rule added).
   - DMR text: received control characters (0x7F-0x9F) are dropped instead of being drawn as icons (RadioFoundry 22b27e8).
+- DMR search and the all digital search's DMR probe: the modem now hears every color code at once. Before, "any color
+  code" made the DMR modem step through the codes one at a time, and once a strong signal near the frequency moved it
+  off the right code it heard nothing at the probe, which is how a DMR radio in the same room was never found
+  (docs/plus.md "DMR search: the color code scan"). Ported from upstream RadioFoundry (d1a7ae4, MIT); "Any" color
+  code channels use the same path. Host-tested only; the owner's radio test decides.
+- From upstream RadioFoundry (2093f64, MIT): a simplex hotspot that sends base station sync is no longer dropped as
+  the other timeslot.
+- Searches: a strong signal that raises several channels around it is probed on a real channel, never 6.25 kHz off,
+  and a signal standing out of a raised band is probed instead of being taken as the noise floor.
 
 ## v1.0.0-beta.7 (candidate, not released yet)
 

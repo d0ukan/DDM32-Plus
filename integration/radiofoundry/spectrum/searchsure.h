@@ -11,7 +11,12 @@
  *    (within SURE_RUN_DB of the strongest), then probes the middle of the strongest run: the peak of a carrier whose
  *    lower skirt came first (a radio close by reads strong 12.5-50 kHz off), the middle of a plateau (an overloaded
  *    front end), the half step between two equal steps (a signal on a 6.25 kHz raster, x.xx625, 12.5 kHz steps).
- *    A run SURE_CLIMB_MAX steps flat is the band's level raised, not a carrier: the floor takes its level.
+ *    A run of three or more steps is probed on a channel step, never a half step: its one clearly strongest step
+ *    (SURE_PEAK_DB over every other: the channel, its neighbours raised by a radio close by), else the step in its
+ *    middle (branch dmrs3: an even plateau's middle was a half step, 6.25 kHz off a DMR channel, which the modem can't
+ *    decode). A run SURE_CLIMB_MAX steps flat is the band's level raised, not a carrier: the floor takes its level.
+ *    Unless one of its steps reads clearly over the rest (beta.7 hole hunt A3: a plateau never hides its strongest
+ *    step): that step is probed first, and the floor takes the run's level when the probe ends.
  *  - The skirt: after a probe (or a run whose middle is skipped) the steps up to SURE_SKIRT_HZ above the run that read
  *    SURE_SKIRT_DB under it are that carrier's, not probed again (SURE_SKIRT_MS, the same pass). */
 #ifndef PLUS_SEARCHSURE_H
@@ -27,6 +32,7 @@
 #define SURE_SKIRT_DB		10	/* past the run: this far under it is its skirt ... */
 #define SURE_SKIRT_HZ		50000u	/* ... up to this far past it */
 #define SURE_SKIRT_MS		4000u	/* a skirt is known this long after the probe ended */
+#define SURE_PEAK_DB		3	/* a run's step this far over every other step of it is the one probed */
 #define SURE_FLOOR_UP_Q4	4	/* a strong step lifts the floor by 1/4 dB (dBm x 16) */
 #define SURE_GONE_MS		200u	/* a probe's level under the hit's half margin this long: off the air (a direct mode
 					 * DMR gap is 32.5 ms, so it is a whole over that ended) */
@@ -35,8 +41,11 @@ typedef struct {
 	bool floor_ok;		/* the floor was learned (the first step) */
 	bool climbing;		/* a run is being followed */
 	bool skirt_on;
+	bool wide;		/* the run is SURE_CLIMB_MAX flat: its level becomes the floor when it ends (dmrs3) */
 	uint8_t climbed;
 	int16_t run_lvl;	/* the run's strongest */
+	int16_t best_lvl, next_lvl;	/* the run's strongest reading and the strongest of its other steps */
+	uint32_t best_hz;		/* ... and where (dmrs3) */
 	int16_t skirt_lvl;
 	uint32_t run_lo, run_hi;
 	uint32_t skirt_lo, skirt_hi, skirt_ms, skirt_pass;
@@ -91,6 +100,10 @@ static inline int sure_climb(sure_t *u, uint32_t hz, int16_t lvl, bool strong)
 		u->climbed = 0;
 		u->run_lvl = lvl;
 		u->run_lo = u->run_hi = hz;
+		u->best_lvl = lvl;
+		u->best_hz = hz;
+		u->next_lvl = INT16_MIN;
+		u->wide = false;
 		return SURE_MORE;
 	}
 	if (!strong || lvl < u->run_lvl - SURE_RUN_DB)
@@ -99,17 +112,59 @@ static inline int sure_climb(sure_t *u, uint32_t hz, int16_t lvl, bool strong)
 		u->run_lvl = lvl;	/* stronger: a new run starts here (and may go on as far again) */
 		u->run_lo = u->run_hi = hz;
 		u->climbed = 0;
+		u->best_lvl = lvl;
+		u->best_hz = hz;
+		u->next_lvl = INT16_MIN;
 	} else {
 		u->run_hi = hz;
+		if (lvl > u->best_lvl) {
+			u->next_lvl = u->best_lvl;
+			u->best_lvl = lvl;
+			u->best_hz = hz;
+		} else if (lvl > u->next_lvl) {
+			u->next_lvl = lvl;
+		}
 	}
-	return ++u->climbed >= SURE_CLIMB_MAX ? SURE_WIDE : SURE_MORE;
+	if (++u->climbed < SURE_CLIMB_MAX)
+		return SURE_MORE;
+	u->wide = true;
+	return SURE_WIDE;
 }
 
-/* The frequency the run is probed on: its middle (a half step for an even run), on the receiver's 10 Hz grid */
-static inline uint32_t sure_target(const sure_t *u)
+/* A run has ended (probed, passed over, or quiet when its target was read again): a SURE_WIDE run's level is the
+ * band's, raised: the floor from now (until quiet steps pull it down again). True when the floor changed */
+static inline bool sure_wide_floor(sure_t *u, int32_t *floor_q4)
 {
-	uint32_t mid = u->run_lo + (u->run_hi - u->run_lo) / 2u;
-	return mid - mid % 10u;
+	if (!u->wide)
+		return false;
+	u->wide = false;
+	*floor_q4 = (int32_t)u->run_lvl * 16;
+	return true;
+}
+
+/* One step of the run reads clearly over all its others (SURE_PEAK_DB): a carrier, not just the band raised */
+static inline bool sure_peaked(const sure_t *u)
+{
+	return u->best_lvl - u->next_lvl >= SURE_PEAK_DB;
+}
+
+/* The frequency the run is probed on (step: the sweep's). One step: it. Two: the half step between them (a signal on
+ * a 6.25 kHz raster reads on both). Three or more: the clearly strongest step, else the step in the middle (of the two
+ * in the middle of an even run, the one nearer the strongest reading): always a channel step */
+static inline uint32_t sure_target(const sure_t *u, uint32_t step)
+{
+	uint32_t span = u->run_hi - u->run_lo;
+	if (step == 0u || span <= step) {
+		uint32_t mid = u->run_lo + span / 2u;
+		return mid - mid % 10u;
+	}
+	if (sure_peaked(u))
+		return u->best_hz;
+	uint32_t n = span / step;	/* steps above run_lo */
+	uint32_t lo = u->run_lo + n / 2u * step;
+	if (n % 2u == 0u)
+		return lo;
+	return u->best_hz > lo ? lo + step : lo;
 }
 
 #endif

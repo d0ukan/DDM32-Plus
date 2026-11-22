@@ -38,6 +38,13 @@ static int16_t half(uint32_t hz) { return hz == H + 6250u ? -64 : hz == H || hz 
 static int16_t plateau(uint32_t hz) { return off(hz, F) <= 25000u ? -45 : off(hz, F) <= 50000u ? -80 : -124; }
 /* The band's level raised far and wide (a radio close by desensing it): 20 steps flat at -100 */
 static int16_t wide(uint32_t hz) { return hz >= 433200000u && hz < 433450000u ? -100 : -124; }
+/* dmrs3: ... with a carrier 3 dB over it inside the first 16 steps (433.3875 MHz) */
+#define W 433387500u
+static int16_t wide_peak(uint32_t hz) { return hz == W ? -97 : wide(hz); }
+/* An even plateau at the ceiling (F - 12.5 .. F + 25 kHz): its middle is a half step, 6.25 kHz off any channel */
+static int16_t plateau4(uint32_t hz) { return hz >= F - 12500u && hz <= F + 25000u ? -45 : -124; }
+/* Five strong steps (F - 37.5 .. F + 12.5 kHz), F 4 dB over the others: F, not the run's middle (F - 12.5 kHz) */
+static int16_t peak_run(uint32_t hz) { return hz == F ? -46 : hz >= F - 37500u && hz <= F + 12500u ? -50 : -124; }
 
 /* --- DMR --- */
 static unsigned dmr_hits(void)
@@ -140,10 +147,28 @@ static void test_dmr(void)
 	CHECK(ms >= DMRS_PROBE_LONG_MS && ms <= DMRS_PROBE_LONG_MS + POLL);
 	CHECK(dmr_sweep(strong, 81u * 4u * 3u) == F);	/* probed again on the next pass */
 
+	/* dmrs3: an even plateau is probed on a channel step (F), never on its middle's half step */
+	dmrs_start(433000000u, 434000000u, 12500u, now);
+	{ uint32_t got = dmr_sweep(plateau4, 4000u); if (got != F) printf("plateau4 got %u\n", got); CHECK(got == F); }
+	CHECK(dmr_hold(plateau4, 20, true, 500u) == 0);
+	/* ... and a run's clearly strongest step is probed, not its middle */
+	dmrs_start(433000000u, 434000000u, 12500u, now);
+	{ uint32_t got = dmr_sweep(peak_run, 4000u); if (got != F) printf("peak_run got %u\n", got); CHECK(got == F); }
+	CHECK(dmr_hold(peak_run, 20, true, 500u) == 0);
+
 	/* A wide flat run (the band raised, no carrier): no probe, the floor takes its level */
 	dmrs_start(433000000u, 434000000u, 12500u, now);
 	unsigned h0 = dmr_hits();
 	CHECK(dmr_sweep(wide, 81u * 3u * 2u) == 0 && dmr_hits() == h0);
+	/* dmrs3 (hole hunt A3): a carrier 3 dB over such a band: the plateau's strongest step is probed, not taken as the
+	 * floor (the beta.7 rule made the whole run the floor: the carrier was never probed); not DMR: skipped, and from then
+	 * the floor takes the run's level */
+	dmrs_start(433000000u, 434000000u, 12500u, now);
+	{ uint32_t got = dmr_sweep(wide_peak, 81u * 3u * 2u); if (got != W) printf("wide_peak got %u\n", got); CHECK(got == W); }
+	ms = dmr_hold(wide_peak, 0, false, 5000u);
+	CHECK(ms >= DMRS_PROBE_MS && ms <= DMRS_PROBE_MS + POLL && dmrs_snapshot(&v) && v.floor_dbm >= -101);
+	h0 = dmr_hits();
+	CHECK(dmr_sweep(wide_peak, 81u * 3u) == 0 && dmr_hits() == h0);	/* the next pass: within its skip */
 
 	/* The steps on the channel grid: a typed 436.010 starts at 436.0125 and reads 436.2750 */
 	CHECK(dmrs_start(436010000u, 436500000u, 12500u, now) == 436012500u);
@@ -236,6 +261,13 @@ static void test_p25(void)
 	p25_probe(quiet, false, 1200u);	/* gone off the air during the probe: given back at once, not skipped */
 	{ uint32_t got = p25_sweep(plateau, 81u * 4u); if (got != F) printf("p25 plateau got %u\n", got); CHECK(got == F); }
 	p25_probe(plateau, true, 500u);
+	/* dmrs3: the even plateau on a channel step; the strongest step of a wide run probed */
+	p25s_start(433000000u, 434000000u, 12500u, now);
+	CHECK(p25_sweep(plateau4, 4000u) == F);
+	p25_probe(plateau4, true, 500u);
+	p25s_start(433000000u, 434000000u, 12500u, now);
+	{ uint32_t got = p25_sweep(wide_peak, 81u * 4u); if (got != W) printf("p25 wide_peak got %u\n", got); CHECK(got == W); }
+	p25_probe(wide_peak, true, 500u);
 	CHECK(p25s_start(436010000u, 436500000u, 12500u, now) == 436012500u);
 	p25s_stop();
 }
@@ -248,6 +280,6 @@ int main(void)
 #endif
 	test_p25();
 	printf("Plus surer searches (floor, run middle, half step, plateau, skirt, gone, long window, skips, grid, wide run, "
-	       "steps a second%s): %d failures\n", CONFIG_ALL_SEARCH ? ", all digital DMR first" : "", failures);
+	       "steps a second, even plateau, strongest step, a wide run's peak probed%s): %d failures\n", CONFIG_ALL_SEARCH ? ", all digital DMR first" : "", failures);
 	return failures != 0;
 }
