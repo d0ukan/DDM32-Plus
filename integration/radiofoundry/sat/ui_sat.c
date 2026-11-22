@@ -585,7 +585,8 @@ const char *ui_sat_alarm(void)
 	const radio_view_t *rv = ui_view();
 	bool tx = rv->state == RS_TX || rv->state == RS_TX_DENIED;
 	uint8_t scr = ui_depth() == 0 ? SCR_HOME : ui_frame()->scr;
-	sat_ui_idle(rv->state == RS_IDLE && rv->scan == 0 && !rv->hotspot &&
+	bool em = ui_svc_emergency_active();	/* an emergency runs: no track takes the radio, no pop-up offers one */
+	sat_ui_idle(rv->state == RS_IDLE && rv->scan == 0 && !rv->hotspot && !em &&
 		    (scr == SCR_HOME || scr == SCR_SATELLITES || scr == SCR_ISS));
 	if (tx || !sat_alarm_take(&ev) || ev.sat >= sat_count)
 		return NULL;
@@ -604,7 +605,7 @@ const char *ui_sat_alarm(void)
 		sb_str(&b, TR(" min, max "));
 	} else if (ev.kind == SAT_ALARM_TRACK) {
 		sb_str(&b, TR(" tracking, max "));	/* the rise's tone sounded a second ago */
-	} else if (a_auto == SAT_AUTO_OFF && !ui_st.banner.hold && scr == SCR_HOME && !ui_st.entry) {
+	} else if (a_auto == SAT_AUTO_OFF && !ui_st.banner.hold && scr == SCR_HOME && !ui_st.entry && !em) {
 		sb_str(&b, TR(" overhead, max "));	/* the pop-up: OK tracks it (ui_sat_auto_key) */
 		pop = (uint8_t)(ev.sat | 0x80u);
 	} else {
@@ -632,12 +633,12 @@ const char *ui_sat_pop_hint(void)
 /* From ui_app_key before anything else. The AOS pop-up up: OK starts the held track, any other key hides it; either
  * way the key is used for that. While an auto track runs, a key press (or PTT / monitor down, which go on to the
  * radio: it refuses TX meanwhile) ends it, the radio back where it was; the key is used for that (on Tools > ISS the
- * keys stay the page's: its OK stops it). The emergency key is never taken: the radio core ends the hold for the
- * emergency itself (emergency_tick), the service follows */
+ * keys stay the page's: its OK stops it). The emergency and SOS keys are never taken: the radio core ends the hold
+ * for the emergency itself (emergency_tick), the service follows */
 bool ui_sat_auto_key(const input_event_t *ev)
 {
 	bool pass = ev->action == ACT_PTT || ev->action == ACT_MONITOR;
-	if (ev->action == ACT_EMERGENCY)
+	if (ev->action == ACT_EMERGENCY || ev->action == ACT_SOS)
 		return false;
 	if (ui_sat_pop_hint() != NULL && ev->gesture == GESTURE_PRESS &&
 	    (ev->action == ACT_SELECT || ev->action == ACT_BACK)) {

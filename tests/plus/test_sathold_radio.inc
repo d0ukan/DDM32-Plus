@@ -220,6 +220,8 @@ static void test_sathold_emergency(void)
 	run(300);
 	CHECK(!radio_sat_held() && !sm.view.vfo && sm.view.channel_number == 4 && sm.view.ch.mode == RADIO_MODE_DMR);
 	CHECK(dmr_emergency_state() == DMR_EMERGENCY_HOT_MIC && sm.em_keyed && sm.view.state == RS_TX && hw.tx_calls == tx + 1);
+	/* keyed on the channel's own frequency and color code, never the satellite's */
+	CHECK(hw.tx_hz == sm.view.ch.tx_hz && hw.tx_hz != 145802000u && sim.cc_filter == sm.view.ch.color_code);
 	run(2500);
 	dmr_emergency_cancel();
 	run(1000);
@@ -238,7 +240,27 @@ static void test_sathold_emergency(void)
 	CHECK(dmr_emergency_state() == DMR_EMERGENCY_FAILED && hw.tx_calls == tx && sm.view.state != RS_TX);
 	dmr_emergency_cancel();
 	run(100);
-	printf("Plus satellites' hold: an emergency ends it first (DMR channel keyed, FM channel failed)\n");
+
+	/* Verifier: a hold asked for while an emergency is in progress (in emergency until canceled, no hot mic): refused,
+	 * nothing noted, TX still allowed */
+	dmr_start(true);
+	{
+		dmr_emergency_settings_t es2;
+		dmr_emergency_settings_default(&es2);
+		es2.mode = DMR_EMERGENCY_MODE_CALL;
+		es2.hot_mic_s = 0;
+		dmr_emergency_set_settings(&es2);
+		run(20);
+	}
+	CHECK(dmr_emergency_start());
+	run(300);
+	CHECK(dmr_emergency_in_progress());
+	sh_refused();
+	poll_for(100);
+	CHECK(!radio_sat_held() && radio_sm_tx_check(&sm) == TXDENY_NONE);
+	dmr_emergency_cancel();
+	run(200);
+	printf("Plus satellites' hold: an emergency ends it first (DMR channel keyed, FM channel failed); refused during one\n");
 }
 
 /* Holehunt B6: a hold whose end request was lost (its track gone, sat_auto_on false) ends by itself after 2 s, the
@@ -252,6 +274,10 @@ static void test_sathold_watchdog(void)
 	sh_track_moves(145802000);	/* 3.2 s with its track running: held */
 	CHECK(radio_sat_held() && sm.view.vfo);
 	sh_auto = false;		/* the track ended, its sat_hold(false) dropped */
+	req(RREQ_PTT, 1);		/* (refused) while anything is on air the watchdog waits */
+	poll_for(2500);
+	CHECK(radio_sat_held() && sm.view.vfo);
+	req(RREQ_PTT, 0);
 	poll_for(1500);
 	CHECK(radio_sat_held() && sm.view.vfo);
 	poll_for(700);

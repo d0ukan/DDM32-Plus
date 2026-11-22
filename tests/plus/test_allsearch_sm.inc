@@ -162,13 +162,29 @@ static void test_plus_allsearch_sm(void)
     CHECK(dmrs_on() && dmrs_phase() == DMRS_SWEEP && hw.rx_hz >= 433000000u && hw.rx_hz < 434000000u);
     int etx = hw.tx_calls;
     CHECK(dmr_emergency_start());
-    classic_pump();		/* radio_task.c: the native service first, then the radio tick */
+    run(10);		/* the radio tick first (the usual order on the radio): the start waits for the search's stop */
     for (int i = 0; i < 30; i++) as_step();
     CHECK(!dmrs_on() && dmr_emergency_state() == DMR_EMERGENCY_FAILED && hw.tx_calls == etx &&
           hw.rx_hz == 146520000u && hw_mode == RADIO_MODE_FM && !sim.started);
     dmr_emergency_cancel();
     as_wait(200);
-    printf("Plus all digital search: an emergency during the sweep ends it, the channel tuned again (FM: failed)\n");
+    /* ... and during its DMR probe (the radio core's too: the board in DMR, every color code heard) */
+    radio_sm_request(&sm, &r, now);
+    for (int k = 0; k < 4 && !(dmrs_mode() == DMRS_MODE_DMR && hw_mode == RADIO_MODE_DMR); k++) {
+        as_to_probe();
+        for (int i = 0; i < 200 && dmrs_on() && dmrs_phase() != DMRS_SWEEP &&
+                        !(dmrs_mode() == DMRS_MODE_DMR && hw_mode == RADIO_MODE_DMR); i++) as_step();
+    }
+    CHECK(dmrs_on() && dmrs_mode() == DMRS_MODE_DMR && hw_mode == RADIO_MODE_DMR && !native_lab_owns());
+    CHECK(dmr_emergency_start());
+    run(10);
+    for (int i = 0; i < 30; i++) as_step();
+    CHECK(!dmrs_on() && dmr_emergency_state() == DMR_EMERGENCY_FAILED && hw.tx_calls == etx &&
+          hw.rx_hz == 146520000u && hw_mode == RADIO_MODE_FM && !sim.started);
+    dmr_emergency_cancel();
+    as_wait(200);
+    printf("Plus all digital search: an emergency during the sweep or the DMR probe, tick first: ended, the channel "
+           "tuned again (FM: failed)\n");
 #endif
     hw.st.rssi_dbm = 0;
     printf("Plus all digital search in the state machine: FM sweep, native P25 probe found/played/hang/give back, "

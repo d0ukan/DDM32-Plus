@@ -104,6 +104,10 @@ void sat_ui_idle(bool idle) { fake_idle = idle; }
 bool sat_auto_on(void) { return fake_auto; }
 void sat_auto_cancel(void) { cancels++; fake_auto = false; }
 
+/* The radio core's hold (the emergency module is the simulator's: ui_svc_emergency / ui_svc_emergency_active) */
+static bool fake_held;
+bool radio_sat_held(void) { return fake_held; }
+
 /* The user's held track (Tools > ISS, the AOS pop-up): recorded */
 static int starts;
 static uint8_t start_sat = SAT_NONE, start_mode, mode_now;
@@ -165,6 +169,8 @@ static void fake_reset(bool clock)
 	note_loaded = false;
 	al_opts = 0;
 	fake_auto = fake_idle = false;
+	fake_held = false;
+	ui_svc_emergency(false);
 	cancels = 0;
 	starts = 0;
 	refuse = 0;
@@ -286,10 +292,40 @@ static int auto_checks(void)
 		bool taken = false;
 		for (unsigned i = 0; i < sizeof g; i++) {
 			input_event_t ev = { ACT_EMERGENCY, g[i], 0 };
-			taken = taken || ui_sat_auto_key(&ev);
+			input_event_t sos = { ACT_SOS, g[i], 0 };
+			taken = taken || ui_sat_auto_key(&ev) || ui_sat_auto_key(&sos);
 		}
-		AUTO_CHECK(!taken && cancels == 0, "Sat the emergency key is not taken by an auto track");
+		AUTO_CHECK(!taken && cancels == 0, "Sat the emergency and SOS keys are not taken by an auto track");
 	}
+	/* A side key's hold function set to Emergency (SK1: value 1 on the long press) on the FM satellite VFO: during a
+	 * hold it goes on to the emergency (upstream runs hold functions on DMR only: on FM the hold is the squelch
+	 * break, which stays so outside a hold) */
+	fake_reset(true);
+	auto_flow("Sat SK1 hold Emergency: setup", "", "wait:200", "screen=home", 0);
+	{
+		/* the emergency key's handler ran: the emergency asked for (the simulator's module) */
+		input_event_t ev = { ACT_EMERGENCY, GESTURE_LONG, 1 };
+		fake_held = true;
+		ui_app_key(&ev);
+		AUTO_CHECK(ui_svc_emergency_active(), "Sat SK1 hold Emergency during a hold: the emergency asked for");
+		ui_svc_emergency(false);
+		fake_held = false;
+		ui_app_key(&ev);
+		AUTO_CHECK(!ui_svc_emergency_active() || ui_view()->ch.mode == RADIO_MODE_DMR,
+			   "Sat SK1 hold Emergency on FM outside a hold: the squelch break as before");
+		ui_svc_emergency(false);
+	}
+	/* An emergency running: the radio not idle for an auto track */
+	fake_reset(true);
+	auto_flow("Sat emergency running: setup", "", "wait:300", "screen=home", 0);
+	AUTO_CHECK(fake_idle, "Sat idle on Home without an emergency");
+	ui_svc_emergency(true);
+	{
+		char werr[120];
+		AUTO_CHECK(sim_run("wait:300", werr, sizeof werr), "Sat emergency running: the wait");
+	}
+	AUTO_CHECK(!fake_idle, "Sat emergency running: not idle");
+	ui_svc_emergency(false);
 #undef AUTO_CHECK
 	return bad;
 }
@@ -361,6 +397,7 @@ static void prep_up(void)
 static void prep_no_clock(void) { fv.clock = SAT_CLOCK_NONE; }
 static void prep_aprs(void) { iss_aprs = true; }
 static void prep_busy(void) { refuse = SAT_NO_BUSY; }
+static void prep_em(void) { ui_svc_emergency(true); }
 /* The fake alarm's warning and rise not coming (its banner hidden): the page's own lines in view */
 static void prep_quiet(void)
 {
@@ -480,6 +517,10 @@ static int iss_checks(void)
 			T("banner=ISS_overhead", "banner=ISS_tepede"), false);
 	bad += iss_flow(n = "Pop-up gone after 30 s", ARMED, NULL, "wait:45000 ok", "banner=none", false);
 	ISS_CHECK(starts == 0, n);
+	/* An emergency running at the rise: the plain banner, no pop-up, OK not taken */
+	bad += iss_flow(n = "No pop-up during an emergency", ARMED, prep_em, "wait:10500",
+			T("screen=home banner=ISS_AOS_now hides=OK:_track", "screen=home hides=OK:_takip"), false);
+	ISS_CHECK(starts == 0 && pop == SAT_NONE, n);
 	/* Not while transmitting: no tone, no pop-up; after the release it comes, and OK tracks */
 	bad += iss_flow(n = "Pop-up waits for TX", ARMED, NULL, "pttdown wait:11000", "banner=none", false);
 	ISS_CHECK(beeps_aos == 0 && starts == 0, n);

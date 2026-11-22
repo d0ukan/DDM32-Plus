@@ -1334,9 +1334,27 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     radio's own frame waiting 30 s mid pass: no VFO request, the Doppler caught up after; the hold ended by the radio
     core: the track ends at the next poll, nothing moved after); `tests/plus/test_ui_sat.c` (the emergency key's down,
     long and up not taken by an auto track; the pop-up up at 26 s and gone by 35 s after the rise).
-  - FLASH +184 B on `ddm25` 3118a86 (867,536 -> 867,720: the satellite part +128, the search stop below +56), RAM
-    +8 B (208,576 -> 208,584: the watchdog's word); zero warnings, forced rebuild identical, stack check passed. Radio
-    rows IS-12-IS-14; IS-8 / IS-9 now 30 s.
+  - **Verifier round** (FIX FIRST; no wrong-frequency TX found):
+    - an auto / held track could take the radio during an emergency already running (ACTIVE: held, receive only):
+      `sat_hold_free` now refuses while `dmr_emergency_in_progress()` or a start is pending, and the UI neither counts
+      the radio idle for an auto track nor shows the AOS pop-up while `ui_svc_emergency_active()`;
+    - an Emergency (or SOS) set as a side key's **hold** function (SK1: value 1 on the long press) was dropped by
+      `ui_app_key`'s "hold functions on DMR only" rule (on FM the hold is the squelch break), and during a hold the
+      radio sits on the FM satellite VFO. That rule now lets ACT_EMERGENCY / ACT_SOS through while `radio_sat_held()`
+      (`plus_satauto.py`); outside a hold upstream's rule is unchanged on purpose. In practice the key's press already
+      ends an auto track (monitor DOWN) before the long press fires, so this matters when the hold has not ended yet;
+    - `ui_sat_auto_key` also passes ACT_SOS (the first SOS press was taken by the track);
+    - the rise during the radio's own frame (`SAT_TX_OWN` for the whole APRS clear-channel wait, up to 10 s) skipped
+      the auto track for the whole pass: `auto_begin` now notes it (`auto_retry`, the mode) and starts the track once
+      the frame is over, if the radio is still idle and the pass not over; PTT across the rise still skips the pass;
+    - `sat_hold_watch` waits while anything is on air or an APRS frame waits (`radio_sat_txk() != SAT_TX_NONE`);
+    - the emergency / search order race and DMR trunk following: see the multi-watch fifth review's "order race".
+    Host tests: the emergency keyed on the channel's own frequency and color code (never 145.802); a hold refused
+    during an ACTIVE emergency; the watchdog waiting while PTT is held; the emergency and SOS keys' down / long / up
+    not taken; SK1 hold Emergency during a hold reaches the emergency key (outside a hold on FM it does not); no pop-up
+    and not idle during an emergency; the auto track after the radio's own frame across the rise.
+  - FLASH +484 B on `ddm25` 3118a86 (867,536 -> 868,020), RAM +8 B (208,576 -> 208,584); zero warnings, forced
+    rebuild identical, stack check passed. Radio rows IS-12-IS-16; IS-8 / IS-9 now 30 s.
 
 - [built] P25 Phase 1 trunk following (`CONFIG_P25_TRUNK`, `prepare_p25_trunk`; parallel job; receive only):
   Tools > P25 trunk (tool 24, before Battery) follows a trunked system from the **selected channel**: a P25 channel
@@ -4000,9 +4018,22 @@ waits for the reference trim to settle, so the tick took the start in the search
 native receiver holds is retuned by its own give back as before. Host tests: `tests/plus/test_dmrsearch_sm.inc` (an
 emergency during the DMR search on a DMR channel: the stack back on color code 2 and the hot mic keyed; on an FM
 channel: the channel tuned again, FAILED, nothing keyed) and `tests/plus/test_allsearch_sm.inc` (during the all
-digital sweep: the FM channel tuned again, FAILED). Residual: the start is set by the UI task, so it can land between
-the native service and the radio tick of one loop; the tick then takes it before the search is stopped (a window of
-one radio loop, not closed here).
+digital sweep: the FM channel tuned again, FAILED).
+
+**The order race (satfix verifier, HIGH)**: the "window of one loop" first noted here is the common case. The UI task
+sets the start (`ui_svc_emergency` -> `dmr_emergency_start`) while the radio task waits in its queue between the native
+service and the 10 ms tick, so the radio tick nearly always saw the start first and took it in the search's set-up:
+FAILED, the search going on (no TX, but the emergency lost). mwfix4's search part therefore did not work on the radio
+in the usual order; its host tests ran the native service first. Fix: `emergency_tick` defers a pending start while a
+search or trunk following the radio core runs (`dmrs_on`, `p25s_on`, `p25tk_on`, `dmrtk_on`) for at most 200 ms; the
+native service stops it (and tunes the channel) within a loop, then the tick takes the start on the user's channel.
+The search is not stopped inline in the tick (during an all digital probe the native receiver's `search_owned` /
+`channel_selected` are set before `test.owned`). DMR trunk following (receive only) is now ended the same way
+(RREQ_DMR_TRUNK stop), so on a DMR channel the emergency keys instead of failing with TXDENY_RX_ONLY. Host tests with
+the radio tick first: the DMR search (DMR channel: HOT_MIC on CC 2 at 438.5 MHz; FM channel: FAILED, back on 146.52,
+search off; both orders), the all digital sweep and DMR probe (FM: FAILED, channel again), the P25 sweep
+(`tests/classic/test_scan.inc`: FAILED within 200 ms, channel again) and DMR trunk following
+(`tests/plus/test_dmrtrunk_sm.inc`: following ended, keyed on the channel).
 
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free (720 after the review round, 716 after the second), UI 184 B: the radio task's deepest path is still the P25 search's give back):

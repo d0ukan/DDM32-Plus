@@ -17,12 +17,18 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   look like a callsign for SSTV, the cross-band and CW IDs ("DM32UV", the factory name, is refused; TA2DOU/P works).
   digital search at once instead of waiting for them (the channel tuned again before the emergency goes out); one
   pressed while transmitting in a watch waits 10 s at most.
+- An emergency (the key, the lone worker, SOS) also ends P25 and DMR trunk following, the P25 search and the DMR /
+  all digital search instead of waiting for them: within about 0.3 s the channel is tuned again and the emergency goes
+  out there (before this fix it usually failed while a search ran and the search went on). One pressed while
+  transmitting in a watch waits 10 s at most. Host-tested; radio row IS-16.
 - Satellite tracks (ISS auto track and the held track from Tools > ISS / the pop-up): the emergency key, the lone
   worker and SOS now end the track at once and go on from the user's channel (a DMR channel transmits the emergency;
   before, the key only ended the track and SOS / the lone worker failed on the receive-only satellite frequency). A
   track whose end got lost can no longer leave the radio receive only and not saving until a power cycle: it ends by
   itself within 2 s. A Doppler step no longer aborts the "# APRS via ISS" frame while it waits for a clear channel.
-  The AOS pop-up stays 30 s instead of 60 s. Host-tested; radio rows IS-12 to IS-14.
+  No track takes the radio while an emergency runs (and no AOS pop-up then); an Emergency or SOS key (also as SK1's
+  hold function) always reaches the emergency during a track. A rise during the radio's own APRS frame no longer
+  skips the auto track for the pass. The AOS pop-up stays 30 s instead of 60 s. Host-tested; radio rows IS-12 to IS-15.
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
   radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
   that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved

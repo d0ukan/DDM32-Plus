@@ -22,6 +22,9 @@
 #if CONFIG_P25_TRUNK
 #include "radio/p25trunk.h"
 #endif
+#if CONFIG_DMR_TRUNK
+#include "radio/dmrtrunk.h"
+#endif
 #if CONFIG_YSF_TX
 #include "radio/radio_cwid.h"
 #endif
@@ -473,8 +476,9 @@ static void channel_service(radio_sm_t *sm)
 {
 #if CONFIG_DMR_EMERGENCY
     /* DDM32 Plus: an emergency asked for (the key, the lone worker, SOS) never waits for the receiver: the DMR / all
-     * digital search, the P25 search and P25 trunk following end at once (as PTT ends them) and their receiver is let
-     * go below; a P25 channel or letter it holds is let go further down. A native transmission ends first (PTT) */
+     * digital search, the P25 search, P25 and DMR trunk following end at once (as PTT ends them) and their receiver is
+     * let go below; a P25 channel or letter it holds is let go further down. A native transmission ends first (PTT).
+     * The radio tick holds the start back meanwhile (emergency_tick, 200 ms at most): it usually sees it first */
     bool emergency=dmr_emergency_start_pending();
     if(emergency && !native_ptt && !live_owner()) {
         /* A search the radio core runs (the sweep's frequency, the DMR stack hearing every color code and slot) ends
@@ -494,6 +498,9 @@ static void channel_service(radio_sm_t *sm)
 #endif
 #if CONFIG_P25_TRUNK
         if(p25tk_on())p25tk_stop();
+#endif
+#if CONFIG_DMR_TRUNK
+        if(dmrtk_on()){stop=true;r.type=RREQ_DMR_TRUNK;}  /* (receive only: it refused the emergency's TX) */
 #endif
         (void)owned;
         if(stop)radio_sm_request(sm,&r,hal_millis());

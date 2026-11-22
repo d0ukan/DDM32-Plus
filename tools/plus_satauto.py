@@ -150,6 +150,7 @@ def prepare_sat_auto(transform, install):
          '\toff_warned = false;\n',
          '#if CONFIG_SATELLITES\n'
          'bool ui_sat_auto_key(const input_event_t *ev);\t// ui_sat.c (DDM32 Plus)\n'
+         'bool radio_sat_held(void);\t// radio_sathold.inc (DDM32 Plus)\n'
          '#endif\n'
          'void ui_app_key(const input_event_t *ev)\n{\n\tdirty = true;\n\tlast_key_ms = now;\n\tlast_use_ms = now;\n'
          '\toff_warned = false;\n'
@@ -157,6 +158,14 @@ def prepare_sat_auto(transform, install):
          '\tif (ui_sat_auto_key(ev))\n'
          '\t\treturn;\t// DDM32 Plus: the key ended a satellite\'s auto track (PTT and monitor go on below)\n'
          '#endif\n'),
+        # A side key's hold function runs on DMR only (on FM holding the key is the squelch break); during a satellite
+        # hold the radio sits on the FM satellite VFO, so an emergency / SOS hold function goes on (holehunt verifier)
+        ('\tif (ev->gesture == GESTURE_LONG && ev->value != 0 && view->ch.mode != RADIO_MODE_DMR)\n\t\treturn;\n',
+         '\tif (ev->gesture == GESTURE_LONG && ev->value != 0 && view->ch.mode != RADIO_MODE_DMR\n'
+         '#if CONFIG_SATELLITES\n'
+         '\t    && !((ev->action == ACT_EMERGENCY || ev->action == ACT_SOS) && radio_sat_held())\n'
+         '#endif\n'
+         '\t    )\n\t\treturn;\n'),
         # The AOS pop-up (auto track Off): "OK: track" under the rise's title (ui_sat_pop_text; ui_sat_auto_key acts)
         ('\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, NULL);\n',
          '\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, ui_sat_pop_text());\t// DDM32 Plus: the AOS pop-up\'s OK\n'),

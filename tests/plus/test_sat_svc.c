@@ -936,6 +936,31 @@ static void own_frame_and_hold_gone(uint8_t iss, int32_t start)
 	poll_ms = POLL_MS;
 }
 
+/* Verifier: the rise during the radio's own frame (an APRS beacon waiting for a clear channel, SAT_TX_OWN for up to
+ * 10 s): the auto track starts after it instead of skipping the pass (PTT across the rise still skips it: auto_busy) */
+static void auto_after_own_frame(uint8_t iss, int32_t start)
+{
+	scenario("auto track: the rise during the radio's own frame: it starts after the frame", start);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	sat_ui_idle(true);
+	sat_alarm_set(iss, 2, 10, SAT_AUTO_DOWN << SAT_OPT_AUTO_SHIFT);	/* one pass */
+	run_until_found();
+	poll_ms = 100;
+	sat_view_t v = view_now();
+	run_s(v.alarm.aos - utc_now() - 3);
+	ptt = SAT_TX_OWN;
+	run_s(8);
+	CHECK(!held && nreq == 0 && !sat_auto_on());
+	ptt = SAT_TX_NONE;
+	run_s(5);
+	CHECK(held && sat_auto_on() && vfo && abs((int32_t)(rx_hz - SAT_ISS_VOICE_HZ)) <= 4000);
+	sat_auto_cancel();
+	run_s(2);
+	CHECK(!held && !vfo && rx_hz == 438500000u);
+	poll_ms = POLL_MS;
+}
+
 int main(void)
 {
 	uint8_t iss = sat_index(SAT_ISS_CATNUM);
@@ -962,6 +987,7 @@ int main(void)
 	user_track(iss, t0 + 580000);
 	popup_track(iss, t0 + 640000);
 	own_frame_and_hold_gone(iss, t0 + 700000);
+	auto_after_own_frame(iss, t0 + 760000);
 	if (failures) {
 		printf("test_sat_svc: %d failures\n", failures);
 		return 1;
