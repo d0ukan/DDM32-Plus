@@ -29,9 +29,19 @@ static struct {				// what Home's row shows, read when the letter gets its chann
 	uint8_t mode;
 	uint32_t rx_hz;
 	char name[CODEPLUG_NAME_LEN + 1];
+#if UI_DETAIL
+	uint16_t da, db, dc;		// DDM32 Plus: its mode's settings, ui_detail_t's a, b, c (4 bytes a row: padding)
+#endif
 } mw_row[UI_MW_MAX];
 static char mw_msg[32];			// the toasts built here
-static zone_t mw_z;			// the codeplug reads here (static: not on the UI task's stack)
+// The codeplug reads here (static: not on the UI task's stack); a DMR row's talk contact reuses the zone's room
+static union {
+	zone_t z;
+#if UI_DETAIL && CONFIG_DMR
+	contact_t c;
+#endif
+} mw_u;
+#define mw_z mw_u.z
 static channel_t mw_ch;
 
 static void mw_reset(void)
@@ -82,6 +92,22 @@ static bool __attribute__((noinline)) mw_row_read(uint8_t k)
 	}
 	mw_row[k].mode = mw_ch.mode;
 	mw_row[k].rx_hz = mw_ch.rx_hz;
+#if UI_DETAIL
+	ui_detail_t d;
+	ui_detail_of(&mw_ch, &d);
+#if CONFIG_DMR
+	// A DMR channel's talk target (the VFO's is the radio's: CC and TS only)
+	uint16_t talk = r->vfo || mw_ch.mode != RADIO_MODE_DMR ? 0 : codeplug_channel_talk_contact(&mw_ch);
+	if (talk != 0 && codeplug_contact(talk, &mw_u.c)) {
+		d.b = (uint16_t)mw_u.c.id;
+		d.c = (uint16_t)(UI_DETAIL_TALK | (mw_u.c.type == CONTACT_PRIVATE ? UI_DETAIL_PRIVATE : 0u) |
+				 ((mw_u.c.id >> 16) & 0xFFu));
+	}
+#endif
+	mw_row[k].da = d.a;
+	mw_row[k].db = d.b;
+	mw_row[k].dc = d.c;
+#endif
 	return true;
 }
 
@@ -458,6 +484,15 @@ void ui_dual_ring_row(uint8_t k, const radio_view_t *v, ui_mw_row_t *out)
 	out->mode = mw_row[k].mode;
 	out->rx_hz = mw_row[k].rx_hz;
 	out->name = mw_row[k].name;
+#if UI_DETAIL
+	out->detail = (ui_detail_t){ mw_row[k].da, mw_row[k].db, mw_row[k].dc, mw_row[k].mode };
+	// A VFO letter as it is now (its mode, NAC or talk group change without a new channel): read from the radio's copy
+	if (mw_ref[k].vfo && ui_svc_vfo_get((uint8_t)mw_ref[k].pos, &mw_ch)) {
+		out->mode = mw_ch.mode;
+		out->rx_hz = mw_ch.rx_hz;
+		ui_detail_of(&mw_ch, &out->detail);
+	}
+#endif
 	uint8_t pane = mw_pane_of(k);
 	if (pane != UI_DUAL_NONE && d->pane[pane].vfo)
 		out->rx_hz = d->pane[pane].rx_hz;	// the VFO steps: the pane follows it

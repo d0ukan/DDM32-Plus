@@ -130,21 +130,56 @@ static void __attribute__((noinline)) mw_draw_row(const radio_view_t *v, const u
 		}
 		x_end = dual_right(sm, w, y2, sm->h, x0 + 8 * sm->w, buf, r->busy ? ui_col.rx : agec) - sm->w / 2;
 	}
-	sb_init(&b, buf, sizeof mw_buf);
 	if (rx && r->caller != NULL && r->caller[0] != '\0') {
 		gfx_text_fit(sm, r->caller, x_end - x0, fit, sizeof mw_fit);
 		gfx_text(sm, x0, y2, fit, ui_col.rx);
 		return;
 	}
+	// The mode and frequency, then (DDM32 Plus) the mode's own settings, the first form that fits: mode, frequency and
+	// the wide details ("P25 145.5000 NAC Any>$293/659 TG 1"), the tight ones ("...NACAny>$293/659 TG1"); then the
+	// frequency and the tight details; the mode and the tight details; the tight details alone (they name the mode:
+	// NAC, CC TS, DG, RAN, a tone); last the mode and frequency alone, as before
+#if UI_DETAIL
+	for (uint8_t form = 0; form <= 5u; form++) {
+#endif
+	sb_init(&b, buf, sizeof mw_buf);
 #if CONFIG_AM_RX
 	// DDM32 Plus: an FM channel or VFO in the air band is received in AM (radio_am_channel): say so (the air watch)
-	if (r->mode == RADIO_MODE_FM && radio_am_band(r->rx_hz) && radio_am_capable())
+	bool am = r->mode == RADIO_MODE_FM && radio_am_band(r->rx_hz) && radio_am_capable();
+#endif
+#if UI_DETAIL
+	if (form != 2u && form != 4u) {
+#endif
+#if CONFIG_AM_RX
+	if (am)
 		sb_str(&b, "AM");
 	else
 #endif
 	sb_str(&b, mw_mode_word(r->mode));
+#if UI_DETAIL
+	}
+	if (form < 3u || form == 5u) {
+		if (form != 2u)
+			sb_chr(&b, ' ');
+#else
 	sb_chr(&b, ' ');
+#endif
 	sb_freq(&b, r->rx_hz);
+#if UI_DETAIL
+	}
+#if CONFIG_AM_RX
+	if (am)
+		break;	// no tones in AM: the mode and frequency (form 0's start)
+#endif
+	if (form == 5u)
+		break;
+	if (form != 4u)
+		sb_chr(&b, ' ');
+	ui_sb_detail(&b, &r->detail, form == 0u ? UI_DETAIL_WIDE : UI_DETAIL_TIGHT);
+	if (gfx_text_width(sm, buf) <= x_end - x0)
+		break;
+	}
+#endif
 	gfx_text_fit(sm, buf, x_end - x0, fit, sizeof mw_fit);
 	gfx_text(sm, x0, y2, fit, rx ? ui_col.rx : ui_col.dim);
 }

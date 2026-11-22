@@ -3643,6 +3643,27 @@ Not host-tested: YSF / NXDN / dPMR letters (YSF has no transmitter in this build
 dPMR receive only), VFO letters (they go through the same `dual_here` / `dual_talk`), the real worker's timing.
 Radio rows MW9-MW16 in [plus-radio-test.md](plus-radio-test.md).
 
+
+**Home's details** (part 2 of the same job; with VFO_MODES and NAC_DEC, i.e. every Plus build: `UI_DETAIL`,
+`integration/radiofoundry/mwatch/ui_detail.inc`, `tools/plus_mwfix.py`): each channel row says its mode's own
+settings, the first form that fits the 240 px row (the simulator's layout checks, English and Turkish, normal and
+Large text):
+
+| Where | Before | Now |
+|---|---|---|
+| Single channel, the chips row of a P25 / YSF / NXDN / dPMR channel | FM's "No tone 12.5k High SQ3" | `NAC $293/659 TG 42` (the owner's B: `NAC Any>$293/659 TG 1`), `DG-ID 12`, `RAN 5`, `CC 7`, then the power and squelch where they fit; tight `NAC$293/659 TG42`. FM (tones) and DMR (CC, TS, talk group) rows had theirs already; the VFO has them on its own row (round 15) |
+| Dual watch panes (2 letters), a P25 / YSF / NXDN / dPMR pane | row 2 the frequency, row 3 "No tone 12.5k"; a P25 VFO pane said "VFO FM" | as a DMR pane: row 2 what PTT talks to (`TG 42`, `DG-ID 12`, `RAN 5`, `CC 7`), row 3 the frequency and the NAC (`145.5000 MHz  NAC Any>$293/659`) |
+| Multi-watch rows (3..6), line 2 | `P25 145.5000` | `P25 145.5000 NAC Any>$293/659 TG 1`, tight `...NACAny>$293/659 TG1`; then the frequency and the tight details (`467.375 CC1 TS1 TG3100`), the mode and the tight details (the selected row, beside its PTT pill: `DMR CC1 TS1 TG3100`), the tight details alone, last the mode and frequency as before. FM `T88.5 R100.0` / `T88.5` / `No tone`; DMR `CC1 TS1 TG 91` (Any `CC* TS*`, a private talk target `ID 1234`); YSF `DG-ID 12`, NXDN `RAN 5`, dPMR `CC 7`. A VFO letter's row follows its VFO as it is now (before, the mode it had when it became a VFO) |
+| Large text | | unchanged: one line per letter / pane, the name only |
+
+Not done (no room on the row or in RAM): NXDN's group (the channel keeps the RAN only), dPMR's own ID (the radio's),
+the DMR talk group of a VFO letter (the radio core's, not in the VFO copy: CC and TS only). RAM: 4 B per ring row
+(the three packed values in the row's padding and 4 more) and the row the drawing fills: +32 B static. Host tests:
+`tests/plus/test_ui_mwdetail.c` (the formatter for every mode and form; Home with 4 and 6 letters, a P25 VFO letter,
+dual watch with a P25 VFO pane; English and Turkish, normal and Large text, the layout checks), `test_ui_vfox.c` and
+`test_ui_mwatch.c` unchanged; the single channel's chips row is covered by the formatter only (the simulator has no
+P25 channel to put on Home). Radio rows HD1-HD4.
+
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free, UI 184 B, as before: the radio task's deepest path is still the P25 search's give back):
 
@@ -3650,3 +3671,4 @@ radio task 728 B free, UI 184 B, as before: the radio task's deepest path is sti
 |---|---:|---:|
 | `ddm25` dc6376d | 857,584 | 209,856 (1,600) |
 | the TX target fix | 858,176 (+592) | 209,856 (1,600; the one new flag sits in padding) |
+| Home's details | 859,524 (+1,348) | 209,888 (1,568; +32 B, the 1,500 B floor kept) |

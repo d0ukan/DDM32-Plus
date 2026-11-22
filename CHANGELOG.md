@@ -12,6 +12,10 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   held there (that letter is let go and the selected one tuned first); a P25 letter transmits as a single P25 channel
   does; an FM carrier is never keyed on a P25 letter; the TX indicator clears on release, end or refusal; after our
   over on a P25 letter its reply is waited for 2.5 s without the cooldown.
+- Home shows each channel's own mode settings: a P25 channel "NAC $293/659 TG 42" (RX Any with its TX NAC: "NAC
+  Any>$293/659 TG 1"), YSF DG-ID, NXDN RAN, dPMR colour code on the single channel's chips row; dual watch panes of
+  those modes name the talk group and NAC as DMR panes do (a P25 VFO pane no longer says "VFO FM"); the multi-watch
+  rows add the NAC and TG, DMR colour code / timeslot / talk group, or the FM tones, in the form that fits.
 - Satellites: ISS notifications and auto track. The pass alarm page gains "Every pass" (the ISS or any satellite:
   every qualifying pass announced with the beeps and banner before and at AOS, armed again by itself and kept across
   power cycles) and "Auto track" (Off / On / APRS): at AOS, when the radio is idle on Home or the Satellites screen, it
