@@ -313,6 +313,10 @@ def prepare_rfports(transform, install):
         ('\nvoid hrc_dmr_board_init(hrc7000_t *modem, const hrc_dmr_board_t *hooks)\n',
          '\nGLUE_FLASH void hrc_dmr_board_init(hrc7000_t *modem, const hrc_dmr_board_t *hooks)\n'),
         ('\nvoid hrc_dmr_stats_reset(void)\n', '\nGLUE_FLASH void hrc_dmr_stats_reset(void)\n'),
+        # as upstream 916ac26: the counters restart, so does lost_check's memory of them (else one needless unmask)
+        ('\tmemset(&eng.st, 0, offsetof(hrc7000_dmr_stats_t, last_rx_type_info));\n\tunlock(NULL);\n',
+         '\tmemset(&eng.st, 0, offsetof(hrc7000_dmr_stats_t, last_rx_type_info));\n' + ON + '\tlost_seen = 0;\n#endif\n'
+         '\tunlock(NULL);\n'),
         ('\nstatic void put(out_t *o, const char *s)\n', '\nGLUE_FLASH static void put(out_t *o, const char *s)\n'),
         ('\nstatic void put_u(out_t *o, uint32_t v)\n', '\nGLUE_FLASH static void put_u(out_t *o, uint32_t v)\n'),
         ('\nstatic void put_x(out_t *o, uint32_t v, int digits)\n',
