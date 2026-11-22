@@ -98,6 +98,7 @@
 !/tests/native/test_pcm_coexist.c
 !/tests/native/test_tx_owner.c
 !/tests/native/test_update_owner.c
+!/tests/native/test_watch.c
 !/tests/protocol/build_target.sh
 !/tests/protocol/fuzz_p25.c
 !/tests/protocol/run_sanitizers.sh
@@ -233,6 +234,10 @@ __pycache__/
 !/integration/radiofoundry/spectrum/nav.h
 !/integration/radiofoundry/spectrum/ui_goto.c
 !/tests/plus/test_nav.c
+!/tests/plus/test_fm_copy.c
+!/tests/plus/fm_copy/FreeRTOS.h
+!/tests/plus/fm_copy/dmr_glue.h
+!/tests/plus/fm_copy/platform.h
 !/src/ysf/ysf.c
 !/src/ysf/ysf.h
 !/tests/plus/test_ysf.c

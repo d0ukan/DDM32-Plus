@@ -4096,6 +4096,49 @@ stack, the least free prvIdleTask 136 B, dmr task 800 B free):
 | `ddm25` 3e1119a (switch off) | 861,280 | 209,872 (1,584) |
 | this branch | 861,784 (+504) | 208,520 (2,936): +1,352 B free, the glue's task side in flash |
 
+### Second round (branch `rfports2`, 2026-11-22)
+
+Same switch (`CONFIG_RF_FIXES`), same file (`tools/plus_rfports.py`, `prepare_rfports2`, after the first round's hunks;
+RF `2093f64` is not here, branch `dmrs3` ports it). Each row first asked whether the problem exists in our tree.
+
+| RadioFoundry | Problem here? | Our change |
+|---|---|---|
+| `f5d2fd1` (#943) terminator ends the polite busy window | Yes. Our pin's call stack keys a direct reply aligned to the call it heard within `DMR_CALL_ALIGN_MS` (300 ms, `dmr_call.h`), and the 947c139 port's busy window is 360 ms from the last burst: a reply keyed in the first 360 ms after a terminator was refused "busy". Upstream measured it on a DM-32UV (refused before, keyed 3 of 3 after) | In direct mode a terminator with a good CRC, as the last burst taken, with no call left on either chip slot, ends the busy window (`rx_call_end`, in existing padding); any later burst opens it again. Through a repeater nothing changes (its terminator is its hang) |
+| `18fdd29` (#918) FM squelch holds through voice peaks | Yes, by the code: the same FD6818 noise reading and Classic's close rule, closing after 2 polls (50 ms) over the line; upstream's DM-32UV bench closed 9-10 times on fricatives before, 0 after. Ours closes after two polls in every case (our pin has no fast close), so a peak of 100-300 ms always closed it | On a 12.5 kHz channel, noise over the close line with the RX tone still heard and the signal strength within 3 dB of the last poll that held closes only after 16 polls (400 ms), for a carrier 10 dB or more over the receiver's floor (learned on idle polls). A carrier that goes, a fade (the strength falls), a weak carrier near the floor, the APRS hold and 25 kHz channels close as before. `sql_close` (polls the last close took) is kept in `radio_sm_t`, not in the view (no debug link view key here) |
+| `3d5940b` (#929) receive-copy watchdog, P25/NXDN, "RX deaf after 15-20 minutes" (RF #923; Open25 #40: P25 stops receiving after 10-20 minutes) | Possibly, in both our receive paths; not reproduced here. Upstream's code does not apply (its `hrc7000_air.c` is not in our pin). (1) **NXDN, dPMR, APRS receive** read the HR_C7000's FM copy (`fm_rx_audio.c`, system interrupt bit 14 every 32 ms) through the DMR glue's handler; outside DMR the engine's stuck-request check (916ac26 port) does not run, so a lost copy request or a masked system source leaves them deaf until the next start, the case upstream fixed. (2) **P25** is our native session (`hrc_native_chip.c`): `hn_sys` reads SYS_INTERP_LIST, then 24 diagnostic registers and the 36-byte block, and clears only the bits it read; a request rising in between keeps its line high and, the PIC acting on a rising line, never interrupts again. The session's slot interrupts keep it alive, so it does not stall out: it just hears nothing more | The idea, not the code, and nothing new in an ISR (RAM). (1) `fm_rx_audio.c` `copy_watch`, from the reader at task level: no half taken or dropped for 200 ms, and `hrc_dmr_fm_rx_kick` (glue, flash) drops the pending requests, sets the copy's mask bit and unmasks the system source; only outside DMR and only while the glue's own handler is installed (never under a native P25 session); counted (`hrc_fm_rx_restarts`). (2) `hn_watch` (`hrc_native_chip.c`, `.flashfunc`), from `native_lab_service` every radio poll while a session is owned: in a receive session, an owned request (RX_DONE, PHY_READY, ABNORMAL) enabled and pending with no `hn_sys` run for 50 ms is cleared and the system source unmasked (`hn_port_kick`); counted in `hn_chip.sys_stuck`. A busy channel (requests pending at a poll, the handler running between polls), a source the session doesn't own or enable, a transmit session and no session are left alone |
+| `f4b19e9` (#827) one keying gate (TX inhibit, critical battery) | Yes, for some paths. Audit of every `board.radio->tx()`: PTT FM/DMR, the cross-band, VOX and the emergency hot mic go through `ptt_down` (`radio_sm_tx_check`: inhibit and battery); DMR data, the roaming probe, the SFR repeater and its CW ID, the CW beacon, the cross-band CW ID and SSTV check `radio_sm_tx_check` first; native P25 / YSF PTT check it in `eligible` and re-check the battery every 25 ms. **Not covered:** the hotspot's armed keying and its CW ID (no inhibit or battery check at all), the APRS key-up after its channel wait (checked when the job started, not when it keys, up to the CSMA give-up later), DOTA (inhibit checked, a critical battery not) | `key_tx` / `KEY_TX` in the radio core: every keying (the 8 in `radio_sm.c`, `radio_dota.inc`, `radio_sstvtx.inc`) refuses on TX inhibit or a critical battery. The hotspot drops an armed keying when held (`tx_off`, back to its receive frequency) and is armed again when TX inhibit is cleared (`use_settings`). **No band rule** (owner decision 2026-11-22). Not ported: the hardware option check (none in our pin), the net page checks (no network stack in our build), LRRP's period floor, Emergency with the backlight off (not checked here) |
+| `22b27e8` (#790) received DMR text drops C1 controls and DEL | Yes: `latin1()` dropped only C0, and TMS kept every code point under 0x100; the UI font draws its own icons at 0x80-0x86 (`GLYPH_FIRST_EXTRA`), so a sender's U+0082 drew an arrow | 0x7F-0x9F dropped in every text path (ETSI short data, ETSI IP text, TMS) |
+
+Host tests (`tools/test_rfports.py`, run by `make classic-test`; `make native-test` for the native one), each failing
+with its fix removed (mutation run): `test_polite_after_terminator` / `test_polite_other_slot_terminator`
+(hrc7000DmrTest), `test_squelch_voice_peak` (radioCoreTest, adapted: no fast close in our pin), the hotspot's TX
+inhibit / critical battery checks in `test_hotspot` (radioCoreTest), `test_inhibit_during_wait` (aprsRadioTest, the
+APRS key-up), the C1 cases in `testIpText` (dmrDataServiceTest), `tests/plus/test_fm_copy.c` (the copy watchdog on
+the prepared `fm_rx_audio.c` with host doubles) and `tests/native/test_watch.c` (`hn_watch`). Radio rows RF-7..RF-12
+in [plus-radio-test.md](plus-radio-test.md). **Nothing of this round is proven on our radio**; the two watchdogs
+guard against a failure nobody has caught here, and their counts stay 0 unless it happens (not on a screen yet:
+`hrc_fm_rx_restarts()`, `hn_chip.sys_stuck`).
+
+Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its
+stack, the least free prvIdleTask 136 B, dmr task 800 B free):
+
+| | FLASH B | RAM B (free) |
+|---|---:|---:|
+| `ddm25` bd18936 | 869,384 | 208,616 (2,840) |
+| this branch | 870,172 (+788) | 208,712 (2,744): -96 B (the DMR engine's ISR-side lines, the watchdogs' state) |
+
+Other RadioFoundry commits after the pin looked at for this round (not ported; recommendations):
+
+| RadioFoundry | What | Recommendation |
+|---|---|---|
+| `9e1f720` (#606) DM32: `transmitting = true` before the TX routing | already in our tree (`radio_dm32.c` `tx()`) | nothing to do |
+| `7ae1cbf` (#816) APRS releases the FM receive copy before a retune | P25/NXDN/YSF engine not starting (PTT refused) after dual watch on the APRS frequency | M; check on the radio first (dual watch on the APRS frequency with a P25 channel, then P25 PTT); port if it shows |
+| `2f97ed4` (#891) voice streams send the speaker route on start | the speaker amplifier left on after the first key-up's talk permit beep (battery) | M (ambeVoice, p25Voice, board); worth porting with an amplifier check on the radio |
+| `eb17fce` (#858) slot numbers alone never bring a repeater up | noise-driven slot labels report a repeater up and a key-up skips its wake-up; seen on the HR_C6000; our condition is older and differs | S-M in `dmr_call.c`; leave for the `dmrs3` DMR work (same area as 2093f64) |
+| `0787733` + `ff23ce6` (#789, #835) hotspot power level changes | re-keying a keyed hotspot (split pairs), then a regression fix | only if the owner uses the MMDVM hotspot; the gate above already drops a held keying |
+| `0923f59` (#917) radio check, FID 0x10 form | interoperability with commercial portables' radio check | M; only if radio check is used |
+| `a600035` (#586) hotspot ignores line noise on the host link | a loose cable's 0xE0 byte switched to hotspot mode | M; only with the hotspot |
+
 ### Evaluated, not ported (decision needed)
 
 **`b93be31` (#777) cold buffers in modem SRAM, about 6 KB RAM.** Upstream puts the storage sector buffer (4,096 B,

@@ -35,7 +35,7 @@ static bool dota_key(bool on)
 	sm->view.tx_deny = TXDENY_NONE;
 	outputs(sm);
 	changed(sm);
-	if (!board.radio->tx(ch->tx_hz, RADIO_BW_12K5, sm->view.power, &ch->tx_tone)) {
+	if (!KEY_TX(sm, ch->tx_hz, RADIO_BW_12K5, sm->view.power, &ch->tx_tone)) {	/* the radio core's keying gate (RF fixes) */
 		sm->view.state = RS_IDLE;
 		tune(sm, now);
 		return false;

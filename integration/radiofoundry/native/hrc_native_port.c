@@ -66,6 +66,17 @@ void hn_port_quiet(void)
     for (unsigned i=0;i<5;i++) hrc_irq_enable(sources[i],false);
     hrc_timer_stop(TIMER_PA);
 }
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+/* After a lost request (hn_watch, after RadioFoundry 3d5940b): a source left masked stays silent.
+ * Task side, in flash (this file's other code is in RAM). The caller holds the IRQ lock. */
+#if defined(__csky__)
+__attribute__((section(".flashfunc"), noinline))
+#endif
+void hn_port_kick(void)
+{
+    if (installed && test) hrc_irq_enable(IRQ_MODEM_SYS,true);
+}
+#endif
 void hn_port_restore(void)
 {
     uint32_t s=hrc_irq_save();

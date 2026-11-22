@@ -79,6 +79,11 @@ typedef struct nt_ops {
     uint32_t (*lock)(void *); /* paired IRQ/scheduler exclusion; optional in host mocks */
     void (*unlock)(void *, uint32_t);
     size_t (*snapshot)(void *,uint32_t *,size_t); /* fixed read-only PHY diagnostics */
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+    /* DDM32 Plus (after RadioFoundry 3d5940b): the owner task's lost-request check while a
+     * receive session runs (hn_watch); optional, task-only, takes its own lock. */
+    void (*watch)(void *, uint32_t now_us);
+#endif
 } nt_ops;
 typedef struct nt_test {
     const nt_ops *ops;

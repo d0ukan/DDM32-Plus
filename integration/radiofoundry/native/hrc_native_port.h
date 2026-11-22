@@ -16,4 +16,8 @@ enum { HN_GUARD_TIMER = 4 };
 int hn_port_on(hn_chip *, nt_test *);
 void hn_port_quiet(void);
 void hn_port_restore(void);
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+/* DDM32 Plus (hn_watch): the modem system source unmasked again while the session's handlers are in */
+void hn_port_kick(void);
+#endif
 #endif

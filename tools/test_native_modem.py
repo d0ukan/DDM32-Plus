@@ -28,6 +28,10 @@ def main():
     run(["clang",*flags,"-DCONFIG_DEV_TX=1","src/modem/native_test.c",
          "tests/native/test_chip_start.c","-o",OUT/"test_chip_start"])
     run([OUT/"test_chip_start"])
+    # DDM32 Plus RF fixes: the receive session's lost-request watchdog (hn_watch)
+    run(["clang",*flags,"-DCONFIG_RF_FIXES=1","src/modem/native_test.c",
+         "tests/native/test_watch.c","-o",OUT/"test_watch"])
+    run([OUT/"test_watch"])
     board=(app/"boards/dm32/radio_dm32.c").read_text()
     start=board.index("static void set_mode(radio_mode_t m)\n{")
     end=board.index("\n}\n",start)+3

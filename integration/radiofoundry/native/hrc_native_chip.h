@@ -15,6 +15,9 @@ typedef struct {
     int (*restore)(void *);
     uint32_t (*lock)(void *);
     void (*unlock)(void *, uint32_t);
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+    void (*irq_kick)(void *); /* DDM32 Plus: the modem system source unmasked again (hn_watch); optional */
+#endif
 } hn_hooks;
 enum { HN_REGS=15, HN_DIAG_REGS=24 };
 typedef struct {
@@ -27,6 +30,12 @@ typedef struct {
     uint32_t event_regs[HN_DIAG_REGS];
 #if CONFIG_DEV_TX
     uint32_t staged_index;
+#endif
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+    /* DDM32 Plus lost-request watchdog (hn_watch): the last hn_sys time it saw with a request
+     * pending, since when that request waits, and how many were dropped. */
+    uint32_t stuck_sys_us, stuck_since, sys_stuck;
+    uint8_t stuck_waiting;
 #endif
     uint8_t prepared, saved_valid;
 } hn_chip;

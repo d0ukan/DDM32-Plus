@@ -166,10 +166,50 @@ static int restore(void *ctx)
     d->prepared=d->saved_valid=0;
     return ok;
 }
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+/* DDM32 Plus, the idea of RadioFoundry 3d5940b (#929, MIT; not its code, our P25 receive is this
+ * native session, not RF's air.c). The PIC acts on a request line rising (RF gotchas 2.9): a modem
+ * system request still pending after hn_sys ran (one that came between its LIST read and its CLEAR
+ * write, say) keeps its line high and never interrupts again, and the session hears nothing more
+ * until it closes (Open25 #40 "P25 stops receiving after 10-20 minutes" fits). The halted DMR
+ * engine's own check (dmr.modem_stuck) does not run in a session. Here, from the owner task:
+ * a receive session's owned request pending with no hn_sys run for 50 ms is dropped and the
+ * system source unmasked again. Counted in sys_stuck. Task side: in flash, not in the RAM that
+ * holds this file's ISR code. */
+#define HN_STUCK_US 50000u
+#if defined(__csky__)
+#define HN_FLASHFUNC __attribute__((section(".flashfunc"), noinline))
+#else
+#define HN_FLASHFUNC
+#endif
+HN_FLASHFUNC static void watch(void *ctx, uint32_t now)
+{
+    hn_chip *d=ctx;
+    uint32_t s=lock(d);
+    nt_test *t=d->test;
+    uint32_t pend=0;
+    if (t && d->saved_valid && t->config.mode==NT_RECEIVE && t->state==NT_RX)
+        pend=hrc7000_rd(d->modem,C7_SYS_INTERP_LIST)&hrc7000_rd(d->modem,C7_SYS_INTERP_MASK)&OWNED_SYS;
+    if (!pend || d->last_sys_us!=d->stuck_sys_us) {
+        d->stuck_sys_us=d->last_sys_us; d->stuck_waiting=0; /* none, or hn_sys ran since */
+    } else if (!d->stuck_waiting) {
+        d->stuck_waiting=1; d->stuck_since=now;              /* first seen: the 50 ms start now */
+    } else if ((uint32_t)(now-d->stuck_since)>HN_STUCK_US) {
+        d->sys_stuck++; d->stuck_waiting=0;
+        w(d,C7_SYS_INTERP_CLEAR,pend);
+        if (d->hooks->irq_kick) d->hooks->irq_kick(d->hooks->ctx);
+    }
+    unlock(d,s);
+}
+#endif
 void hn_init(hn_chip *d, hrc7000_t *m, const hn_hooks *hooks, nt_ops *out)
 {
     memset(d,0,sizeof *d); d->modem=m; d->hooks=hooks;
-    *out=(nt_ops){d,start,write_block,cancel,key,pa,quiet,restore,lock,unlock,snapshot};
+    *out=(nt_ops){d,start,write_block,cancel,key,pa,quiet,restore,lock,unlock,snapshot
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+        ,watch
+#endif
+    };
 }
 void hn_sys(hn_chip *d, uint32_t now)
 {

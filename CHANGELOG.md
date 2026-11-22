@@ -3,6 +3,22 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## v1.0.0-beta.8 (candidate, not released yet)
+
+- Upstream RadioFoundry fixes, second round (docs/plus.md "Upstream RadioFoundry fixes"; host-tested, not yet
+  checked on the radio, rows RF-7..RF-12):
+  - DMR: a reply keyed right after the other station's over ends (within 0.36 s) is no longer refused as "busy" on a
+    polite channel in direct mode (RadioFoundry f5d2fd1). Through a repeater nothing changes.
+  - FM: on 12.5 kHz channels the squelch no longer chops on S/SH/T sounds of a strong station; it still closes at once
+    when the station unkeys or fades (RadioFoundry 18fdd29).
+  - P25, NXDN, dPMR and APRS receive: a lost modem interrupt request no longer leaves receive deaf until the channel
+    is changed; it is cleared within about 0.1-0.25 s (after the idea of RadioFoundry 3d5940b; against "P25 stops
+    receiving after 10-20 minutes", Open25 #40, not reproduced here).
+  - Transmit: TX inhibit and a critical battery now stop every transmission at the keying itself, also the MMDVM
+    hotspot (and its CW ID), an APRS beacon that waited for a clear channel, and DOTA (after RadioFoundry f4b19e9; no
+    band rule added).
+  - DMR text: received control characters (0x7F-0x9F) are dropped instead of being drawn as icons (RadioFoundry 22b27e8).
+
 ## v1.0.0-beta.7 (candidate, not released yet)
 
 - PC programmers (Windows C# and Rust): a classic menu bar (File, Radio, Tools, Help) on top of the window, reaching the existing pages, the backups and logs folders, the GitHub page and About; the radio entries are off while a radio job holds the port.

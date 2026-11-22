@@ -68,7 +68,14 @@ static int native_restore(void *ctx)
 }
 static uint32_t native_lock(void *ctx) { (void)ctx; return hrc_irq_save(); }
 static void native_unlock(void *ctx, uint32_t irq) { (void)ctx; hrc_irq_restore(irq); }
+#if CONFIG_RF_FIXES
+static void native_irq_kick(void *ctx) { (void)ctx; hn_port_kick(); }
+#endif
 static const hn_hooks native_hooks={NULL,native_prepare,native_off,native_key,native_pa,
-    native_irq_on,native_irq_quiet,native_irq_restore,native_restore,native_lock,native_unlock};
+    native_irq_on,native_irq_quiet,native_irq_restore,native_restore,native_lock,native_unlock
+#if CONFIG_RF_FIXES
+    ,native_irq_kick
+#endif
+};
 static void native_init(void) { hn_init(&native_chip,&modem,&native_hooks,&dm32_native_ops); }
 #endif

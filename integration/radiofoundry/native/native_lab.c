@@ -866,6 +866,10 @@ void native_lab_service(radio_sm_t *sm, uint32_t now)
         /* Sample the clock with interrupts excluded: a newer IRQ timestamp
          * must not be compared against a stale task timestamp across setup. */
         taskENTER_CRITICAL(); nt_tick(&test,hal_micros()); taskEXIT_CRITICAL();
+#if defined(CONFIG_RF_FIXES) && CONFIG_RF_FIXES
+        /* A receive session's lost modem request (hn_watch, after RadioFoundry 3d5940b) */
+        if (test.ops && test.ops->watch) test.ops->watch(test.ops->ctx,hal_micros());
+#endif
         if (nt_cleanup(&test)) {
 #if CONFIG_DEV_TX
             if (live_enabled) return; /* keep the analog speaker muted between directions */

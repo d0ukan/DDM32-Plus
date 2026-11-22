@@ -91,7 +91,7 @@ static void sstvtx_start(radio_sm_t *sm, uint8_t mode, uint32_t now_ms)
 		sstvtx_phase = SSTVTX_KEYUP;	/* before tx(): sstvtx_end unkeys from here on */
 		sstvtx_ms = now_ms;
 		sstvtx_until = now_ms + ms + SSTVTX_SLACK_MS;
-		if (!board.radio->tx(ch->tx_hz, (radio_bw_t)ch->bw, sm->view.power, &ch->tx_tone))
+		if (!KEY_TX(sm, ch->tx_hz, (radio_bw_t)ch->bw, sm->view.power, &ch->tx_tone))	/* the keying gate */
 			sstvtx_end(sm, SSTVTX_REFUSED, SSTVTX_R_KEY, 0, now_ms);
 		return;
 	}
