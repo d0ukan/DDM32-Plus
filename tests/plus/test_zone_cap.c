@@ -7,7 +7,9 @@
  *   - the limits the UI reports (codeplug_zone_capacity 80, CODEPLUG_ZONES_MAX 68, CODEPLUG_CHANNELS_MAX 1024);
  *   - zone_edit_drop_channel (Delete channel): the channel leaves every zone that holds it (the other
  *     channels in their order), its slot is free (codeplug_free_channel) and a new channel written there is in no
- *     zone; a P25 channel's RFKV record goes with it; the virtual "All channels" zone; an unknown number refused. */
+ *     zone; a P25 channel's RFKV record goes with it; the virtual "All channels" zone; an unknown number refused;
+ *   - the owner's "only up to 26" (a zone shaped like his): a new channel written alone stays out of the stored "All
+ *     channels" copy; ZONE_POS_JOIN puts it at the zone's end (alone when full, the zone gone or virtual). */
 #define main upstream_zone_main
 #include "zoneEditTest.c"
 #undef main
@@ -110,6 +112,61 @@ static void test_drop_channel(void)
 	CHECK(holds(0, (const uint16_t[]){ 1, 2, 3, 6, 7, 8, 10, 11 }, 8) && codeplug_zone_count() == 4);
 }
 
+/* The owner's codeplug (backup of 2026-11-21, its structure only): 26 channels (FM, DMR, P25, some receive only),
+ * then a find zone made ("Bulunanlar 1", empty), which stores "All channels" as zone 0 with channels 1-26; channel 27
+ * made after it. Before the fix the new channel was written alone: in no zone, so Home stepped 1-26. ZONE_POS_JOIN
+ * puts a new channel at the end of the zone it names (Home's), alone when the zone is full or the zones are virtual */
+static void test_new_joins(void)
+{
+	fresh();
+	for (uint16_t n = 1; n <= 26; n++) {
+		channel_t c = kind_of(n);
+		c.rx_only = n % 5u == 0u;
+		CHECK(codeplug_set_channel(n, &c));
+	}
+	/* Virtual "All channels": a new channel is in it without a zone write, nothing gets stored */
+	channel_t c = kind_of(27);
+	CHECK(!codeplug_zones_stored());
+	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 27, &c) == ZONE_EDIT_OK && !codeplug_zones_stored());
+	zone_t z;
+	CHECK(codeplug_zone(0, &z) && z.count == 27 && z.channels[26] == 27);
+	CHECK(zone_edit_drop_channel(27) == ZONE_EDIT_OK);
+	uint16_t at;
+	CHECK(zone_edit_new("Bulunanlar 1", &at) == ZONE_EDIT_OK && at == 1 && codeplug_zone_count() == 2);
+	CHECK(codeplug_zone(0, &z) && z.count == 26 && strcmp(z.name, "All channels") == 0);
+	CHECK(holds(1, NULL, 0));
+	/* The old path (the channel written alone): in no zone, Home's zone still ends at 26 */
+	CHECK(codeplug_set_channel(27, &c));
+	CHECK(codeplug_zone(0, &z) && z.count == 26 && zone_list_find(&z, 27) < 0);
+	/* The new one: channel 28 joins zone 0 at its end, every one of the 27 entries readable */
+	channel_t p = kind_of(29);	/* P25 */
+	p.rx_only = true;
+	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 28, &p) == ZONE_EDIT_OK);
+	CHECK(codeplug_zone(0, &z) && z.count == 27 && z.channels[26] == 28);
+	for (uint16_t i = 0; i < z.count; i++) {
+		channel_t r;
+		CHECK(codeplug_channel(z.channels[i], &r));
+	}
+	CHECK(holds(1, NULL, 0));
+	/* Into the empty find zone too; a taken number refused, nothing changed */
+	CHECK(zone_edit_add_new(1, ZONE_POS_JOIN, 30, &c) == ZONE_EDIT_OK && holds(1, (const uint16_t[]){ 30 }, 1));
+	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 28, &c) == ZONE_EDIT_NO_FREE && codeplug_zone(0, &z) && z.count == 27);
+	/* A full zone: the channel is written alone (it is not lost), the zone unchanged */
+	for (uint16_t n = 31; n <= 83; n++) {
+		channel_t f = kind_of(n);
+		CHECK(codeplug_set_channel(n, &f) && zone_edit_insert(0, z.count, n) == ZONE_EDIT_OK);
+		CHECK(codeplug_zone(0, &z));
+	}
+	CHECK(z.count == 80);
+	CHECK(zone_edit_add_new(0, ZONE_POS_JOIN, 84, &c) == ZONE_EDIT_OK);
+	channel_t r;
+	CHECK(codeplug_channel(84, &r) && codeplug_zone(0, &z) && z.count == 80 && zone_list_find(&z, 84) < 0);
+	/* A zone that is gone: written alone */
+	CHECK(zone_edit_add_new(9, ZONE_POS_JOIN, 85, &c) == ZONE_EDIT_OK && codeplug_channel(85, &r));
+	boot_again();
+	CHECK(codeplug_zone(0, &z) && z.count == 80 && z.channels[26] == 28 && holds(1, (const uint16_t[]){ 30 }, 1));
+}
+
 int main(void)
 {
 	if (upstream_zone_main() != 0)
@@ -117,6 +174,7 @@ int main(void)
 	failures = 0;
 	test_zone_grows();
 	test_drop_channel();
+	test_new_joins();
 	printf("Plus zone capacity and Delete channel: %s\n", failures ? "FAILED" : "all passed");
 	return failures != 0;
 }

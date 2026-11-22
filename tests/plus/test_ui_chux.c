@@ -10,7 +10,9 @@
  *      None, picking it says what it hears and the row reads "All TGs TS1", None says so too; saved; an RX only DMR
  *      channel saves without a TX contact; Direct mode on says what it does;
  *   3. digital monitor: a channel with RX list Any shows AllTG, not DMon; the monitor key's toggle shows and hides DMon
- *      and says what it does (on: every call; off on such a channel: the channel still hears all TGs). */
+ *      and says what it does (on: every call; off on such a channel: the channel still hears all TGs);
+ *   6. a new channel (Channels > New from current, the editor's Save as new channel) joins Home's zone at its end and
+ *      Home steps onto it (the owner's "only up to 26"). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -275,6 +277,70 @@ static void case_delete(void)
 	expect("screen=channel hides=Delete_channel writes=0");
 }
 
+/* ---------------- 6. a new channel joins Home's zone ---------------- */
+
+/* Home steps (Down) until position pos of its zone; false when it never gets there */
+static bool home_reaches(uint16_t pos)
+{
+	for (int k = 0; k < 2 * CODEPLUG_ZONE_MAX; k++) {
+		if (ui_view()->zone_pos + 1u == pos)
+			return true;
+		run("down wait:100");
+	}
+	printf("FAIL %s (%s): Home never reached position %u (at %u)\n", name, turkish ? "tr" : "en", pos,
+	       ui_view()->zone_pos + 1u);
+	fails++;
+	return false;
+}
+
+/* The owner's case: a channel made after the zones were stored was in no zone, so Home stopped at the zone's old last
+ * channel. Channels > New from current, saved: it is the zone's last channel and Home steps onto it */
+static void case_new_joins(void)
+{
+	start("new channel: joins Home's zone, Home steps onto it");
+	zone_t z;
+	uint16_t zi = ui_view()->zone_index;
+	codeplug_zone(zi, &z);
+	uint16_t before = z.count;
+	run("ok 5");
+	row(T("New from current", "Mevcuttan yeni"), "up");
+	run("ok long:ok wait:200");
+	expect(T("toast=Saved_as_channel", "toast=Kaydedildi,_yeni_kanal"));
+	codeplug_zone(zi, &z);
+	if (z.count != before + 1u) {
+		printf("FAIL %s (%s): zone %u has %u channels, want %u\n", name, turkish ? "tr" : "en", zi, z.count,
+		       before + 1u);
+		fails++;
+		return;
+	}
+	uint16_t num = z.channels[z.count - 1u];
+	channel_t c;
+	if (!codeplug_channel(num, &c)) {
+		printf("FAIL %s (%s): the new channel %u can't be read\n", name, turkish ? "tr" : "en", num);
+		fails++;
+	}
+	run("back back back wait:200");
+	expect("screen=home");
+	if (home_reaches(z.count) && ui_view()->channel_number != num) {
+		printf("FAIL %s (%s): Home's last position is channel %u, want %u\n", name, turkish ? "tr" : "en",
+		       ui_view()->channel_number, num);
+		fails++;
+	}
+	layout();
+	start("Save as new channel: joins Home's zone too");
+	codeplug_zone(zi, &z);
+	before = z.count;
+	run("ok 5 ok");
+	row(T("Save as new channel", "Yeni kanal olarak kaydet"), "up");
+	run("ok wait:200");
+	codeplug_zone(zi, &z);
+	if (z.count != before + 1u) {
+		printf("FAIL %s (%s): Save as new: zone %u has %u channels, want %u\n", name, turkish ? "tr" : "en", zi,
+		       z.count, before + 1u);
+		fails++;
+	}
+}
+
 /* ---------------- 5. P25 NAC in decimal ---------------- */
 
 /* COUNTY DMR made P25 (NAC $293), on its RX NAC row */
@@ -341,7 +407,8 @@ static int run_case(case_fn fn)
 
 int main(void)
 {
-	static const case_fn cases[] = { case_zone_counts, case_zone_full, case_zone_unreadable, case_dmr_rows, case_dmon, case_delete, case_nac };
+	static const case_fn cases[] = { case_zone_counts, case_zone_full, case_zone_unreadable, case_dmr_rows, case_dmon, case_delete, case_nac,
+					 case_new_joins };
 	int bad = 0, n = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		turkish = lang == 1;

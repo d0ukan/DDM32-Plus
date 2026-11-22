@@ -7,6 +7,7 @@ the shared prepare list gains one line. Upstream files change only through the h
   2. DMR rows: RX list Any is every talkgroup on the slot (not digital monitor), clearer rows and defaults.
   3. Digital monitor: DMon follows the toggle; a channel's Any shows AllTG.
   4. Delete channel: out of every zone, its slot freed (zone_edit_drop_channel, one zone_op_t kind).
+  6. A new channel joins the zone Home is on (the true cause of item 1's "only up to 26").
   5. NAC in decimal: not here; it changes CONFIG_NAC_DEC itself (plus_features.prepare_nac_decimal, plus_p25nac.py).
 """
 
@@ -34,6 +35,48 @@ def prepare_chux(transform, install):
     prepare_dmr_rows(transform)
     prepare_dmon(transform)
     prepare_drop(transform)
+    prepare_new_joins(transform)
+
+
+def prepare_new_joins(transform):
+    """6. A new channel joins the zone Home is on (the real cause of "I can add a 27th channel, but on Home I can only go
+    up to 26", docs/plus.md "Zone size: the real cause"). Without stored zones the radio shows the virtual "All
+    channels" zone, every used channel; the first zone the radio makes (Create New Zone, Find & save's "Bulunanlar N")
+    stores "All channels" as zone 0, a copy of the channels of that moment. A channel made after it (Channels > New
+    channel, the VFO's or the editor's Save as new channel) was written in no zone, so Home, which steps the zone's own
+    list, stopped at the last channel of the copy (the owner's backup: 27 channels, "All channels" 1-26). Now such a
+    channel is written and put at the end of Home's zone in one job (ZONE_OP_ADD_NEW, pos ZONE_POS_JOIN); alone, as
+    before, when that zone is full or the zones are still the virtual one (which holds it anyway)."""
+    transform('core/codeplug/zone_edit.h', [
+        ('zone_edit_result_t zone_edit_drop_channel(uint16_t number);\n#endif\n',
+         'zone_edit_result_t zone_edit_drop_channel(uint16_t number);\n'
+         '// DDM32 Plus: zone_edit_add_new\'s pos for a new channel made outside a zone: the zone\'s end when the zones are\n'
+         '// stored and it has room, else the channel is written alone (OK)\n'
+         '#define ZONE_POS_JOIN\t0xFFFFu\n#endif\n'),
+    ])
+    transform('core/codeplug/zone_edit.c', [
+        ('\t\tr = ZONE_EDIT_NO_FREE;\t\t// not a free number: never overwrite a channel\n\t}\n',
+         '\t\tr = ZONE_EDIT_NO_FREE;\t\t// not a free number: never overwrite a channel\n\t}\n'
+         + _if('\tif (pos == ZONE_POS_JOIN) {\n'
+               '\t\tbool join = r == ZONE_EDIT_OK && codeplug_zones_stored() && work.count < codeplug_zone_capacity();\n'
+               '\t\tpos = work.count;\n'
+               '\t\tif (!join && r != ZONE_EDIT_NO_FREE) {\n'
+               '\t\t\tr = number == 0 || codeplug_channel(number, &probe) ? ZONE_EDIT_NO_FREE :\n'
+               '\t\t\t    codeplug_set_channel(number, ch) ? ZONE_EDIT_OK : ZONE_EDIT_FAILED;\n'
+               '\t\t\tstorage_unlock();\n\t\t\treturn r;\n\t\t}\n\t}\n')),
+    ])
+    transform('core/ui/ui_menus.c', [
+        ('\t\tzone_focus_num = num;\t// the zone\'s list shows it when the editor closes\n\t\treturn true;\n\t}\n#endif\n'
+         '\t(void)as_new;\n\treturn ui_svc_write_channel(num, &ced_ch);\n',
+         '\t\tzone_focus_num = num;\t// the zone\'s list shows it when the editor closes\n\t\treturn true;\n\t}\n'
+         + _if('\t// DDM32 Plus: a new channel joins the zone Home is on, at its end (zone_edit ZONE_POS_JOIN)\n'
+               '\tif (ced_new || as_new) {\n'
+               '\t\tze_op_new(ZONE_OP_ADD_NEW, ZONE_POS_JOIN)->channel = num;\n'
+               '\t\tze_op.zone = ui_view()->zone_index;\n'
+               '\t\tze_op.ch = ced_ch;\n'
+               '\t\treturn ui_svc_zone_edit(&ze_op);\n\t}\n')
+         + '#endif\n\t(void)as_new;\n\treturn ui_svc_write_channel(num, &ced_ch);\n'),
+    ])
 
 
 def prepare_zone_size(transform):

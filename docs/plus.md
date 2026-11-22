@@ -3183,6 +3183,38 @@ hold. What changed:
 
 Radio test row Z-1 (`docs/plus-radio-test.md`) narrows the owner's case down.
 
+#### Zone size: the real cause (branch `zone27`, after beta.7)
+
+**Correction:** the analysis above was about the wrong thing. The limits are right and Home steps a stored zone to its
+end, but the owner's zone did not hold 27 channels: it held 26, and the 27th channel was in **no zone**. Evidence: the
+owner's two newest data-flash backups (2026-11-21, the Rust and the C# app's, read locally with
+`pc/ddm32_app/codeplug.py`; nothing copied): 27 used channels (FM, DMR, P25, some receive only, every record valid);
+zone layout byte 0 (80-channel records); two stored zones: zone 0 **"All channels"** with entries 1-26 then a 0
+terminator, zone 1 "Bulunanlar 1" (a Find & save zone) with none; channel 27 ("Simplex 145.500", P25 receive only) in
+neither. Nothing in the zone or channel records is odd (no duplicate, no index out of range, no empty or unreadable
+channel), so Home's 1..26 was exactly the zone's list.
+
+How a channel ends up outside every zone: without stored zones the radio shows the virtual "All channels" zone, every
+used channel (`codeplug.c all_channels`). The first zone the radio makes (Zones > Create New Zone, Copy, or Find &
+save's "Bulunanlar N") first stores that virtual zone as zone 0 (`zone_edit.c make_room`) so the user keeps what they
+saw: a **copy of the channels of that moment** (here 1-26). From then on a channel made outside a zone (Menu > Channels
+> New from current, the VFO's Save as new channel, the editor's Save as new channel) was written alone
+(`ui_svc_write_channel`): still named in the channel list, in no zone, so "All channels" on Home stopped at 26 while
+the channel list counted 27. Only Copy here and Find & save put the new channel in a zone. Dual / multi-watch step a
+letter's zone list the same way, so they stopped at 26 too.
+
+Fix (`tools/plus_chux.py prepare_new_joins`, `CONFIG_CHAN_EXTRAS`): a new channel made outside a zone is written and
+put at the **end of the zone Home is on** in one storage job (`ZONE_OP_ADD_NEW` with pos `ZONE_POS_JOIN`, the Copy here
+path); written alone as before when that zone is full (80), gone, or the zones are still the virtual one (which shows
+it anyway, and is not stored by this). Cost: FLASH +120 B (861,392 B, 95.59 %), RAM 0 (1,584 B free), no new stack
+buffer (the zone check runs in the storage job, which already holds its `work` zone). The owner's existing channel 27
+stays out of the zones: add it once with Zones > All channels > Add channel. Tests: `tests/plus/test_zone_cap.c
+test_new_joins` (the owner's zone shape on the real codeplug and `zone_edit.c`: 26 mixed channels, a find zone made,
+"All channels" stored with 26, the old path leaves the 27th out, `ZONE_POS_JOIN` adds it as entry 27 readable, full
+zone / zone gone / virtual zones write it alone, after a reboot too), `tests/plus/test_ui_chux.c case_new_joins` (the
+real screens in the simulator, English and Turkish: New from current and Save as new channel join Home's zone and Home
+steps onto the new last position). Radio test row Z-1b.
+
 #### Above 80 channels a zone? (owner's question; not changed)
 
 Measured on the public build (`--plus --public`, base 743c1b7: RAM 209,368 B, 2,088 B free; rule >= 1,500 B free).

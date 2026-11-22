@@ -5,6 +5,11 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
+- Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
+  radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
+  that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved
+  in no zone. A new channel now joins the end of the zone Home is on (alone, as before, when that zone is full). A
+  channel made before this fix stays outside: add it once with Zones > the zone > Add channel.
 - Dual / multi-watch: the emergency key ends the watch on the selected DMR letter (refused with a toast on another
   mode); the PTT pill follows the radio when it keeps another letter, without cutting a P25 call; a TX indicator
   left with nothing keyed is cleared in the ring.
