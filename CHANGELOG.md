@@ -6,7 +6,9 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 ## Unreleased
 
 - Dual / multi-watch emergency: the key, the lone worker and SOS use the selected letter when it is DMR, else the
-  first DMR letter of the ring (the watch ends there and says which); refused only with no DMR letter.
+  first DMR letter of the ring (the watch ends there and says which; it isn't restored after); refused only with no
+  DMR letter. An emergency never waits for a P25 call being received (on a single P25 channel it now fails at once,
+  so SOS and the lone worker fall back), and one pressed while transmitting waits for PTT to end.
 - Dual / multi-watch: the PTT pill follows the radio when it keeps another letter, without cutting a P25 call; a TX indicator
   left with nothing keyed is cleared in the ring.
 - Upstream RadioFoundry fixes (MIT, The RadioFoundry Authors; docs/plus.md "Upstream RadioFoundry fixes"):

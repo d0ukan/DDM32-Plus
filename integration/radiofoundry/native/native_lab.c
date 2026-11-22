@@ -7,6 +7,9 @@
 #include "firstboot/firstboot.h"
 #endif
 #include "radio/beep.h"
+#if CONFIG_DMR_EMERGENCY
+#include "dmr/dmr_emergency.h"
+#endif
 #if CONFIG_SPECTRUM
 #include "radio/spectrum.h"
 #endif
@@ -74,6 +77,7 @@ static void channel_view(radio_sm_t *sm)
     }
 }
 static void restore_channel(radio_sm_t *sm);
+static int channel_let_go(radio_sm_t *sm);
 #if CONFIG_P25_SCAN
 /* P25 scan (docs/plus.md): the scan finds a P25 channel's carrier on the FM path and holds there; the native
  * receiver then takes the channel. It gives the channel back when the call has ended (or no P25 voice came),
@@ -494,6 +498,19 @@ static void channel_service(radio_sm_t *sm)
         return;
     }
 #endif
+#if CONFIG_DMR_EMERGENCY
+    /* DDM32 Plus: an emergency asked for (the key, the lone worker, SOS) never waits for a P25 call: the native
+     * receiver lets the channel go at once, as for a request (the radio task's tick runs only without it), and takes
+     * none while the start is pending. The radio core then puts it on a DMR letter of the watch, or fails it at once on
+     * a P25 channel (SOS and the lone worker fall back). A native transmission ends first (PTT) */
+    bool emergency=dmr_emergency_start_pending();
+    if(emergency && (channel_selected || channel_handoff) && !native_ptt && !live_owner()) {
+        if(channel_let_go(sm)==0) restore_channel(sm);
+        return;
+    }
+#else
+    bool emergency=false;
+#endif
 #if CONFIG_P25_SCAN
     if(scan_owned && (channel_selected || channel_handoff) && scan_on(&sm->scan)) { scan_give_back(sm); return; }
     if(scan_owned && !scan_on(&sm->scan)) scan_owned=scan_release=false;  /* the scan was stopped: keep the channel */
@@ -515,7 +532,7 @@ static void channel_service(radio_sm_t *sm)
     if(channel_handoff)return;
     /* DM32 Plus (CONFIG_VFO_MODES): a P25 or YSF VFO is taken like a channel of that mode */
     bool selected=codeplug_mode_p25(sm->view.ch.mode) && (CONFIG_VFO_MODES || !sm->view.vfo) &&
-                  !sm->power_off_req && !sm->view.power_off;
+                  !sm->power_off_req && !sm->view.power_off && !emergency;
 #if CONFIG_P25_SCAN
     selected=selected && scan_allows(sm);
 #endif

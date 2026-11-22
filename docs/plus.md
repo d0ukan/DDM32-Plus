@@ -3782,6 +3782,17 @@ Host tests added: a selection during a held P25 call (`test_mwatch_radio.inc`; f
 
 Host tests: the emergency from each letter and ring position of the owner's A / B / C (always A), a ring with two DMR letters (the selected one, or the first), one without (the watch goes on, failed); PTT during the held call (`test_mwatch_radio.inc`). Radio row MW22 changes: with C (FM) selected the emergency goes out on A, the toast "Watch off: on A".
 
+**Fourth review round** (branch `mwfix3`, same commit series):
+
+| # | Found | Fix |
+|---|---|---|
+| B1 | The radio task runs no radio tick while the native receiver owns the channel, so an emergency asked for during a P25 call held on a ring letter waited for the whole call (31.5 s for a 30 s call; a busy net held it for good), and SOS / the lone worker waited with no fallback | `native_lab.c`: while `dmr_emergency_start_pending()`, the native receiver lets the channel go at once as for a request (`channel_let_go`, its wait honoured, then `restore_channel`) and takes none; the tick then runs `emergency_tick` (`mw_emergency`: the DMR letter). Host model: keyed on A 50 ms after the key, B's call still on the air |
+| S1 | On a single P25 channel the native receiver owns all the time: the emergency never resolved (no FAILED, no fallback) | the same: the channel is let go, the start is taken on the P25 channel and fails at once (50 ms in the host model), so SOS and the lone worker fall back; the P25 channel is taken again after |
+| M1 | An emergency pressed while PTT is held on a ring letter | the start waits (pending) while PTT is held or the radio transmits, then goes on the DMR letter, never the transmitting FM / P25 one; a native P25 transmission ends first, then the channel is let go |
+| M2 | After the emergency | the watch is **not** restored: the radio stays on the DMR letter the emergency went out on (in emergency, further calls there carry the emergency option until it is canceled); start the watch again by hand (`* 7`, hold SK2) |
+
+Host tests (`test_mwatch_radio.inc` `test_mwatch_emergency_now`, all failing with the code before): the emergency during a P25 call on B with C or A selected (keyed on A within 1 s, the call running), a single P25 channel with a call (FAILED within 1 s, the channel taken again), pressed while PTT is held on C (nothing until release, then on A).
+
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
 radio task 728 B free (720 after the review round, 716 after the second), UI 184 B: the radio task's deepest path is still the P25 search's give back):
 
@@ -3793,6 +3804,7 @@ radio task 728 B free (720 after the review round, 716 after the second), UI 184
 | review round and the names | 860,584 (+1,060) | 209,904 (1,552; +16 B: the # screen's title) |
 | second review (on `ddm25` 415b519: 864,272 / 209,916) | 865,032 (+760) | 209,920 (1,536; +4 B) |
 | third review (on `ddm25` ab6afc3: 865,552 / 208,568) | 865,808 (+256) | 208,568 (2,888; +0 B) |
+| fourth review (same base) | 865,884 (+332 on the base, +76 this round) | 208,568 (2,888; +0 B) |
 ## Upstream RadioFoundry fixes (`CONFIG_RF_FIXES`, branch `rfports`)
 
 Our RadioFoundry pin is `dfbaf20c`; upstream (MIT, The RadioFoundry Authors) is 194 commits ahead

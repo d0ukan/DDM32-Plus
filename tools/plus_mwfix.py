@@ -265,6 +265,9 @@ def prepare_mwfix(transform, install):
          'static void emergency_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n'
          '#if CONFIG_MULTI_WATCH\n'
          '\tif (dual_running(sm) && dmr_emergency_start_pending()) {\n'
+         '\t\tif (sm->ptt || sm->view.state == RS_TX) {\n'
+         '\t\t\treturn;\t// DDM32 Plus: PTT first (the start waits), then on a DMR letter, not the transmitting one\n'
+         '\t\t}\n'
          '\t\tmw_emergency(sm, now_ms);\t// DDM32 Plus: on a DMR letter of the watch, before the start is taken\n'
          '\t}\n'
          '#endif\n'),
