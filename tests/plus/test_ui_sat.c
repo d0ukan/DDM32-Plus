@@ -5,7 +5,7 @@
  * alarm's banner and tone on another screen (Home) and its toast over a banner that waits for the user, the screen
  * without the GPS time (its hint names OK), and the layout check on the list and the page. Tools > ISS and the AOS
  * pop-up in English and Turkish (iss_checks): the page, its keys and settings, the held track asked for, the pop-up's
- * OK / Back / other keys, its 60 s, no pop-up during TX or with auto track on, layout checks.
+ * OK / Back / other keys, its 30 s, no pop-up during TX or with auto track on, layout checks.
  *
  * ui_sat.c is included here (its statics start each flow afresh); the radio task's service (sat_svc.c) is a fake
  * with sat.h's contract: a view the test sets, the requests recorded, an armed alarm due 2 s later (its warning) and
@@ -277,6 +277,19 @@ static int auto_checks(void)
 	fake_reset(true);
 	auto_flow(n = "Sat a key without an auto track", "", "ok", "hides=Auto_track_off", 1);
 	AUTO_CHECK(cancels == 0, n);
+	/* Holehunt B1: the emergency key (its long press, and the rest of it) is never taken: it goes on to the emergency
+	 * (the radio core ends the hold for it) */
+	fake_reset(true);
+	fake_auto = true;
+	{
+		static const uint8_t g[] = { GESTURE_DOWN, GESTURE_LONG, GESTURE_UP };
+		bool taken = false;
+		for (unsigned i = 0; i < sizeof g; i++) {
+			input_event_t ev = { ACT_EMERGENCY, g[i], 0 };
+			taken = taken || ui_sat_auto_key(&ev);
+		}
+		AUTO_CHECK(!taken && cancels == 0, "Sat the emergency key is not taken by an auto track");
+	}
 #undef AUTO_CHECK
 	return bad;
 }
@@ -462,10 +475,10 @@ static int iss_checks(void)
 	bad += iss_flow(n = "No pop-up off Home: OK and Back are the menu's", ARMED, NULL, "ok wait:10500 back ok",
 			"screen=hub", false);
 	ISS_CHECK(starts == 0, n);
-	/* Up for 60 s, then gone; OK after that is Home's again */
-	bad += iss_flow("Pop-up up for 60 s", ARMED, NULL, "wait:40000",
+	/* Up for 30 s (the rise ~10 s in), then gone; OK after that is Home's again */
+	bad += iss_flow("Pop-up up for 30 s", ARMED, NULL, "wait:36000",
 			T("banner=ISS_overhead", "banner=ISS_tepede"), false);
-	bad += iss_flow(n = "Pop-up gone after 60 s", ARMED, NULL, "wait:72000 ok", "banner=none", false);
+	bad += iss_flow(n = "Pop-up gone after 30 s", ARMED, NULL, "wait:45000 ok", "banner=none", false);
 	ISS_CHECK(starts == 0, n);
 	/* Not while transmitting: no tone, no pop-up; after the release it comes, and OK tracks */
 	bad += iss_flow(n = "Pop-up waits for TX", ARMED, NULL, "pttdown wait:11000", "banner=none", false);

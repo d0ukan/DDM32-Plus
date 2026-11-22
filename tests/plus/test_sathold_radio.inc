@@ -9,9 +9,14 @@
  *    settings as before;
  *  - from the VFO (a split, a CTCSS, narrow): the end puts all of it back;
  *  - refused while PTT is held, the monitor is open, a call is heard or a scan runs: nothing noted, nothing held;
- *  - the radio core's own save of its settings keeps the satellites' auto track bits in rs_flags. */
+ *  - the radio core's own save of its settings keeps the satellites' auto track bits in rs_flags;
+ *  - an emergency ends the hold first (B1), a hold left without its track ends by itself (B6), the service's TX word
+ *    counts an APRS frame waiting for a clear channel (B8). */
 
 void radio_req_sat_hold(bool on) { req(RREQ_SAT_HOLD, on); }
+/* The hold's owner (sat_svc.c): an auto or held track runs; false: the radio core's watchdog ends a hold after 2 s */
+static bool sh_auto = true;
+bool sat_auto_on(void) { return sh_auto; }
 /* The service (radio_task.c's loop, classic_dispatch.inc) is not under test here */
 void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, uint8_t transmitting, bool light, uint32_t now_ms)
 {
@@ -188,6 +193,93 @@ static void test_sathold_rs_bits(void)
 	printf("Plus satellites' auto track setting: kept by the radio core's own settings save\n");
 }
 
+/* Holehunt B1: an emergency (the key, the lone worker, SOS: dmr_emergency_start) during a held track ends the hold at
+ * once, before the emergency is taken: from a DMR channel the channel back and the hot mic keyed there; from an FM
+ * channel the channel back and the emergency failed (SOS / the lone worker fall back), nothing keyed */
+static void sh_emergency_settings(void)
+{
+	dmr_emergency_settings_t es;
+	dmr_emergency_settings_default(&es);
+	es.mode = DMR_EMERGENCY_MODE_CALL;
+	es.hot_mic_s = 1;
+	dmr_emergency_set_settings(&es);
+	run(20);
+}
+
+static void test_sathold_emergency(void)
+{
+	dmr_start(true);		/* channel 4: DMR */
+	sh_emergency_settings();
+	CHECK(!sm.view.vfo && sm.view.channel_number == 4 && sm.view.ch.mode == RADIO_MODE_DMR);
+	radio_req_sat_hold(true);
+	CHECK(radio_sat_held());
+	sh_track_moves(145802000);
+	CHECK(sm.view.vfo && sm.view.ch.mode == RADIO_MODE_FM);
+	int tx = hw.tx_calls;
+	CHECK(dmr_emergency_start());
+	run(300);
+	CHECK(!radio_sat_held() && !sm.view.vfo && sm.view.channel_number == 4 && sm.view.ch.mode == RADIO_MODE_DMR);
+	CHECK(dmr_emergency_state() == DMR_EMERGENCY_HOT_MIC && sm.em_keyed && sm.view.state == RS_TX && hw.tx_calls == tx + 1);
+	run(2500);
+	dmr_emergency_cancel();
+	run(1000);
+	CHECK(sm.view.state == RS_IDLE && dmr_emergency_state() == DMR_EMERGENCY_IDLE);
+
+	setup_codeplug();
+	start();			/* channel 1: FM */
+	sh_emergency_settings();
+	radio_req_sat_hold(true);
+	sh_track_moves(437800000);
+	CHECK(radio_sat_held() && sm.view.vfo);
+	tx = hw.tx_calls;
+	CHECK(dmr_emergency_start());
+	run(300);
+	CHECK(!radio_sat_held() && !sm.view.vfo && sm.view.channel_number == 1 && sm.view.ch.rx_hz == 146520000);
+	CHECK(dmr_emergency_state() == DMR_EMERGENCY_FAILED && hw.tx_calls == tx && sm.view.state != RS_TX);
+	dmr_emergency_cancel();
+	run(100);
+	printf("Plus satellites' hold: an emergency ends it first (DMR channel keyed, FM channel failed)\n");
+}
+
+/* Holehunt B6: a hold whose end request was lost (its track gone, sat_auto_on false) ends by itself after 2 s, the
+ * channel back and TX allowed; while a track runs nothing ends it */
+static void test_sathold_watchdog(void)
+{
+	setup_codeplug();
+	start();
+	poll_for(200);
+	radio_req_sat_hold(true);
+	sh_track_moves(145802000);	/* 3.2 s with its track running: held */
+	CHECK(radio_sat_held() && sm.view.vfo);
+	sh_auto = false;		/* the track ended, its sat_hold(false) dropped */
+	poll_for(1500);
+	CHECK(radio_sat_held() && sm.view.vfo);
+	poll_for(700);
+	CHECK(!radio_sat_held() && !sm.view.vfo && sm.view.channel_number == 1 && sm.view.ch.rx_hz == 146520000);
+	CHECK(radio_sm_tx_check(&sm) == TXDENY_NONE);
+	sh_auto = true;
+	printf("Plus satellites' hold: left without its track, it ends by itself after 2 s\n");
+}
+
+/* Holehunt B8: the service's SAT_TX_* word: PTT, the radio's own TX, and an APRS frame from its clear-channel wait on
+ * (a Doppler step then would abort it) */
+static void test_sathold_txk(void)
+{
+	setup_codeplug();
+	start();
+	poll_for(200);
+	CHECK(radio_sat_txk(&sm) == SAT_TX_NONE);
+	sm.aprs_phase = 1;		/* APRS_RF_LISTEN (any phase but off) */
+	CHECK(radio_sat_txk(&sm) == SAT_TX_OWN);
+	sm.aprs_phase = 0;
+	req(RREQ_PTT, 1);
+	CHECK(radio_sat_txk(&sm) == SAT_TX_PTT);
+	req(RREQ_PTT, 0);
+	poll_for(200);
+	CHECK(radio_sat_txk(&sm) == SAT_TX_NONE);
+	printf("Plus satellites' TX word: PTT, own TX, an APRS frame waiting for a clear channel\n");
+}
+
 int main(void)
 {
 	int prior = classic_radio_main();
@@ -196,6 +288,9 @@ int main(void)
 	test_sathold_vfo();
 	test_sathold_refused();
 	test_sathold_rs_bits();
+	test_sathold_emergency();
+	test_sathold_watchdog();
+	test_sathold_txk();
 	printf("Plus satellites' auto track hold, radio core: %d failures (upstream's and Classic's suites with it built "
 	       "in: %s)\n", failures - before, prior ? "FAILED" : "passed");
 	return prior != 0 || failures != before;

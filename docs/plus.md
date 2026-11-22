@@ -1268,7 +1268,7 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     end the track. The ISS frame's own gates (callsign, position, 30 s apart) are as before.
   - **The AOS pop-up** (Home only): with the pass alarm armed (notifications on: one pass or Every pass), Auto track
     Off and Home open (no menu, editor or typed frequency), the rise's banner reads "ISS overhead, max 47°" ("ISS
-    tepede, maks 47°") with "OK: track" ("OK: takip") under it, the rise's beep as before, up 60 s instead of 8
+    tepede, maks 47°") with "OK: track" ("OK: takip") under it, the rise's beep as before, up 30 s instead of 8 (60 s before branch satfix)
     (countdown), and Home's hint row reads "OK track  Back" ("OK takip  Geri") meanwhile. It takes two key presses
     only: OK asks for the held track on that satellite's downlink (the ISS: the one chosen on Tools > ISS, 145.800 at
     power on) and hides it, the service's word following as above; Back hides it. Every other key, a long press and
@@ -1298,6 +1298,44 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   - FLASH +3,688 B (857,584 -> 861,272), RAM +16 B (209,856 -> 209,872: the alarm rise's pass and the held track's
     flag in the service, the downlink switch, the pop-up byte; the alarm text moved out of its function); stacks
     unchanged (radio 728 B free, UI 184 B free). Radio rows IS-1-IS-11 with IS-4b, IS-6b and IS-6c.
+
+- [built] Satellite track safety fixes (branch `satfix`, pre-release hole hunt docs B1, B6, B8 and two idea items;
+  `radio_sathold.inc`, `sat_svc.c`, `ui_sat.c`, `tools/plus_satauto.py`):
+  - **B1, an emergency during a held / auto track**: the emergency key was taken by the track (its long press only
+    ended the track) and the lone worker / SOS failed on the receive-only satellite VFO. Now `ui_sat_auto_key` never
+    takes the emergency key, and the radio core's `emergency_tick` ends the hold first whenever a start is pending
+    (`sat_held && dmr_emergency_start_pending()`: `sat_hold_end`, the same tick, before `dmr_emergency_tick` takes the
+    start, as `mw_emergency` does for the watch): the user's channel / VFO back, then the emergency on it. A DMR
+    channel with an ID transmits (hot mic), any other mode fails as on that channel, so SOS and the lone worker fall
+    back. Never a transmission on the satellite frequency. The service notices the hold gone (`AUTO_ON` while
+    `!radio_sat_held()`) at its next poll and ends the track without moving anything again.
+  - **B6, a lost hold end**: `radio_req_sat_hold(false)` goes through the radio task's own 16-slot queue with a 20 ms
+    wait; dropped, the radio stayed receive only and saved nothing until a power cycle. The radio core now has a
+    watchdog (`sat_hold_watch`, every radio poll): held for 2 s with no auto or held track running (`sat_auto_on()`
+    false; the service runs in the same task) ends the hold as a normal end does. This also covers a hold taken after
+    its track gave up (the refusal path) and every key / PTT end whose request is lost; no retry loop is needed since
+    the watchdog reads the owner's state directly. RAM: one word.
+  - **B8, a Doppler step aborting the ISS APRS frame**: while an APRS frame waits for a clear channel (`aprs_phase`
+    LISTEN) the radio state is not TX, so the tracking could post a VFO request, and any non-alert request aborts the
+    frame (`aprs_rf_abort`); 145.825 is busy in a pass. The radio task now asks `radio_sat_txk()` for the service's
+    word: PTT, or `SAT_TX_OWN` while transmitting **or while any APRS phase runs**, so the Doppler steps wait for the
+    frame as they wait for any TX and catch up within a second after it.
+  - **PTT during a held track** (idea item): already ends the track and gives the channel back on release (PTT is
+    refused on the satellite frequency, the toast "Auto track off: radio back" on the press, the channel back on the
+    release, the next PTT transmits there; radio row PA13). Left as is: making the first PTT itself transmit would mean
+    keying on a channel retuned under the finger; the owner decides later.
+  - **The AOS pop-up** (idea item): up 30 s instead of 60 s (`POP_MORE_MS` 22 s on top of the banner's 8 s), so an OK
+    pressed out of habit long after the rise starts a track less often. A less common key (# or a long OK) is left to
+    the owner.
+  - Host tests: `tests/plus/test_sathold_radio.inc` (an emergency during a hold from a DMR channel: the channel back
+    and the hot mic keyed there; from an FM channel: the channel back, the emergency failed, nothing keyed; the
+    watchdog: held 1.5 s without its track still held, ended by 2.2 s, the channel back and TX allowed;
+    `radio_sat_txk` for PTT, own TX and an APRS phase); `tests/plus/test_sat_svc.c` (a held ISS APRS track with the
+    radio's own frame waiting 30 s mid pass: no VFO request, the Doppler caught up after; the hold ended by the radio
+    core: the track ends at the next poll, nothing moved after); `tests/plus/test_ui_sat.c` (the emergency key's down,
+    long and up not taken by an auto track; the pop-up up at 26 s and gone by 35 s after the rise).
+  - FLASH +124 B (867,408 -> 867,532 on ddm25 151a533), RAM +0 B (208,576). Radio rows IS-12-IS-14; IS-8 / IS-9 now
+    30 s.
 
 - [built] P25 Phase 1 trunk following (`CONFIG_P25_TRUNK`, `prepare_p25_trunk`; parallel job; receive only):
   Tools > P25 trunk (tool 24, before Battery) follows a trunked system from the **selected channel**: a P25 channel

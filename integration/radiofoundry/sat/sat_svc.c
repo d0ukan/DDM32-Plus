@@ -22,7 +22,8 @@
  * only once it does (radio_sat_held, within AUTO_WAIT_S) does the VFO move: the tracking above on the downlink alone
  * (the ISS: 145.800 voice / SSTV or 145.825 APRS), simplex, no tones. A key (sat_auto_cancel), PTT (the release
  * awaited), the set (30 s after), a hand change or the elements failing end it: the hold's end puts the radio back as
- * it was.
+ * it was. The radio core ending the hold itself (an emergency; a hold left without its track) ends it at the next poll.
+ * While an APRS frame waits for a clear channel the radio task says SAT_TX_OWN: no Doppler step aborts it.
  *
  * The user's held track (sat_auto_start: Tools > ISS's OK, OK on the AOS pop-up) is the same, started from the request
  * at once (a pass under way or due within 10 minutes; the UI's idle word not needed, the radio core's hold still is);
@@ -677,8 +678,10 @@ void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, uint8_t txk, bool lig
 	bool busy = looking || e.track != SAT_NONE || want_track_new;	/* the screen or the tracking */
 	if (want_al_new)
 		alarm_request();
-	if (want_cancel && auto_phase() == AUTO_ON && !transmitting) {
-		auto_end(SAT_TRK_OFF);	/* a key: the radio back where it was, at once */
+	if (auto_phase() == AUTO_ON && (!radio_sat_held() || (want_cancel && !transmitting))) {
+		/* a key: the radio back where it was, at once; or the radio core ended the hold itself (an emergency):
+		 * nothing more is moved */
+		auto_end(SAT_TRK_OFF);
 		busy = looking || want_track_new;
 	}
 	if (!busy && view.alarm.target == SAT_NONE) {

@@ -11,6 +11,11 @@
 // RREQ_SAT_HOLD arg 0: the VFO in use and the position come back from what was noted, as the radio's start takes
 // them (radio_sm_init), and the radio is tuned there: on the channel, or in the VFO with its frequency, mode, width,
 // tones and talk target. A power off while it holds comes back as before the hold too. RAM: the flag.
+// An emergency (the key, the lone worker, SOS) ends the hold at once, before the emergency is taken (emergency_tick:
+// the user's channel back, then the emergency on it: a DMR channel transmits, another fails so SOS / the lone worker
+// fall back), and a hold left without its track ends by itself (sat_hold_watch).
+
+#include "radio/sat.h"	// sat_auto_on (the hold's owner, sat_svc.c), SAT_TX_*
 
 bool radio_sat_held(void)
 {
@@ -92,6 +97,36 @@ static void __attribute__((noinline)) sat_hold_end(radio_sm_t *sm, uint32_t now_
 		tune(sm, now_ms);
 	}
 	changed(sm);
+}
+
+// A hold whose track is gone ends by itself (holehunt B6): its end request lost in a full queue (or the track over
+// before its hold was taken) left the radio receive only, saving nothing, until a power cycle. Held for 2 s with no auto
+// or held track running (sat_auto_on, the service in this task): the user's state back as at a normal end. From
+// radio_sm_poll. RAM: one word
+static void sat_hold_watch(radio_sm_t *sm, uint32_t now_ms)
+{
+	static uint32_t orphan_ms;	// since when held without a track (0: not)
+	if (!sat_held || sat_auto_on()) {
+		orphan_ms = 0;
+	} else if (orphan_ms == 0) {
+		orphan_ms = now_ms | 1u;
+	} else if (now_ms - orphan_ms >= 2000u) {
+		sat_hold_end(sm, now_ms);
+	}
+}
+
+// The service's word on the air (sat.h SAT_TX_*; radio_task.c): PTT, or the radio's own transmission. An APRS frame
+// counts from its wait for a clear channel on (holehunt B8): a Doppler step then (a VFO request) would abort it, so the
+// tracking waits for the frame as it waits for any TX
+uint8_t radio_sat_txk(const radio_sm_t *sm)
+{
+	if (sm->ptt)
+		return SAT_TX_PTT;
+#if CONFIG_APRS
+	if (sm->aprs_phase != APRS_RF_OFF)
+		return SAT_TX_OWN;
+#endif
+	return sm->view.state == RS_TX ? SAT_TX_OWN : SAT_TX_NONE;
 }
 
 static void sat_hold_request(radio_sm_t *sm, bool on, uint32_t now_ms)
