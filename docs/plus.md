@@ -3233,8 +3233,8 @@ the zone work runs in the storage job on its `work` zone, nothing new on the UI 
   "Bölgeye eklendi: N"), "Zone full, added: N" (some left) or "Every channel is in a zone" (TR "Her kanal bir
   bölgede"). This is how the owner's channel 27 gets into All channels.
 
-Cost (zone27 over ddm25 3e1119a): FLASH 862,788 B (95.75 %, +1,516 B), RAM unchanged 209,872 B (1,584 B free), no new
-zone buffer. Tests: `tests/plus/test_zone_cap.c` `test_new_joins` and `test_legacy16` on the real codeplug and
+Cost (zone27 over ddm25 ab6afc3, measured): FLASH 867,088 B (96.22 %, +1,536 B), RAM 208,576 B (+8 B: the note word
+and the UI's last sequence; 2,880 B free), no new zone buffer. Tests: `tests/plus/test_zone_cap.c` `test_new_joins`, `test_legacy16` and `test_copy_into_all` on the real codeplug and
 `zone_edit.c` with the owner's zone shape (26 mixed channels, a find zone made, "All channels" stored with 26, the old
 write leaves the 27th out; Home on the find zone, on another zone, on All channels, the VFO, Copy here's position, a
 taken number, Home's zone full, All channels full with and without another zone, the repair with the count, All
