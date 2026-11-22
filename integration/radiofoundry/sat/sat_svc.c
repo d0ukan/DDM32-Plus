@@ -48,6 +48,7 @@
 #define MOVED_E7	2000000	/* 0.2 degree (about 20 km): the passes are searched again */
 #define JUMP_S		60	/* the GPS time against the running clock: a bigger jump searches again */
 #define ALARM_GAP_S	5	/* the pass after one is looked for from this long after its set (found to 2 s) */
+#define SKY_STEP_S	20	/* the sky plot: points about this far apart (a long pass: SAT_SKY_MAX evenly) */
 #define AUTO_WAIT_S	3	/* auto track: the radio core's hold awaited this many seconds at most */
 
 /* The radio task writes, the UI copies; both in a critical section */
@@ -205,13 +206,14 @@ static double now_exact(uint32_t now_ms)
 	return (double)e.anchor_s + (double)(now_ms - e.anchor_ms) / 1000.0;
 }
 
-/* The GPS's time and position, when they change */
+/* The GPS's time, and the position when it changes: the GPS fix, else the one the APRS settings hold (a typed
+ * position: Settings > Location; aprs_position_now, blurred as the beacons are when position ambiguity is set). The time
+ * still comes from the GPS alone: the radio has no clock of its own */
 static void clock_update(uint32_t now_ms)
 {
 	aprs_gps_t g;
-	if (!aprs_gps(&g, now_ms))
-		return;
-	if (g.date != 0 && g.utc_hms != 0xFFFFFFFFu && (g.utc_hms != e.gps_hms || g.date != e.gps_date)) {
+	bool gps = aprs_gps(&g, now_ms);
+	if (gps && g.date != 0 && g.utc_hms != 0xFFFFFFFFu && (g.utc_hms != e.gps_hms || g.date != e.gps_date)) {
 		int32_t s = sat_s2000(g.date, g.utc_hms);
 		if (s >= 0) {
 			bool jump = !e.clock_ok || s - now_s(now_ms) > JUMP_S || now_s(now_ms) - s > JUMP_S;
@@ -224,12 +226,22 @@ static void clock_update(uint32_t now_ms)
 				research_all();
 		}
 	}
-	if (g.fix) {
-		int32_t alt = g.alt_m != APRS_ALT_NONE ? g.alt_m : 0;
-		int32_t dlat = g.lat - e.lat, dlon = g.lon - e.lon;
+	int32_t lat, lon, alt = 0;
+	bool have = gps && g.fix;
+	if (have) {
+		lat = g.lat;
+		lon = g.lon;
+		alt = g.alt_m != APRS_ALT_NONE ? g.alt_m : 0;
+	} else {
+		uint32_t err_m;
+		bool dmr;
+		have = aprs_position_now(&lat, &lon, &err_m, &dmr);
+	}
+	if (have) {
+		int32_t dlat = lat - e.lat, dlon = lon - e.lon;
 		if (!e.pos_ok || dlat > 10000 || dlat < -10000 || dlon > 10000 || dlon < -10000) {	/* 0.001 deg */
-			e.lat = g.lat;
-			e.lon = g.lon;
+			e.lat = lat;
+			e.lon = lon;
 			e.alt = alt;
 			sat_observer(e.lat, e.lon, e.alt, &e.obs);
 			dlat = e.lat - e.pass_lat;
@@ -254,6 +266,84 @@ static __attribute__((noinline)) bool live_look(uint8_t i, double t, sat_look_t 
 	if (us > view.cost_us)
 		view.cost_us = (uint16_t)(us > 0xFFFFu ? 0xFFFFu : us);
 	return ok;
+}
+
+/* --- The sky plot's points (sat_sky: the UI asks, this works one job a poll, like the pass search) --- */
+
+static volatile struct {	/* UI task writes, in a critical section */
+	bool want;
+	uint8_t sat;
+	int32_t aos, los;
+} sky_ask;
+static struct {		/* radio task writes; the UI reads az / el only once n is published (n > 1) */
+	uint8_t sat, n_want, done;
+	int32_t aos, los;
+	bool fail;
+	volatile uint8_t n;	/* points ready: 0 none, 1 failed, else the count */
+	uint8_t az[SAT_SKY_MAX], el[SAT_SKY_MAX];
+} sky = { .sat = SAT_NONE };
+
+uint8_t sat_sky(uint8_t idx, int32_t aos, int32_t los, const uint8_t **az, const uint8_t **el)
+{
+	taskENTER_CRITICAL();
+	sky_ask.want = true;
+	sky_ask.sat = idx;
+	sky_ask.aos = aos;
+	sky_ask.los = los;
+	bool mine = sky.sat == idx && sky.aos == aos && sky.los == los;
+	uint8_t n = mine ? sky.n : 0;
+	taskEXIT_CRITICAL();
+	*az = sky.az;
+	*el = sky.el;
+	return n;
+}
+
+/* One or two points of the asked track: false when nothing is asked or it is worked out. A new ask starts over (the
+ * points are not shown until all are there) */
+static __attribute__((noinline)) bool sky_job(int evals)
+{
+	bool want;
+	uint8_t idx;
+	int32_t aos, los;
+	taskENTER_CRITICAL();
+	want = sky_ask.want;
+	idx = sky_ask.sat;
+	aos = sky_ask.aos;
+	los = sky_ask.los;
+	taskEXIT_CRITICAL();
+	if (!want)
+		return false;
+	if (sky.sat != idx || sky.aos != aos || sky.los != los) {
+		int32_t n = (los - aos) / SKY_STEP_S + 1;
+		sky.n = 0;
+		sky.sat = idx;
+		sky.aos = aos;
+		sky.los = los;
+		sky.done = 0;
+		sky.fail = idx >= sat_count || los <= aos;
+		sky.n_want = n < 2 ? 2 : n > SAT_SKY_MAX ? SAT_SKY_MAX : (uint8_t)n;
+	}
+	if (sky.n != 0)
+		return false;		/* done (or failed) */
+	sgp4_t p;
+	if (sky.fail || sgp4_init(&p, &sat_table[idx].el) != SGP4_OK) {
+		sky.n = 1;
+		return true;
+	}
+	for (int k = 0; k < evals && sky.done < sky.n_want; k++) {
+		sat_look_t l;
+		double t = (double)aos + (double)(los - aos) * (double)sky.done / (double)(sky.n_want - 1u);
+		if (sat_eval(&p, &sat_table[idx], t, &e.obs, &l) != SGP4_OK) {
+			sky.n = 1;
+			return true;
+		}
+		sky.az[sky.done] = (uint8_t)(l.az * (256.0f / 360.0f) + 0.5f);
+		sky.el[sky.done] = l.el <= 0.0f ? 0 : l.el >= 90.0f ? 90 : (uint8_t)(l.el + 0.5f);
+		sky.done++;
+	}
+	if (sky.done >= sky.n_want)
+		sky.n = sky.n_want;
+	return true;
 }
 
 /* The screen's pass search: false when there was nothing to search */
@@ -760,6 +850,8 @@ void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, uint8_t txk, bool lig
 		return;		/* one job a poll */
 	}
 	if (transmitting)
+		return;
+	if (looking && sky_job(light ? 1 : SEARCH_EVALS))
 		return;
 	if (looking && search_job(now, light ? 1 : SEARCH_EVALS))
 		return;

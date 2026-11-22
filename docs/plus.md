@@ -1385,6 +1385,70 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     flag in the service, the downlink switch, the pop-up byte; the alarm text moved out of its function); stacks
     unchanged (radio 728 B free, UI 184 B free). Radio rows IS-1-IS-11 with IS-4b, IS-6b and IS-6c.
 
+- [built] Sky plot (part of `CONFIG_SATELLITES`; `integration/radiofoundry/sat/` ui_sat.c, sat_svc.c, sat.h; owner's
+  request 2026-11-22; branch skyplot; screenshot `images/ddm32/sky-plot.png`, a simulator render of a 63 degree ISS pass).
+  Key `2` on Tools > ISS (the ISS) and on Tools > Satellites (the satellite in focus) opens a polar plot of that
+  satellite's next pass, or the one under way, from your location; Back returns to the page. Key 2 was free on both pages
+  (Satellites: 0 is the alarm page, # APRS via the ISS, OK, arrows and UTC; Tools > ISS: 1 the downlink, # APRS, OK, the
+  alarm rows), so the same key does it on both. The hint says so where it fits: Satellites' hints end "2 sky" ("2 gök"; the
+  ISS row's hint lost its "via ISS" and the others their "^v pick" for the room); on Tools > ISS the hint row is full, so
+  "2 sky" sits at the right of the "145.825 APRS" line.
+  - **What is drawn** (nothing but lines, no map bitmap): a circle, the horizon (elevation 0 at the edge, the zenith in
+    the centre, so the radius is proportional to 90 - elevation), rings at 30 and 60 degrees, a cross, N / E / S / W
+    outside it (Turkish K / D / G / B), north up and east to the right as on a map (a view down on the compass, so east is on
+    the right, not on the left as on a sky chart held overhead). The pass is a white line through its
+    points, the rise a filled green square, the set an open red one, the satellite now a filled warning-color dot at the
+    live azimuth and elevation (from the same once-a-second live look the page prints; not drawn below the horizon).
+    Under it: "AOS hh:mm  LOS hh:mm" (local time, the page's offset), "Max 47°  AOS in m:ss" ("LOS in m:ss" and the rx
+    color under way), "Az 123°  El 23.4°". Large text and Turkish: the small font is the only one used and the texts
+    wrap at their spaces, so nothing is cut off (checked by the layout test in both sizes and both languages). With no
+    plot to draw it says why instead: "Waiting for the GPS time", "Waiting for a GPS position" with "Needs a GPS fix or a
+    typed position", "no pass soon", "Looking for the pass", "bad elements" (and an ellipsis while the points are worked
+    out, a moment).
+  - **Where the points come from.** No new orbit model: the pass (AOS, LOS, top elevation) is the one the lists and the
+    alarm already use (`sat_pass_t`), and each point is `sat_eval` (SGP4 and the look angles, as the live line) at evenly
+    spaced times from AOS to LOS: about 20 s apart, 64 points at most (a pass over 21 minutes spreads them evenly).
+    The UI task cannot run SGP4 (its stack: 184 B free; one `cos` in the soft-float library is 900 B deep), so the radio
+    task works them out, `sat_sky()` in sat_svc.c: the draw asks for the pass (as `sat_seen` keeps the service looking),
+    the service does two points a radio poll (one while the native receiver owns the radio) between its other jobs and
+    publishes them when all are there, so a redraw costs no SGP4 and a key press never waits. The points are kept in the
+    service as 64 x 2 bytes (azimuth in 360/256 degrees, elevation in whole degrees), 128 B of RAM that the pass needs
+    for as long as the page is open: computing them afresh at every redraw (a second) would be 30 to 60 propagations
+    each time, and the arrays are small enough to keep. The plot is thus as accurate as the lists: the rise and set
+    marks sit on the horizon circle and the highest point at the radius of the search's top elevation (checked to a few
+    pixels against `sat_eval` in the UI test). A new ask for the same pass is answered at once; a different pass starts
+    over.
+  - **Location without a GPS fix.** The satellite code used the GPS fix alone. It now takes the position the APRS settings
+    hold when the GPS has no fix (`aprs_position_now`: a typed position, Settings > Location, the way the beacons use it,
+    with the same position-ambiguity blur if one is set; the altitude is taken as 0) in `clock_update`, so the lists, the
+    pass alarm, auto track and the plot all work indoors with a typed position. The TIME still comes from the GPS: the radio
+    has no clock of its own that firmware reads (as in the Clock tools), so with no GPS time since power on nothing can be
+    predicted and the pages say "Waiting for the GPS time". A GPS fix, when there is one, wins; a position that moved by
+    0.001 degree is taken over, as before. The Satellites page's hint line is now "Needs a GPS fix or a typed position".
+  - **No interference.** Nothing on the plot tunes, tracks or transmits: OK does nothing there, the pass alarm, the AOS
+    pop-up, Doppler tracking and auto track run as before. While a held (auto) track holds the radio the plot may be shown:
+    on Tools > ISS the keys were already the page's; on Tools > Satellites the "any key ends the track" rule
+    (`ui_sat_auto_key`) leaves key 2 and the open plot's keys (Back) alone, and any other key there ends the track as it
+    did. The plot keeps the service looking at the satellite shown (`sat_seen`), which it does anyway while a satellite page
+    is open; closing it stops that after 4 s as before.
+  - **Cost.** FLASH 872,980 -> 876,068 B (+3,088, 97.22 % of 901,120 B), RAM 209,168 B (2,288 B free, the floor 1,500; +184 B: the
+    points 128 B, the ask and the state in the service 36 B, the page's state in the UI 20 B); stacks unchanged (radio 676 B
+    free, UI 184 B free: the plot's own frame is under the Satellites screen's, and no SGP4 runs in the UI task).
+    Build: zero warnings, forced rebuild identical.
+  - **Host tests.** `tests/plus/test_sat_svc.c`: no position gives no points however long it is asked, the points of a pass
+    (31 for 600 s, the 64 point cap) against `sat_eval` at the same moments (0.75 degree, 0.5 degree) from the GPS position,
+    an empty span and a missing satellite failing, a repeated ask answered at once, and the typed position without a GPS
+    fix used as the observer (the points from there, not from the GPS position). `tests/plus/test_ui_sat.c` (English,
+    Turkish and both with Large text; the fake service answers with `sat_eval` from a fixed observer): the plot from Tools >
+    ISS and Tools > Satellites (the focus, and another satellite one down), Back returning to the page or the list, 0 still
+    the alarm page there, OK and 1 doing nothing on the plot, a held track left running (no cancel, no start, key 2 and
+    Back not taken by the "any key" rule), the stopped cases (no GPS time, no position, no pass, looking, bad elements, the
+    points not ready for two asks then there), layout checks on the plots and messages, and the pixels: the rise's filled
+    square and the set's open one at the AOS and LOS azimuths on the horizon circle (within 3.5 px of a position worked
+    out here), the highest point at the radius that top elevation means, the live dot at the live az / el (warning color)
+    and moving when the look moves, none below the horizon. The hint edits are checked in both screens.
+    Radio rows SK-1 to SK-6 (`docs/plus-radio-test.md`).
+
 - [built] Satellite track safety fixes (branch `satfix`, pre-release hole hunt docs B1, B6, B8 and two idea items;
   `radio_sathold.inc`, `sat_svc.c`, `ui_sat.c`, `tools/plus_satauto.py`):
   - **B1, an emergency during a held / auto track**: the emergency key was taken by the track (its long press only

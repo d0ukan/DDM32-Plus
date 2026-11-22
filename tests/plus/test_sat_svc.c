@@ -7,9 +7,12 @@
  *  - the tracking: the first request sequence (VFO RX, FM, wide, uplink CTCSS, no RX tone, the split), the step
  *    hysteresis (sat_follow_hz) and the VFO never more than the hold plus a second's drift off the true Doppler, an
  *    uplink move alone not touching RX, no request at all while PTT is held, the nominal frequencies back after the
- *    set, a hand change ending it with the VFO left alone.
+ *    set, a hand change ending it with the VFO left alone;
+ *  - the sky plot's points (sat_sky): none without a position; the pass's ends and middle against sat_eval; and the
+ *    position the APRS settings hold (a typed one, aprs_position_now) used when the GPS has the time but no fix.
  * The fake radio core has no PTT or keying call: the service links only against the VFO, mode, bandwidth and tone
  * requests below, so it cannot key the transmitter. */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +41,20 @@ void mock_exit(void) {}
 
 static int32_t gps_t0;		/* GPS UTC (seconds since 2000) at now_ms = 0 */
 static bool gps_on;
+static bool fix_off, typed_on;	/* the GPS has the time but no fix; the APRS settings hold a typed position */
+#define TLAT	419000000	/* the typed one: Milan, a long way from Ankara */
+#define TLON	91900000
+
+bool aprs_position_now(int32_t *lat, int32_t *lon, uint32_t *err_m, bool *dmr_gps)
+{
+	if (!typed_on)
+		return false;
+	*lat = TLAT;
+	*lon = TLON;
+	*err_m = 200;
+	*dmr_gps = false;
+	return true;
+}
 
 bool aprs_gps(aprs_gps_t *g, uint32_t now)
 {
@@ -47,7 +64,7 @@ bool aprs_gps(aprs_gps_t *g, uint32_t now)
 	time_t tt = (time_t)(gps_t0 + (int32_t)(now / 1000u)) + 946684800;
 	struct tm tm;
 	gmtime_r(&tt, &tm);
-	g->fix = true;
+	g->fix = !fix_off;
 	g->lat = LAT;
 	g->lon = LON;
 	g->alt_m = ALT;
@@ -369,6 +386,112 @@ static void alarm_before_gps(uint8_t iss, int32_t start)
 	CHECK(v.clock == SAT_CLOCK_OK && v.alarm.state == SAT_AL_ARMED && v.alarm.aos > utc_now());
 	sat_alarm_set(SAT_NONE, 0, 0, 0);
 	run_s(1);
+}
+
+/* --- The sky plot's points --- */
+
+/* sat_sky asked at every poll, the way the screen's draws do: the points once the radio task has them (n 0: still
+ * working after the polls given) */
+static uint8_t sky_ask(uint8_t k, int32_t aos, int32_t los, const uint8_t **az, const uint8_t **el, int polls)
+{
+	uint8_t n = 0;
+	screen = true;
+	focus = k;
+	for (int i = 0; i < polls && n == 0; i++) {
+		n = sat_sky(k, aos, los, az, el);
+		poll_once();
+	}
+	return n;
+}
+
+/* The points from aos to los against sat_eval at the same moments, observer o; the count for the span */
+static void sky_against(uint8_t k, int32_t aos, int32_t los, const sat_obs_t *o)
+{
+	const uint8_t *az, *el;
+	sgp4_t p;
+	uint8_t n = sky_ask(k, aos, los, &az, &el, 4000);
+	int32_t want = (los - aos) / 20 + 1;
+	want = want > SAT_SKY_MAX ? SAT_SKY_MAX : want;
+	CHECK(n == want);
+	CHECK(sgp4_init(&p, &sat_table[k].el) == SGP4_OK);
+	int bad = 0, top = 0;
+	for (int i = 0; i < n && n > 1; i++) {
+		sat_look_t l;
+		double t = (double)aos + (double)(los - aos) * i / (double)(n - 1);
+		CHECK(sat_eval(&p, &sat_table[k], t, o, &l) == SGP4_OK);
+		double da = fabs((double)az[i] * 360.0 / 256.0 - (double)l.az);
+		da = da > 180.0 ? 360.0 - da : da;
+		double de = fabs((double)el[i] - (double)(l.el < 0.0f ? 0.0f : l.el));
+		bad += da > 0.75 || de > 0.51;
+		top = el[i] > top ? el[i] : top;
+	}
+	CHECK(bad == 0);
+	/* the pass's rise is on the horizon (found to 2 s: a few tenths of a degree) */
+	CHECK(n > 1 && el[0] <= 2);
+	CHECK(top > 0);
+}
+
+/* No position (nor GPS time): nothing is worked out, however long it is asked */
+static void sky_without_position(uint8_t k, int32_t t)
+{
+	const uint8_t *az, *el;
+	printf("  sky: no position, no points\n");
+	CHECK(sky_ask(k, t, t + 600, &az, &el, 400) == 0);
+	screen = false;
+}
+
+static void sky_from_gps(uint8_t k, int32_t start)
+{
+	printf("  sky: points against sat_eval from the GPS position\n");
+	scenario("sky", start);
+	sat_alarm_set(k, 5, 10, 0);
+	run_until_found();
+	sat_view_t v = view_now();
+	CHECK(v.alarm.state == SAT_AL_ARMED);
+	sat_obs_t o;
+	sat_observer(LAT, LON, ALT, &o);
+	sky_against(k, v.alarm.aos, v.alarm.aos + 600, &o);	/* 31 points */
+	sky_against(k, v.alarm.aos, v.alarm.aos + 2000, &o);	/* the 64 point cap */
+	const uint8_t *az, *el;
+	CHECK(sky_ask(k, v.alarm.aos, v.alarm.aos, &az, &el, 100) == 1);	/* an empty span: failed */
+	CHECK(sky_ask(SAT_NONE, v.alarm.aos, v.alarm.aos + 600, &az, &el, 100) == 1);
+	/* a new ask for the same pass is answered at once (nothing worked out again) */
+	CHECK(sky_ask(k, v.alarm.aos, v.alarm.aos + 600, &az, &el, 4000) == 31);
+	CHECK(sat_sky(k, v.alarm.aos, v.alarm.aos + 600, &az, &el) == 31);
+	screen = false;
+	sat_alarm_set(SAT_NONE, 0, 0, 0);
+	run_s(6);		/* the screen's last look lapses (SEEN_MS) */
+}
+
+/* The GPS has the time but no fix: the typed position is the observer (the altitude 0) */
+static void typed_position(uint8_t k, int32_t start)
+{
+	printf("  sky: the typed position without a GPS fix\n");
+	scenario("typed", start);
+	fix_off = true;
+	typed_on = true;
+	sat_alarm_set(k, 5, 0, 0);
+	run_s(5);
+	run_until_found();
+	sat_view_t v = view_now();
+	CHECK(v.clock == SAT_CLOCK_OK && v.alarm.state == SAT_AL_ARMED);
+	sat_obs_t o;
+	sat_observer(TLAT, TLON, 0, &o);
+	sky_against(k, v.alarm.aos, v.alarm.aos + 600, &o);
+	screen = false;
+	/* ... not Ankara's: its look angles differ */
+	sat_obs_t og;
+	sat_observer(LAT, LON, ALT, &og);
+	sgp4_t p;
+	sat_look_t l;
+	CHECK(sgp4_init(&p, &sat_table[k].el) == SGP4_OK && sat_eval(&p, &sat_table[k], v.alarm.aos + 300, &og, &l) == SGP4_OK);
+	sat_look_t lt;
+	CHECK(sat_eval(&p, &sat_table[k], v.alarm.aos + 300, &o, &lt) == SGP4_OK);
+	CHECK(fabsf(l.az - lt.az) > 1.0f || fabsf(l.el - lt.el) > 1.0f);
+	sat_alarm_set(SAT_NONE, 0, 0, 0);
+	run_s(1);
+	fix_off = false;
+	typed_on = false;
 }
 
 /* --- Tracking --- */
@@ -987,7 +1110,9 @@ int main(void)
 		return 1;
 	int32_t t0 = (int32_t)sat_table[iss].el.epoch + 3600;
 	follow_steps();
+	sky_without_position(iss, t0);
 	alarm_before_gps(iss, t0);
+	sky_from_gps(iss, t0 + 10000);
 	alarm_one(iss, 5, 0, t0);
 	alarm_one(iss, 2, 0, t0 + 20000);
 	alarm_one(iss, 10, 30, t0 + 40000);
@@ -1006,6 +1131,7 @@ int main(void)
 	popup_track(iss, t0 + 640000);
 	own_frame_and_hold_gone(iss, t0 + 700000);
 	auto_after_own_frame(iss, t0 + 760000);
+	typed_position(iss, t0 + 820000);
 	if (failures) {
 		printf("test_sat_svc: %d failures\n", failures);
 		return 1;

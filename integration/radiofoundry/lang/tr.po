@@ -4821,8 +4821,8 @@ msgid "Waiting for a GPS position"
 msgstr "GPS konumu bekleniyor"
 
 #: core/ui/ui_sat.c
-msgid "Needs a GPS fix: Settings > Location"
-msgstr "GPS fix gerekir: Ayarlar > Konum"
+msgid "Needs a GPS fix or a typed position"
+msgstr "GPS konumu veya girilmiş konum gerekir"
 
 #: core/ui/ui_sat.c
 msgid "  TLE "
@@ -4833,32 +4833,32 @@ msgid " d"
 msgstr " g"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  # arm tone  <> UTC"
-msgstr "OK durdur  # akt. ton  <> UTC"
+msgid "OK stop  # tone  2 sky"
+msgstr "OK durdur  # ton  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  # APRS via ISS"
-msgstr "OK durdur  # ISS'ten APRS"
+msgid "OK stop  # APRS  2 sky"
+msgstr "OK durdur  # APRS  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK track  # APRS via ISS"
-msgstr "OK takip  # ISS'ten APRS"
+msgid "OK track  # APRS  2 sky"
+msgstr "OK takip  # APRS  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK alarm  # APRS via ISS"
-msgstr "OK alarm  # ISS'ten APRS"
+msgid "OK alarm  # APRS  2 sky"
+msgstr "OK alarm  # APRS  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  ^v pick  <> UTC"
-msgstr "OK durdur  ^v seç  <> UTC"
+msgid "OK stop  2 sky  <> UTC"
+msgstr "OK durdur  2 gök  <> UTC"
 
 #: core/ui/ui_sat.c
-msgid "^v pick  OK track  <> UTC"
-msgstr "^v seç  OK takip  <> UTC"
+msgid "OK track  2 sky  <> UTC"
+msgstr "OK takip  2 gök  <> UTC"
 
 #: core/ui/ui_sat.c
-msgid "^v pick  OK alarm  <> UTC"
-msgstr "^v seç  OK alarm  <> UTC"
+msgid "OK alarm  2 sky  <> UTC"
+msgstr "OK alarm  2 gök  <> UTC"
 
 #: core/ui/ui_sat.c
 msgid "Tracking off: VFO stays"
@@ -4935,6 +4935,34 @@ msgstr " kurulu"
 #: core/ui/ui_sat.c
 msgid "Every ISS pass: other alarm off"
 msgstr "Her ISS geçişi: diğer alarm kapalı"
+
+#: core/ui/ui_sat.c
+msgid "2 sky"
+msgstr "2 gök"
+
+#: core/ui/ui_sat.c
+msgid "Max "
+msgstr "Maks "
+
+#: core/ui/ui_sat.c
+msgid "Looking for the pass"
+msgstr "Geçiş aranıyor"
+
+#: core/ui/ui_sat.c
+msgid "N"
+msgstr "K"
+
+#: core/ui/ui_sat.c
+msgid "E"
+msgstr "D"
+
+#: core/ui/ui_sat.c
+msgid "S"
+msgstr "G"
+
+#: core/ui/ui_sat.c
+msgid "W"
+msgstr "B"
 
 #: core/ui/ui_scanx.c
 msgid "Priority channel off"

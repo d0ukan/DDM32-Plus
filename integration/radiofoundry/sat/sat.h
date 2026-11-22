@@ -168,6 +168,14 @@ typedef struct {
 void sat_view(sat_view_t *out);
 void sat_seen(uint8_t focus);		/* the screen looks (from its draw), the satellite in focus */
 void sat_track(uint8_t idx);		/* follow this satellite's pass in the VFO; SAT_NONE stops */
+/* The sky plot (ui_sat.c): satellite idx's look angles from the observer at points evenly spread from aos to los
+ * (seconds since 2000), about SKY_STEP_S apart, at most SAT_SKY_MAX. The UI calls this at every draw (it keeps the
+ * service looking, as sat_seen does); the radio task works the points out a poll at a time. Returns 0 while it works,
+ * 1 when it cannot (no position, the elements do not propagate), else the number of points, with *az (360/256 degrees)
+ * and *el (whole degrees 0 .. 90, under the horizon 0) valid until the next ask for another pass. The UI task never
+ * runs SGP4 itself: its stack has no room for it */
+#define SAT_SKY_MAX	64
+uint8_t sat_sky(uint8_t idx, int32_t aos, int32_t los, const uint8_t **az, const uint8_t **el);
 void sat_arm(bool on);			/* the arming tone instead of the CTCSS on the uplink */
 /* Arm the pass alarm (target SAT_NONE: off) with SAT_OPT_* opts, replacing one armed before */
 void sat_alarm_set(uint8_t target, uint8_t lead_min, uint8_t min_el, uint8_t opts);

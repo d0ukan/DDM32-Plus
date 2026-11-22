@@ -29,6 +29,8 @@ static uint32_t track_ms;		/* sim time an auto track's "tracking" event is due (
 static uint8_t refuse;			/* ... a refusal instead (SAT_NO_*), the user's held track */
 static int beeps_soon, beeps_aos;
 static uint8_t iss, so50, ao91, po101;
+static bool fake_pos = true;	/* the sky plot's fake service: a position (else the points fail) */
+static int fsky_wait;		/* ... asks answered "still working" before the points are there */
 
 static int32_t fake_now(void)
 {
@@ -178,6 +180,11 @@ static void fake_reset(bool clock)
 	start_mode = mode_now = 0;
 	pop = SAT_NONE;
 	iss_aprs = false;
+	sky_page = false;
+	sky_n = 0;
+	sky_idx = SAT_NONE;
+	fake_pos = true;
+	fsky_wait = 0;
 	ui_svc_setting_set(UI_SET_SAT_NOTE, 0);
 	ui_svc_setting_set(UI_SET_SAT_AUTO, 0);
 }
@@ -331,7 +338,7 @@ static int auto_checks(void)
 }
 
 /* --- Tools > ISS and the AOS pop-up, in English and in Turkish (ASCII parts of the translations) --- */
-static bool turkish;
+static bool turkish, large;
 #define T(en, tr) (turkish ? (tr) : (en))
 #define ISSP "ok 6 up up ok "	/* Tools > ISS (after All digital search, before Battery) */
 #define ARMED SATS "0 ok long:back "	/* the ISS's pass alarm armed (one pass, auto track off), Home */
@@ -345,6 +352,10 @@ static int iss_flow(const char *name, const char *setup, void (*prep)(void), con
 	int bad = 0;
 	fake_reset(true);
 	sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_M);
+	if (large) {
+		ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
+		sim_run("reboot", err, sizeof err);	/* the setting is read at start */
+	}
 	if (!lang_set(lang_find(turkish ? 't' << 8 | 'r' : 'e' << 8 | 'n'))) {
 		printf("FAIL %s: no such language in this build\n", name);
 		return 1;
@@ -424,9 +435,9 @@ static int iss_checks(void)
 	bad += iss_flow("ISS page", ISSP, NULL, "",
 			T("screen=iss shows=AOS_in_5:00__47 shows=AOS_ shows=LOS_ shows=145.800_voice_/_SSTV "
 			  "shows=145.825_APRS shows=Before_AOS shows=Auto_track shows=Every_pass hides=For "
-			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80",
+			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80 shows=2_sky",
 			  "screen=iss shows=AOS'a_5:00 shows=AOS_ shows=145.800_ses_/_SSTV shows=145.825_APRS "
-			  "shows=OK_takip__#_APRS__1_frek"), true);
+			  "shows=OK_takip__#_APRS__1_frek shows=2_g"), true);
 	/* OK within 10 min of AOS: the held track on 145.800 */
 	bad += iss_flow(n = "ISS OK tracks", ISSP, NULL, "ok", "toast=none banner=none", false);
 	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
@@ -537,6 +548,250 @@ static int iss_checks(void)
 	return bad;
 }
 
+/* --- The sky plot (key 2 on Tools > ISS and Tools > Satellites) --- */
+
+/* The fake service's sat_sky: sat.h's contract on a fixed observer (the real one is tested in test_sat_svc.c) */
+#define OLAT	399334000	/* the observer: Ankara */
+#define OLON	328597000
+static sat_obs_t fobs;
+static int sky_calls;
+
+static uint8_t fsky_az[SAT_SKY_MAX], fsky_el[SAT_SKY_MAX];
+
+uint8_t sat_sky(uint8_t idx, int32_t aos, int32_t los, const uint8_t **az, const uint8_t **el)
+{
+	sgp4_t p;
+	sky_calls++;
+	*az = fsky_az;
+	*el = fsky_el;
+	if (fsky_wait > 0) {
+		fsky_wait--;
+		return 0;
+	}
+	if (!fake_pos || idx >= sat_count || los <= aos || sgp4_init(&p, &sat_table[idx].el) != SGP4_OK)
+		return 1;
+	int32_t cnt = (los - aos) / 20 + 1;
+	uint8_t n = cnt < 2 ? 2 : cnt > SAT_SKY_MAX ? SAT_SKY_MAX : (uint8_t)cnt;
+	for (uint8_t k = 0; k < n; k++) {
+		sat_look_t l;
+		double t = (double)aos + (double)(los - aos) * (double)k / (double)(n - 1u);
+		if (sat_eval(&p, &sat_table[idx], t, &fobs, &l) != SGP4_OK)
+			return 1;
+		fsky_az[k] = (uint8_t)(l.az * (256.0f / 360.0f) + 0.5f);
+		fsky_el[k] = l.el <= 0.0f ? 0 : l.el >= 90.0f ? 90 : (uint8_t)(l.el + 0.5f);
+	}
+	return n;
+}
+
+static sat_pass_t real_pass_of(uint8_t k, int32_t from)
+{
+	sat_search_t sr;
+	sgp4_t p;
+	if (sgp4_init(&p, &sat_table[k].el) != SGP4_OK)
+		return (sat_pass_t){ 0, 0, 0, SAT_PASS_BAD };
+	sat_search_start(&sr, from);
+	while (!sat_search_step(&sr, &p, &sat_table[k], &fobs))
+		;
+	return sr.out;
+}
+
+/* The live look the fake service gives (az10 / el10) at second t of the pass */
+static void live_at(uint8_t k, int32_t t)
+{
+	sgp4_t p;
+	sat_look_t l;
+	if (sgp4_init(&p, &sat_table[k].el) == SGP4_OK && sat_eval(&p, &sat_table[k], (double)t, &fobs, &l) == SGP4_OK) {
+		fv.az10 = (int16_t)(l.az * 10.0f + 0.5f);
+		fv.el10 = (int16_t)(l.el * 10.0f + 0.5f);
+	}
+}
+
+/* The ISS's and SO-50's real passes from the observer; "now" a third into the ISS's (under way). real_min_el: the
+ * first ISS pass at least that high (a picture of a good pass) */
+static int real_min_el;
+static void prep_real(void)
+{
+	sat_observer(OLAT, OLON, 100, &fobs);
+	fv.pass[iss] = real_pass_of(iss, t0);
+	for (int k = 0; k < 60 && fv.pass[iss].max_el < real_min_el; k++)
+		fv.pass[iss] = real_pass_of(iss, fv.pass[iss].los + 60);
+	t0 = fv.pass[iss].aos + (fv.pass[iss].los - fv.pass[iss].aos) / 3;
+	fv.pass[so50] = real_pass_of(so50, t0);
+	fv.pass[ao91] = real_pass_of(ao91, t0);
+	fv.pass[po101] = real_pass_of(po101, t0);
+	live_at(iss, t0);
+}
+static void prep_real_held(void) { prep_real(); prep_held(); }
+static void prep_no_pos(void) { fv.clock = SAT_CLOCK_NO_POS; }
+static void prep_no_pass(void) { fv.pass[iss] = (sat_pass_t){ 0, 0, 0, SAT_PASS_NONE }; }
+static void prep_unknown(void) { fv.pass[iss] = (sat_pass_t){ 0, 0, 0, SAT_PASS_UNKNOWN }; }
+static void prep_bad_sky(void) { prep_real(); fake_pos = false; }
+static void prep_slow_sky(void) { prep_real(); fsky_wait = 2; }
+
+/* The plot as drawn is where it should be: the rise a filled square on the circle at the rise's azimuth, the set's
+ * open square at the set's, the highest point at the right radius, the live dot where the satellite is (or none) */
+static int sky_pixels(const char *name, uint8_t k, const sat_pass_t *pp, bool dot)
+{
+	int bad = 0;
+	char why[200] = "";
+	sgp4_t p;
+	sat_look_t l;
+	if (sky_n < 2) {
+		printf("FAIL %s (%s): the track was not made (%d points)\n", name, T("en", "tr"), sky_n);
+		return 1;
+	}
+	if (sky_r < 20 || sky_cx != gfx_width() / 2) {
+		snprintf(why, sizeof why, "plot r %d centre %d,%d", sky_r, sky_cx, sky_cy);
+		bad++;
+	}
+	int x0, y0, x1, y1;
+	sky_xy((int32_t)sky_az[0] * 36000 / 256, (int32_t)sky_el[0] * 100, &x0, &y0);
+	sky_xy((int32_t)sky_az[sky_n - 1] * 36000 / 256, (int32_t)sky_el[sky_n - 1] * 100, &x1, &y1);
+	if (gfx_get_pixel(x0, y0) != ui_col.rx) {
+		snprintf(why, sizeof why, "no rise mark at %d,%d", x0, y0);
+		bad++;
+	}
+	if (gfx_get_pixel(x1 - 2, y1) != ui_col.tx || gfx_get_pixel(x1, y1) != ui_col.bg) {
+		snprintf(why, sizeof why, "no set mark at %d,%d", x1, y1);
+		bad++;
+	}
+	/* the ends against the look angles at AOS and LOS, worked out here (a pixel or three: 360/256 degrees at r) */
+	if (sgp4_init(&p, &sat_table[k].el) != SGP4_OK)
+		return 1;
+	for (int e = 0; e < 2; e++) {
+		int32_t t = e ? pp->los : pp->aos;
+		sat_eval(&p, &sat_table[k], (double)t, &fobs, &l);
+		double el = l.el < 0.0f ? 0.0 : (double)l.el;
+		double rr = sky_r * (90.0 - el) / 90.0, a = (double)l.az * 3.14159265358979 / 180.0;
+		double ex = sky_cx + rr * sin(a), ey = sky_cy - rr * cos(a);
+		int px = e ? x1 : x0, py = e ? y1 : y0;
+		if (fabs(ex - px) > 3.5 || fabs(ey - py) > 3.5) {
+			snprintf(why, sizeof why, "%s mark %d,%d, should be near %.1f,%.1f (az %.1f el %.1f)", e ? "set" : "rise", px, py,
+				 ex, ey, l.az, l.el);
+			bad++;
+		}
+		/* the rise and set are on the horizon circle */
+		double d = hypot(px - sky_cx, py - sky_cy);
+		if (fabs(d - sky_r) > 3.0) {
+			snprintf(why, sizeof why, "%s mark at radius %.1f, the circle %d", e ? "set" : "rise", d, sky_r);
+			bad++;
+		}
+	}
+	/* the highest point: the elevation the search found, at the radius that means */
+	int top = 0;
+	for (int i = 1; i < sky_n; i++)
+		if (sky_el[i] > sky_el[top])
+			top = i;
+	int tx, ty;
+	sky_xy((int32_t)sky_az[top] * 36000 / 256, (int32_t)sky_el[top] * 100, &tx, &ty);
+	double want = sky_r * (90.0 - pp->max_el) / 90.0, got = hypot(tx - sky_cx, ty - sky_cy);
+	if (abs(sky_el[top] - pp->max_el) > 1 || fabs(got - want) > 3.0) {
+		snprintf(why, sizeof why, "top point el %d (search %d) at radius %.1f, want %.1f", sky_el[top], pp->max_el, got,
+			 want);
+		bad++;
+	}
+	/* the live dot: the warning colour at the satellite's place (the same look the page prints), none when it is not up */
+	int dx, dy;
+	sky_xy((int32_t)fv.az10 * 10, (int32_t)fv.el10 * 10, &dx, &dy);
+	bool has = gfx_get_pixel(dx, dy) == ui_col.warn;
+	if (dot && (!has || hypot(dx - sky_cx, dy - sky_cy) > sky_r)) {
+		snprintf(why, sizeof why, "no live dot at %d,%d", dx, dy);
+		bad++;
+	}
+	if (!dot && fv.el10 < 0 && has) {
+		snprintf(why, sizeof why, "a live dot below the horizon");
+		bad++;
+	}
+	if (bad)
+		printf("FAIL %s (%s%s): %s\n", name, T("en", "tr"), large ? ", large" : "", why);
+	return bad;
+}
+
+static int sky_checks(void)
+{
+	int bad = 0;
+	const char *n;
+#define ISS_SKY_CHECK(c, name) do { if (!(c)) { printf("FAIL %s (%s%s): %s\n", name, T("en", "tr"), large ? ", large" : "", #c); bad++; } } while (0)
+	/* Tools > ISS, key 2: the plot, its texts, the live dot; Back returns to the page */
+	bad += iss_flow(n = "Sky from ISS", ISSP, prep_real, "2 wait:1200",
+			T("screen=iss shows=Sky shows=ISS shows=AOS_ shows=LOS_ shows=Max_ shows=LOS_in_ shows=Az_ shows=El_ "
+			  "hides=Before_AOS shows=Back",
+			  "screen=iss shows=ISS shows=AOS_ shows=LOS_ shows=Maks_ shows=LOS'a_ shows=Az_ shows=El_ "
+			  "hides=Before_AOS shows=Geri"), true);
+	bad += sky_pixels(n, iss, &fv.pass[iss], true);
+	ISS_SKY_CHECK(sky_n >= 2 && sky_n <= SAT_SKY_MAX, n);
+	ISS_SKY_CHECK(starts == 0 && track_calls == 0 && alarm_calls == 0 && cancels == 0, n);
+	/* the live dot moves with the look angles the service gives (a second later, the satellite elsewhere) */
+	{
+		int ox, oy, nx, ny;
+		sky_xy((int32_t)fv.az10 * 10, (int32_t)fv.el10 * 10, &ox, &oy);
+		live_at(iss, fv.pass[iss].aos + 2 * (fv.pass[iss].los - fv.pass[iss].aos) / 3);
+		char err[300];
+		sim_run("wait:1200", err, sizeof err);
+		sky_xy((int32_t)fv.az10 * 10, (int32_t)fv.el10 * 10, &nx, &ny);
+		ISS_SKY_CHECK(hypot(nx - ox, ny - oy) > 8 && gfx_get_pixel(nx, ny) == ui_col.warn &&
+			      gfx_get_pixel(ox, oy) != ui_col.warn, "Sky: the live dot moves");
+	}
+	bad += iss_flow(n = "Sky from ISS: Back", ISSP, prep_real, "2 wait:300 back wait:300",
+			T("screen=iss shows=Before_AOS hides=Max_", "screen=iss shows=AOS hides=Maks_"), false);
+	bad += iss_flow(n = "Sky from ISS: Back twice leaves", ISSP, prep_real, "2 wait:300 back back wait:300",
+			"hides=Before_AOS", false);
+	/* OK on the plot does not track; the page's keys are not the plot's */
+	bad += iss_flow(n = "Sky from ISS: OK and # do nothing", ISSP, prep_real, "2 wait:300 ok 1 wait:300",
+			T("screen=iss shows=Max_", "screen=iss shows=Maks_"), false);
+	ISS_SKY_CHECK(starts == 0 && track_calls == 0 && !iss_aprs, n);
+	/* not yet risen: the dot absent, the time to the rise */
+	bad += iss_flow(n = "Sky from ISS: before the rise", ISSP, NULL, "2 wait:1200",
+			T("screen=iss shows=AOS_in_", "screen=iss shows=AOS'a_"), true);
+	/* Tools > Satellites: key 2 on the focus (the ISS, then the next one down) */
+	bad += iss_flow(n = "Sky from Satellites", SATS, prep_real, "2 wait:1200",
+			T("screen=satellites shows=Sky shows=ISS shows=AOS_ shows=Max_ shows=LOS_in_ shows=Az_ hides=Pass_alarm",
+			  "screen=satellites shows=ISS shows=AOS_ shows=Maks_ shows=LOS'a_ shows=Az_"), true);
+	bad += sky_pixels(n, iss, &fv.pass[iss], true);
+	bad += iss_flow(n = "Sky from Satellites: another satellite", SATS, prep_real, "down 2 wait:1200",
+			T("screen=satellites shows=Sky shows=Max_ shows=AOS_", "screen=satellites shows=Maks_"), true);
+	ISS_SKY_CHECK(sel != iss, n);
+	bad += sky_pixels(n, sel, &fv.pass[sel], false);
+	bad += iss_flow(n = "Sky from Satellites: Back to the list", SATS, prep_real, "2 wait:300 back wait:300",
+			T("screen=satellites shows=Satellites hides=Max_ shows=OK_track", "screen=satellites hides=Maks_"), false);
+	bad += iss_flow(n = "Sky from Satellites: 0 is still the alarm", SATS, prep_real, "0 wait:300",
+			T("shows=Pass_alarm hides=Max_", "hides=Maks_"), false);
+	/* Under a held track (auto track): the plot is shown, the track stays; Back is the plot's, not the track's */
+	bad += iss_flow(n = "Sky under a held track, from ISS", ISSP, prep_real_held, "2 wait:1200",
+			T("screen=iss shows=Max_ shows=Az_", "screen=iss shows=Maks_"), true);
+	ISS_SKY_CHECK(cancels == 0 && fv.track == iss && fake_auto, n);
+	bad += iss_flow(n = "Sky under a held track, from Satellites", SATS, prep_real_held, "2 wait:1200 back wait:300",
+			T("screen=satellites shows=Satellites hides=Max_", "screen=satellites hides=Maks_"), false);
+	ISS_SKY_CHECK(cancels == 0 && fv.track == iss && fake_auto, n);
+	/* the stopped cases: no GPS time, no position, no pass, still searching, elements that do not run */
+	bad += iss_flow("Sky: no GPS time", ISSP, prep_no_clock, "2 wait:1200",
+			T("screen=iss shows=Waiting_for_the_GPS_time shows=Needs_a_GPS_fix shows=typed_position shows=Back hides=Max_",
+			  "screen=iss shows=GPS hides=Maks_"), true);
+	bad += iss_flow("Sky: no position", ISSP, prep_no_pos, "2 wait:1200",
+			T("screen=iss shows=Waiting_for_a_GPS shows=Needs_a_GPS_fix shows=typed_position hides=Max_",
+			  "screen=iss shows=GPS hides=Maks_"), true);
+	bad += iss_flow("Sky: no pass soon", ISSP, prep_no_pass, "2 wait:1200",
+			T("screen=iss shows=no_pass_soon hides=Max_", "screen=iss hides=Maks_"), true);
+	bad += iss_flow("Sky: still looking", ISSP, prep_unknown, "2 wait:1200",
+			T("screen=iss shows=Looking_for_the_pass hides=Max_", "screen=iss hides=Maks_"), true);
+	bad += iss_flow("Sky: elements that do not run", ISSP, prep_bad_sky, "2 wait:1200",
+			T("screen=iss shows=bad_elements hides=Max_", "screen=iss hides=Maks_"), true);
+	/* the radio task still working the points out: an ellipsis, then the plot a moment later */
+	bad += iss_flow("Sky: points not ready yet", ISSP, prep_slow_sky, "2",
+			T("screen=iss shows=Sky hides=Max_ hides=bad_elements", "screen=iss hides=Maks_ hides=bad_elements"),
+			false);
+	bad += iss_flow("Sky: points ready a moment later", ISSP, prep_slow_sky, "2 wait:3500",
+			T("screen=iss shows=Max_ shows=Az_", "screen=iss shows=Maks_"), false);
+	bad += iss_flow("Sky from Satellites: no position", SATS, prep_no_pos, "2 wait:1200",
+			T("screen=satellites shows=Waiting_for_a_GPS shows=Needs_a_GPS_fix shows=typed_position", "screen=satellites"),
+			true);
+	/* left alone: the Satellites page's key 2 without a clock still goes to the plot's message, Back returns */
+	bad += iss_flow(n = "Sky: no position, Back", SATS, prep_no_pos, "2 wait:300 back wait:300",
+			T("screen=satellites shows=Satellites", "screen=satellites shows=Uydular"),
+			false);
+	return bad;
+}
+
 int main(int argc, char **argv)
 {
 	iss = index_of(25544u);
@@ -551,6 +806,16 @@ int main(int argc, char **argv)
 		char err[300];
 		fake_reset(true);
 		sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_M);
+		if (argc > 3 && !strcmp(argv[3], "high"))
+			real_min_el = 60;
+		if (argc > 3 && (!strcmp(argv[3], "real") || !strcmp(argv[3], "high")))
+			prep_real();	/* the real passes (a third into the ISS's) */
+		if (argc > 3 && !strcmp(argv[3], "nopos"))
+			prep_no_pos();
+		if (argc > 3 && !strcmp(argv[3], "noclock"))
+			prep_no_clock();
+		if (argc > 3 && !strcmp(argv[3], "nopass"))
+			prep_no_pass();
 		sim_run(argv[1], err, sizeof err);
 		ui_app_status_t st;
 		ui_app_status(&st);
@@ -563,7 +828,7 @@ int main(int argc, char **argv)
 	}
 	const sat_flow_t checks[] = {
 		{ { "Sat list: soonest first, the ISS can be tracked", SATS, "",
-		    "screen=satellites shows=ISS shows=SO-50 shows=AO-91 shows=OK_track__#_APRS_via_ISS", 0, false },
+		    "screen=satellites shows=ISS shows=SO-50 shows=AO-91 shows=OK_track__#_APRS__2_sky", 0, false },
 		  true, SAT_NONE, SAT_NONE, 0, 0, -1, -1 },
 		{ { "Sat live lines: Az/El, range rate, Doppler in kHz", SATS, "",
 		    "shows=Az_123 shows=El_-1.2 shows=2345_km__-5.43_km/s shows=+7.9_kHz shows=OK:_track_in_the_VFO", 0, false },
@@ -574,7 +839,7 @@ int main(int argc, char **argv)
 		  true, 0, -1, 0, 0, -1, -1 },
 		{ { "Sat stop tracking", SATS, "ok ok", "toast=Tracking_off:_VFO_stays", 2, false },
 		  true, SAT_NONE, -1, 0, 0, -1, -1 },
-		{ { "Sat nothing to track: OK alarm", SATS, "down", "shows=^v_pick__OK_alarm", 1, false },
+		{ { "Sat nothing to track: OK alarm", SATS, "down", "shows=OK_alarm__2_sky__<>_UTC", 1, false },
 		  true, SAT_NONE, SAT_NONE, 0, 0, -1, -1 },
 		{ { "Sat alarm page", SATS, "down ok",
 		    "screen=satellites shows=Pass_alarm shows=For shows=SO-50 shows=Before_AOS shows=5_min "
@@ -639,11 +904,15 @@ int main(int argc, char **argv)
 		sat_fails += fails != before;
 	}
 	fails += auto_checks();
-	for (int l = 0; l < 2; l++) {
-		turkish = l == 1;
-		fails += iss_checks();
+	for (int l = 0; l < 4; l++) {
+		turkish = l & 1;
+		large = l >> 1;
+		if (!large)
+			fails += iss_checks();
+		fails += sky_checks();
 	}
 	turkish = false;
+	large = false;
 	lang_set(lang_find('e' << 8 | 'n'));
 	/* The layout check on the list (tracking, alarm armed) and on the page (Every pass, auto track APRS) */
 	static const char *const layouts[] = { SATS "ok wait:2500", PAGE "ok wait:2500", PAGE "left left ok wait:2500",

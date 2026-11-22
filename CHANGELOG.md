@@ -3,6 +3,28 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## v1.0.0-beta.9 (candidate, not released yet)
+
+- Sky plot (owner's request 2026-11-22; host-tested, not yet checked on the radio, rows SK-1..SK-6): key `2` on Tools >
+  ISS and on Tools > Satellites (the satellite in focus) opens a polar plot of its next pass (or the one under way)
+  from your location: north up, the centre is the zenith, the edge the horizon, rings at 30 and 60 degrees, N / E / S /
+  W marks (Turkish K / D / G / B). The track is a line from the rise (filled square) to the set (open square) worked
+  out from the same prediction as the pass list (no new orbit model: the points are `sat_eval` at about 20 s steps,
+  64 at most, kept as 128 B so a redraw costs no SGP4); the satellite now is a filled dot in the warning color that
+  moves with the live look (once a second). Under the plot: AOS and LOS times, the top elevation and the time to the
+  next event ("Max 47°  LOS in 7:00"), the live azimuth and elevation. Back returns to the page. Nothing here tunes or
+  transmits: OK does nothing on the plot, and an auto track or the AOS pop-up carry on as before; under a held auto
+  track the plot may be shown (on Tools > Satellites key `2` and the plot's Back are not taken as the "any key ends the
+  track" key). Messages instead of a plot: "Waiting for the GPS time", "Waiting for a GPS position", "no pass soon",
+  "Looking for the pass", "bad elements". The key is named on the pages: "2 sky" (Turkish "2 gök") ends Tools >
+  Satellites' hint row (the ISS row's hint loses "via ISS", the others "^v pick", for the room) and sits at the right of
+  the "145.825 APRS" line on Tools > ISS. FLASH +3,088 B (876,068 B, 97.22 %), RAM +184 B (2,288 B free), stacks
+  unchanged: the points are worked out by the radio task (the UI task has no stack for SGP4).
+- Satellites and the sky plot now also use the position the APRS settings hold when the GPS has the time but no fix (a
+  typed position, Settings > Location, as the beacons use it; with position ambiguity set the same blur applies, and
+  the altitude is taken as 0). The time still comes from the GPS alone: the radio has no clock of its own, so with no
+  GPS time nothing can be predicted. The Satellites page's hint now reads "Needs a GPS fix or a typed position".
+
 ## v1.0.0-beta.8 (2026-11-22, beta: not yet confirmed on the radio)
 
 - Upstream RadioFoundry fixes, second round (docs/plus.md "Upstream RadioFoundry fixes"; host-tested, not yet

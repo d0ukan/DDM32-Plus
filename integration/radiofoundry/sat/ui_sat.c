@@ -25,6 +25,7 @@
  * 1: the other downlink (switched under a track too). */
 #include "config.h"
 #if CONFIG_SATELLITES
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "ui_nav.h"
@@ -44,7 +45,7 @@ static uint8_t sel;
 static int16_t tz_min = 180;
 /* The pass alarm page: open, its row, what it shows (the alarm's own values once armed); Every pass and Auto track
  * (kept in the settings: UI_SET_SAT_NOTE / UI_SET_SAT_AUTO), and whether the stored alarm was armed at power on */
-static bool alarm_page, a_every, note_loaded;
+static bool alarm_page, a_every, note_loaded, sky_page;	/* sky_page: the sky plot is open (below) */
 static uint8_t a_row, a_for, a_lead = 1, a_el, a_auto;
 static const uint8_t lead_min[] = { 2, 5, 10 };
 static const uint8_t min_el[] = { 0, 10, 20, 30, 45 };
@@ -650,7 +651,8 @@ bool ui_sat_auto_key(const input_event_t *ev)
 		ui_dirty();
 		return true;
 	}
-	if (!sat_auto_on() || (!pass && ui_depth() != 0 && ui_frame()->scr == SCR_ISS))
+	if (!sat_auto_on() || (!pass && ui_depth() != 0 && (ui_frame()->scr == SCR_ISS ||
+	    (ui_frame()->scr == SCR_SATELLITES && (sky_page || ev->action == ACT_DIGIT_2)))))
 		return false;
 	if (pass ? ev->gesture != GESTURE_DOWN :
 	    ev->gesture != GESTURE_PRESS && ev->gesture != GESTURE_LONG && ev->action != ACT_ENC_STEP)
@@ -659,6 +661,224 @@ bool ui_sat_auto_key(const input_event_t *ev)
 	ui_toast(TR("Auto track off: radio back"));
 	ui_dirty();
 	return !pass;
+}
+
+/* --- The sky plot (key 2 on Tools > Satellites and Tools > ISS) --- */
+
+/* "Az 123°  El 23.4°" (the live look) */
+static void sb_azel(sbuf_t *b, const sat_view_t *v)
+{
+	sb_str(b, TR("Az "));
+	sb_u32(b, (uint32_t)(v->az10 + 5) / 10u % 360u, 1);
+	sb_str(b, GLYPH_DEGREE "  ");
+	sb_str(b, TR("El "));
+	if (v->el10 < 0)
+		sb_chr(b, '-');
+	sb_u32(b, (uint32_t)abs(v->el10) / 10u, 1);
+	sb_chr(b, '.');
+	sb_u32(b, (uint32_t)abs(v->el10) % 10u, 1);
+	sb_str(b, GLYPH_DEGREE);
+}
+
+/* The pass's track comes from the radio task (sat_sky): point k's azimuth in 360/256 degrees and elevation in degrees,
+ * evenly from the rise to the set. The UI task cannot run SGP4 itself (its stack has no room: the cos in it is 900
+ * bytes deep), so the points live in the service (64 x 2 B) and are drawn from there */
+static uint8_t sky_idx = SAT_NONE;	/* the satellite the page shows (Satellites: the focus; Tools > ISS: the ISS) */
+static uint8_t sky_n;			/* the points as drawn last: their count (the tests read it) ... */
+static const uint8_t *sky_az, *sky_el;	/* ... and where they are */
+static int sky_cx, sky_cy, sky_r;	/* the plot as drawn: centre and radius, pixels */
+
+static void sky_open(uint8_t i)
+{
+	sky_page = true;
+	sky_idx = i;
+	ui_dirty();
+}
+
+/* The pixel of an azimuth (degrees x 100, from north, clockwise) and elevation (degrees x 100) */
+static void sky_xy(int32_t az100, int32_t el100, int *x, int *y)
+{
+	double a = (double)az100 * (3.14159265358979323846 / 18000.0);
+	double rr = (double)sky_r * (double)(9000 - el100) / 9000.0;
+	*x = sky_cx + (int)lrint(rr * sin(a));
+	*y = sky_cy - (int)lrint(rr * cos(a));
+}
+
+static void sky_line(int x0, int y0, int x1, int y1, color_t c)
+{
+	int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1, er = dx + dy;
+	for (;;) {
+		gfx_pixel(x0, y0, c);
+		if (x0 == x1 && y0 == y1)
+			break;
+		int e2 = 2 * er;
+		if (e2 >= dy) {
+			er += dy;
+			x0 += sx;
+		}
+		if (e2 <= dx) {
+			er += dx;
+			y0 += sy;
+		}
+	}
+}
+
+/* A circle (midpoint algorithm) */
+static void sky_ring(int cx, int cy, int r, color_t c)
+{
+	int x = r, y = 0, er = 1 - r;
+	while (x >= y) {
+		gfx_pixel(cx + x, cy + y, c);
+		gfx_pixel(cx - x, cy + y, c);
+		gfx_pixel(cx + x, cy - y, c);
+		gfx_pixel(cx - x, cy - y, c);
+		gfx_pixel(cx + y, cy + x, c);
+		gfx_pixel(cx - y, cy + x, c);
+		gfx_pixel(cx + y, cy - x, c);
+		gfx_pixel(cx - y, cy - x, c);
+		y++;
+		if (er < 0) {
+			er += 2 * y + 1;
+		} else {
+			x--;
+			er += 2 * (y - x) + 1;
+		}
+	}
+}
+
+/* A text line, wrapped at its spaces to the screen's width; the y under it */
+static int sky_row(const font_t *f, int y, const char *text, color_t c)
+{
+	char out[48];
+	while (*text) {
+		strncpy(out, text, sizeof out - 1);
+		out[sizeof out - 1] = 0;
+		char *sp;
+		while (gfx_text_width(f, out) > gfx_width() - 2 && (sp = strrchr(out, ' ')) != NULL)
+			*sp = 0;
+		gfx_text(f, 0, y, out, c);
+		y += f->h + 1;
+		text += strlen(out);
+		while (*text == ' ')
+			text++;
+	}
+	return y;
+}
+
+/* What stops the plot: the line, and what to do about it */
+static void sky_note(int y, const char *what, const char *hint)
+{
+	const font_t *s = ui_layout.small;
+	y = sky_row(s, y, what, ui_col.warn);
+	if (hint != NULL)
+		sky_row(s, y, hint, ui_col.dim);
+}
+
+/* The disc, the 30 and 60 degree rings, the cross, N / E / S / W; the plot's geometry into sky_cx / sky_cy / sky_r */
+static void __attribute__((noinline)) sky_frame(int y, int h)
+{
+	const font_t *s = ui_layout.small;
+	int w = gfx_width();
+	int r = (h - 2 * s->h - 2) / 2, rw = (w - 2 * (s->w + 3)) / 2;
+	if (r > rw)
+		r = rw;
+	if (r < 12)
+		r = 12;
+	sky_r = r;
+	sky_cx = w / 2;
+	sky_cy = y + s->h + 1 + r;
+	gfx_hline(sky_cx - r, sky_cy, 2 * r + 1, ui_col.line);
+	gfx_vline(sky_cx, sky_cy - r, 2 * r + 1, ui_col.line);
+	sky_ring(sky_cx, sky_cy, r / 3, ui_col.line);
+	sky_ring(sky_cx, sky_cy, r * 2 / 3, ui_col.line);
+	sky_ring(sky_cx, sky_cy, r, ui_col.dim);
+	const char *n = TR("N"), *e = TR("E"), *so = TR("S"), *wv = TR("W");
+	gfx_text(s, sky_cx - gfx_text_width(s, n) / 2, sky_cy - r - s->h - 1, n, ui_col.fg);
+	gfx_text(s, sky_cx - gfx_text_width(s, so) / 2, sky_cy + r + 2, so, ui_col.dim);
+	gfx_text(s, sky_cx + r + 3, sky_cy - s->h / 2, e, ui_col.dim);
+	gfx_text(s, sky_cx - r - 3 - gfx_text_width(s, wv), sky_cy - s->h / 2, wv, ui_col.dim);
+}
+
+/* The pass's track: a line from the rise to the set, the rise a filled square, the set an open one */
+static void __attribute__((noinline)) sky_pass(void)
+{
+	int x0 = 0, y0 = 0, x1 = 0, y1 = 0, xr = 0, yr = 0;
+	for (uint8_t k = 0; k < sky_n; k++) {
+		sky_xy((int32_t)sky_az[k] * 36000 / 256, (int32_t)sky_el[k] * 100, &x1, &y1);
+		if (k)
+			sky_line(x0, y0, x1, y1, ui_col.fg);
+		else
+			xr = x1, yr = y1;
+		x0 = x1;
+		y0 = y1;
+	}
+	gfx_fill(xr - 2, yr - 2, 5, 5, ui_col.rx);
+	gfx_fill(x1 - 2, y1 - 2, 5, 5, ui_col.bg);
+	gfx_rect(x1 - 2, y1 - 2, 5, 5, ui_col.tx);
+}
+
+/* The page for satellite i's pass, under the title at y (the screens' own; v: their view, taken after sat_seen(i)); the
+ * texts under the plot: AOS / LOS times, the top and the time to the next event, the live azimuth and elevation */
+static void __attribute__((noinline)) sky_draw(const sat_view_t *v, uint8_t i, int y)
+{
+	char buf[40];
+	sbuf_t b;
+	const font_t *s = ui_layout.small;
+	const sat_pass_t *p = &v->pass[i < sat_count ? i : 0];
+	sky_n = 0;
+	if (v->clock != SAT_CLOCK_OK || i >= sat_count) {
+		sky_note(y, i >= sat_count ? TR("bad elements") : v->clock == SAT_CLOCK_NONE ? TR("Waiting for the GPS time") :
+			 TR("Waiting for a GPS position"), i >= sat_count ? NULL : TR("Needs a GPS fix or a typed position"));
+	} else if (p->state != SAT_PASS_OK) {
+		sky_note(y, p->state == SAT_PASS_NONE ? TR("no pass soon") : p->state == SAT_PASS_BAD ? TR("bad elements") :
+			 TR("Looking for the pass"), NULL);
+	} else if ((sky_n = sat_sky(i, p->aos, p->los, &sky_az, &sky_el)) < 2) {
+		/* 0: the radio task is working it out (a moment), 1: it cannot */
+		sky_note(y, sky_n ? TR("bad elements") : GLYPH_ELLIPSIS, NULL);
+		sky_n = 0;
+	} else {
+		int th = 3 * (s->h + 1) + 2;
+		sky_frame(y, ui_layout.hint_y - y - th);
+		sky_pass();
+		bool up = p->aos <= v->now;
+		if (v->live == i && v->live_ok && v->el10 >= 0) {
+			int x, yy;
+			sky_xy((int32_t)v->az10 * 10, (int32_t)v->el10 * 10, &x, &yy);
+			gfx_round_fill(x - 3, yy - 3, 7, 7, ui_col.warn);
+		}
+		y = sky_cy + sky_r + s->h + 4;
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, "AOS ");
+		sb_hhmm_at(&b, p->aos);
+		sb_str(&b, "  LOS ");
+		sb_hhmm_at(&b, p->los);
+		y = sky_row(s, y, buf, ui_col.fg);
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, TR("Max "));
+		sb_deg(&b, p->max_el);
+		sb_str(&b, "  ");
+		sb_str(&b, up ? TR("LOS in ") : TR("AOS in "));
+		sb_until(&b, (up ? p->los : p->aos) - v->now);
+		y = sky_row(s, y, buf, up ? ui_col.rx : ui_col.fg);
+		if (v->live == i && v->live_ok) {
+			sb_init(&b, buf, sizeof buf);
+			sb_azel(&b, v);
+			sky_row(s, y, buf, v->el10 >= 0 ? ui_col.warn : ui_col.dim);
+		}
+	}
+	ui_draw_bottom(&ui_st, TR("Back"));
+	ui_draw_banner(&ui_st);
+}
+
+/* Back returns; the page has no other keys (OK does not track from here) */
+static bool sky_key(const input_event_t *ev)
+{
+	if (ev->action == ACT_BACK && ev->gesture == GESTURE_PRESS) {
+		sky_page = false;
+		ui_dirty();
+		return true;
+	}
+	return false;
 }
 
 /* --- The screen --- */
@@ -670,12 +890,17 @@ static void sat_draw(void)
 	sat_view_t v;
 	uint8_t idx[SAT_MAX];
 	gfx_clear(ui_col.bg);
-	int y = ui_draw_top(ui_view(), &ui_st, alarm_page ? TR("Pass alarm") : TR("Satellites"), "") + 2;
+	int y = ui_draw_top(ui_view(), &ui_st, sky_page ? TR("Sky") : alarm_page ? TR("Pass alarm") : TR("Satellites"),
+			    sky_page && sky_idx < sat_count ? sat_table[sky_idx].name : "") + 2;
 	const font_t *s = ui_layout.small, *m = ui_layout.medium;
 	if (sel >= sat_count)
 		sel = 0;
 	sat_seen(sel);
 	sat_view(&v);
+	if (sky_page) {
+		sky_draw(&v, sky_idx, y);
+		return;
+	}
 	if (alarm_page) {
 		alarm_draw(y + 2, &v);
 		ui_draw_bottom(&ui_st, armed(&v) ? TR("OK off  <> change") : TR("OK arm  ^v<> change"));
@@ -685,7 +910,7 @@ static void sat_draw(void)
 	if (v.clock != SAT_CLOCK_OK) {
 		gfx_text(s, 0, y, v.clock == SAT_CLOCK_NONE ? TR("Waiting for the GPS time") : TR("Waiting for a GPS position"),
 			 ui_col.warn);
-		gfx_text(s, 0, y + s->h + 2, TR("Needs a GPS fix: Settings > Location"), ui_col.dim);
+		gfx_text(s, 0, y + s->h + 2, TR("Needs a GPS fix or a typed position"), ui_col.dim);
 		ui_draw_bottom(&ui_st, TR("OK alarm  Back"));	/* OK opens the alarm page here too (sat_key) */
 		ui_draw_banner(&ui_st);
 		return;
@@ -734,11 +959,15 @@ static void sat_draw(void)
 	gfx_hline(0, y + 2, gfx_width(), ui_col.line);
 	live(y + 5, &v);
 	bool can = can_track(&v, sel);
-	ui_draw_bottom(&ui_st, v.track == sel && sat_table[sel].arm10 ? TR("OK stop  # arm tone  <> UTC")
-				: is_iss(sel) ? (v.track == sel ? TR("OK stop  # APRS via ISS")
-						: can ? TR("OK track  # APRS via ISS") : TR("OK alarm  # APRS via ISS"))
-				: v.track == sel ? TR("OK stop  ^v pick  <> UTC")
-				: can ? TR("^v pick  OK track  <> UTC") : TR("^v pick  OK alarm  <> UTC"));
+	/* "2 sky" in each hint; a hint too wide drops its last groups first (ui_draw_hint) */
+	ui_draw_bottom(&ui_st, v.track == sel && sat_table[sel].arm10 ?
+		       TR("OK stop  # tone  2 sky")
+		       : is_iss(sel) ? (v.track == sel ? TR("OK stop  # APRS  2 sky")
+					: can ? TR("OK track  # APRS  2 sky")
+					: TR("OK alarm  # APRS  2 sky"))
+		       : v.track == sel ? TR("OK stop  2 sky  <> UTC")
+		       : can ? TR("OK track  2 sky  <> UTC")
+		       : TR("OK alarm  2 sky  <> UTC"));
 	ui_draw_banner(&ui_st);
 }
 
@@ -746,9 +975,15 @@ static bool sat_key(const input_event_t *ev)
 {
 	bool press = ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
 	sat_view_t v;
+	if (sky_page)
+		return sky_key(ev);
 	if (alarm_page) {
 		sat_view(&v);
 		return alarm_key(ev, &v);
+	}
+	if (ev->action == ACT_DIGIT_2 && ev->gesture == GESTURE_PRESS) {
+		sky_open(sel);
+		return true;
 	}
 	if (press && (ev->action == ACT_NAV_UP || ev->action == ACT_NAV_DOWN || ev->action == ACT_ENC_STEP)) {
 		uint8_t idx[SAT_MAX], pos = 0;
@@ -804,6 +1039,7 @@ static bool sat_key(const input_event_t *ev)
 static void sat_enter(void)
 {
 	alarm_page = false;
+	sky_page = false;
 	sat_seen(sel);
 	ui_dirty();
 }
@@ -857,16 +1093,7 @@ static int __attribute__((noinline)) iss_pass(int y, const sat_view_t *v, uint8_
 	bool live = v->live == i && v->live_ok;
 	if (live) {
 		sb_init(&b, buf, sizeof buf);
-		sb_str(&b, TR("Az "));
-		sb_u32(&b, (uint32_t)(v->az10 + 5) / 10u % 360u, 1);
-		sb_str(&b, GLYPH_DEGREE "  ");
-		sb_str(&b, TR("El "));
-		if (v->el10 < 0)
-			sb_chr(&b, '-');
-		sb_u32(&b, (uint32_t)abs(v->el10) / 10u, 1);
-		sb_chr(&b, '.');
-		sb_u32(&b, (uint32_t)abs(v->el10) % 10u, 1);
-		sb_str(&b, GLYPH_DEGREE);
+		sb_azel(&b, v);
 		gfx_text(s, 0, y, buf, v->el10 >= 0 ? ui_col.fg : ui_col.dim);
 		y += s->h + 1;
 	}
@@ -875,6 +1102,7 @@ static int __attribute__((noinline)) iss_pass(int y, const sat_view_t *v, uint8_
 	gfx_text(s, 2 * s->w, y, TR("145.800 voice / SSTV"), iss_aprs ? ui_col.dim : ui_col.fg);
 	y += s->h + 1;
 	gfx_text(s, 0, y, iss_aprs ? "> 145.825 APRS" : "  145.825 APRS", iss_aprs ? ui_col.fg : ui_col.dim);
+	gfx_text(s, gfx_width() - gfx_text_width(s, TR("2 sky")) - 2, y, TR("2 sky"), ui_col.dim);	/* the sky plot's key */
 	y += s->h + 1;
 	if (live) {
 		uint32_t hz = iss_aprs ? SAT_ISS_APRS_HZ : SAT_ISS_VOICE_HZ;
@@ -897,12 +1125,16 @@ static void iss_draw(void)
 	sbuf_t b;
 	sat_view_t v;
 	gfx_clear(ui_col.bg);
-	int y = ui_draw_top(ui_view(), &ui_st, "ISS", "") + 2;
+	int y = ui_draw_top(ui_view(), &ui_st, sky_page ? TR("Sky") : "ISS", sky_page ? "ISS" : "") + 2;
 	const font_t *s = ui_layout.small;
 	uint8_t i = iss_index();
 	if (i != SAT_NONE)
 		sat_seen(i);
 	sat_view(&v);
+	if (sky_page) {
+		sky_draw(&v, i, y);
+		return;
+	}
 	y = iss_pass(y, &v, i);
 	gfx_hline(0, y + 1, gfx_width(), ui_col.line);
 	y = alarm_rows(y + 3, 1, s) + 2;
@@ -924,7 +1156,8 @@ static void iss_draw(void)
 		sb_str(&b, TR("Track from AOS-10 min"));
 	}
 	gfx_text(s, 0, y, buf, c);
-	ui_draw_bottom(&ui_st, v.track != SAT_NONE ? TR("OK stop  # APRS  1 freq") : TR("OK track  # APRS  1 freq"));
+	ui_draw_bottom(&ui_st, v.track != SAT_NONE ? TR("OK stop  # APRS  1 freq")
+						   : TR("OK track  # APRS  1 freq"));
 	ui_draw_banner(&ui_st);
 }
 
@@ -947,6 +1180,12 @@ static bool iss_key(const input_event_t *ev)
 	bool press = ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
 	sat_view_t v;
 	uint8_t i = iss_index();
+	if (sky_page)
+		return sky_key(ev);
+	if (ev->action == ACT_DIGIT_2 && ev->gesture == GESTURE_PRESS) {
+		sky_open(i);
+		return true;
+	}
 	if (press && (ev->action == ACT_NAV_UP || ev->action == ACT_NAV_DOWN)) {
 		a_row = (uint8_t)(1u + (a_row - 1u + (ev->action == ACT_NAV_DOWN ? 1u : A_ROWS - 2u)) % (A_ROWS - 1u));
 		ui_dirty();
@@ -999,6 +1238,7 @@ static void iss_enter(void)
 	else
 		a_every = false;	/* another's (or none): shown, not edited (iss_draw) */
 	alarm_page = false;
+	sky_page = false;
 	a_row = 1;
 	a_for = i;
 	ui_dirty();
