@@ -6,6 +6,10 @@
 
 #include "hal_time.h"	/* hal_millis (radio_sm.c has it only through the APRS headers) */
 
+/* The band plan (radio/xband.h, built with DOTA): 0 (XB_R_OK) for an amateur frequency that is no repeater, satellite,
+ * APRS or PMR446 frequency. The page checks the session frequency; the radio core checks it again before keying */
+uint8_t xband_check_hz(uint32_t hz);
+
 static radio_sm_t *dota_sm;
 static bool dota_owned;		/* the radio is on the session's channel */
 
@@ -22,7 +26,7 @@ static bool dota_key(bool on)
 		tune(sm, now);
 		return true;
 	}
-	if (sm->set.tx_inhibit || !board_in_band(ch->tx_hz, true)) {
+	if (sm->set.tx_inhibit || !board_in_band(ch->tx_hz, true) || xband_check_hz(ch->tx_hz) != 0) {
 		return false;
 	}
 	sm->view.state = RS_TX;		/* speaker off, red LED on, before keying */
@@ -144,7 +148,8 @@ static bool dota_rf_poll(radio_sm_t *sm, const radio_status_t *st, uint32_t now_
 		.battery = sm->view.battery,
 	};
 #if CONFIG_DMR_DATA_CORE
-	io.dmr_ready = data_can_send(sm) && !dmrDataServiceIsBusy() && !dmrDataServiceIpBusy() && !sm->dmr_keyed;
+	io.dmr_ready = data_can_send(sm) && !dmrDataServiceIsBusy() && !dmrDataServiceIpBusy() && !sm->dmr_keyed &&
+		      xband_check_hz(sm->view.ch.tx_hz) == 0;
 #endif
 	dota_poll(&io, now_ms);
 	if (!dota_owns_radio()) {

@@ -401,8 +401,9 @@ static void mwx_codeplug(const char *modes, bool owner)
         c->listen_list = 0;
         if (modes[i] == 'F') {
             c->tx_tone = (subtone_t){ TONE_CTCSS, (uint16_t)(885 + 10 * i) };
-        } else if (modes[i] == 'D') {
+        } else if (modes[i] == 'D' || modes[i] == 'R') {
             c->mode = RADIO_MODE_DMR;
+            c->rx_only = modes[i] == 'R';   /* R: a DMR channel that may not transmit (receive only) */
         } else {
             c->mode = RADIO_MODE_P25;
             c->bw = RADIO_BW_12K5;
@@ -969,6 +970,11 @@ static void test_mwatch_emergency(void)
     mwx_emergency_case("FDDFFF", 2, 0, 2);	/* C DMR selected: C */
     mwx_emergency_case("FDDFFF", 0, 2, 1);	/* A FM selected: the first DMR letter, B */
     mwx_emergency_case("FPFFFF", 1, 0, -1);	/* no DMR letter: the watch goes on, the emergency fails */
+    /* Hole hunt B2: a DMR letter that may not transmit (receive only) is passed over */
+    mwx_emergency_case("RDFFFF", 0, 2, 1);	/* A selected but RX only: B */
+    mwx_emergency_case("RFDFFF", 1, 0, 2);	/* A RX only, B FM selected: C, not A */
+    mwx_emergency_case("RFFFFF", 0, 1, -1);	/* the only DMR letter RX only: the watch goes on, the emergency fails */
+    mwx_emergency_case("FRRFFF", 2, 0, -1);	/* both DMR letters RX only: the same */
     printf("Plus multi-watch: the emergency on the selected or the first DMR letter, the watch ended there: %d failures\n",
            failures - before);
 }

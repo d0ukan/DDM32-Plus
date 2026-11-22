@@ -5,6 +5,14 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
+- Transmit safety (pre-release hole hunt; docs/plus.md "Pre-release hole hunt: transmit safety"): SSTV send is
+  refused while a scan, a dual / multi-watch, the air watch, a search, the spectrum or trunk following runs ("Stop the
+  scan or watch first"), and the radio core checks the band plan itself before keying (before, a watch letter the page
+  never checked could be keyed for up to 2 minutes); DOTA repeats the band plan in the radio core too. The multi-watch
+  emergency takes the selected or first DMR letter that may transmit (an RX-only letter is passed over). All digital,
+  DMR and P25 search are refused over a dual / multi-watch or the air watch. OK on a search find outside the amateur
+  band plan makes the VFO receive only ("This channel is RX only") until its frequency changes. The radio name must
+  look like a callsign for SSTV, the cross-band and CW IDs ("DM32UV", the factory name, is refused; TA2DOU/P works).
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
   radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
   that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved

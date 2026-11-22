@@ -76,6 +76,25 @@ def prepare_sstvtx(transform, install):
         ('\t.click = click,\n', '\t.click = click,\n\t.tx_pcm = tx_pcm,\n'),
     ])
 
+    # --- The callsign check (hole hunt B16): SSTV's, the cross-band's and the CW ID's identification. Upstream's rule (4
+    # to 7 letters and digits, one of each) took "DM32UV", the factory radio name; now it must be shaped like an ITU
+    # callsign: a prefix (a letter, two letters, letter + digit, digit + letter, digit + two letters), one digit, 1-4
+    # letters. "TA2DOU/P" gives TA2DOU as before (the word ends at '/', '-' or a space) ---
+    transform('core/radio/radio_cwid.c', [
+        ('uint8_t radio_cwid_callsign(const char *name, char *out, uint8_t cap)\n{\n',
+         '// DDM32 Plus: s (n characters, A-Z and 0-9 only) shaped like an ITU callsign: prefix, one digit, 1-4 letters\n'
+         'static bool call_shape(const char *s, uint8_t n)\n{\n'
+         '\tuint8_t e = n;\n'
+         '\twhile (e > 0 && s[e - 1u] >= \'A\')\n\t\te--;\t\t// the suffix: letters\n'
+         '\tif (e == n || (uint8_t)(n - e) > 4u || e < 2u || e > 4u)\n\t\treturn false;\n'
+         '\tuint8_t p = (uint8_t)(e - 1u);\t// s[p] is the digit; s[0..p) the prefix\n'
+         '\tbool d0 = s[0] <= \'9\', d1 = s[1] <= \'9\';\n'
+         '\treturn p == 1u ? !d0 : p == 2u ? !(d0 && d1) : d0 && !d1 && s[2] >= \'A\';\n}\n\n'
+         'uint8_t radio_cwid_callsign(const char *name, char *out, uint8_t cap)\n{\n'),
+        ('\tif (!word_end(name[n]) || n < RADIO_CWID_CALL_MIN || !letter || !digit) {\n',
+         '\tif (!word_end(name[n]) || n < RADIO_CWID_CALL_MIN || !letter || !digit || !call_shape(out, n)) {\n'),
+    ])
+
     # --- The radio core (radio_sstvtx.inc) ---
     transform('core/radio/radio_sm.h', [
         ('\tRREQ_XBAND,\t\t// DDM32 Plus: arg 1 = a cross-band session starts (xband.h), 0 = it stops\n',

@@ -801,3 +801,20 @@ TX only on frequencies the licence allows, the other radio listening.
 | RF-4 | **947c139.** DMR channel with polite admit (own CC); the other radio sends an over, wait 2 s after it ends, PTT | keys first time (never refused "busy" after the channel went quiet); during the other radio's over: refused, as before |
 | RF-5 | **916ac26.** A long DMR session (an hour, overs every few minutes, zone changes in between); then the DMR diagnostics line 6 | every over keys first time; note the line's " k" count (0 is normal; more means stuck requests were dropped and recovered). Report any "TX for a split second then idle" (Open25 #28) |
 | RF-6 | **577c242 (evaluation).** SDR: our P25 TX on 433.500 (NAC $659, TG 101), measure the outer deviation (C4FM, nominal 1800 Hz) | about 1.8 kHz; write the figure down. Well below (about 1.69 kHz) means the native path needs upstream's correction |
+
+## Transmit safety (branch `txsafe`, docs/plus.md "Pre-release hole hunt: transmit safety")
+
+Each step that opens the serial port, installs, restarts or transmits needs the owner's approval in chat first.
+TS-1..TS-4, TS-6 and TS-7 expect **nothing transmitted**: watch the red LED and a receiver (or SDR) on the frequencies named.
+
+| # | Do | Expect |
+|---|---|---|
+| TS-1 | Triple watch, A selected on an FM channel outside the band plan (e.g. a PMR446 or business channel, or 146.520), B / C amateur simplex; Tools > SSTV > OK while the ring runs (several times, the ring on each letter) | the page says "Stop the scan or watch first" ("Önce taramayı veya izlemeyi durdurun"); nothing keyed on any letter; the watch goes on |
+| TS-2 | A zone scan running, then Tools > SSTV > OK | the same refusal; the scan goes on |
+| TS-3 | Spectrum, then Back and at once Tools > SSTV > OK (within the 5 s the sweep stays alive); the same after DMR / P25 / All digital search | refused ("Stop the scan or watch first") or, after 5 s, sends normally on an amateur simplex channel (ST1 / ST2) |
+| TS-4 | SSTV send on 146.520 (outside Region 1's 2 m band) and on 145.000 (a repeater input) as the channel on view | refused with the band plan's reason ("Not an amateur band" / "Repeater frequency"); nothing keyed |
+| TS-5 | **Emergency.** Triple watch, A a DMR channel set RX only, B a DMR channel that may transmit, C FM selected: the emergency key; then with B also RX only | first: "Watch off: on B", the alarm / hot mic on B's frequency only (owner approval: it transmits on B, TG1); second: the watch goes on, the emergency says it can't start, nothing keyed |
+| TS-6 | Dual watch (or a multi-watch, or the air watch from Tools > Airfields) running: Tools > All digital search, OK; then DMR search, P25 search | each says "Stop the scan or watch first" and does not start; the watch goes on; after stopping the watch the search starts |
+| TS-7 | All digital search finds a P25 / DMR system outside the amateur bands (e.g. 159.125 or a repeater output 438.900): OK on the find, then PTT | toast "This channel is RX only"; Home on the VFO there, PTT "TX denied" (RX only), nothing keyed; step the VFO to 433.500: PTT works again |
+| TS-8 | All digital search find on 433.500 (amateur simplex), OK, PTT (licence permitting) | no toast; the VFO transmits as before |
+| TS-9 | Radio name "DM32UV" (the factory name), then "TA2DOU/P": Tools > SSTV > OK, Tools > Cross-band, the CW beacon | DM32UV: "Set your callsign (the radio name) in qdmr." everywhere, nothing keyed; TA2DOU/P: TA2DOU used as the ID |

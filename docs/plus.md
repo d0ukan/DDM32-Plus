@@ -354,7 +354,8 @@ Found list: 8 entries, newest first ("433.5000 CC1 TS2 RPT 3m", then "TG 2620 fr
 changes; every 16 steps one find in the range is read again (round robin), so a new call there is caught in about two
 seconds. Up / Down pick a find; OK on it stops the search and puts the VFO there in DMR with its color code and its
 slot (when one slot was seen). A repeater find puts the VFO on its output frequency, simplex: set the TX offset
-before talking through it.
+before talking through it. Outside the band plan the VFO is receive only (hole hunt B4, "Pre-release hole hunt:
+transmit safety"). Not over a dual / multi-watch or the air watch: "Stop the scan or watch first".
 
 Receive only: while it runs `radio_sm_tx_check` refuses everything (PTT, data and ACKs, an SFR repeater role,
 roaming probes) and no APRS job starts. PTT is consumed and stops the search (nothing keyed until the next press);
@@ -405,7 +406,8 @@ Found list: 8 entries, newest first, with the mode as a field:
 | NXDN | `438.8000 NXDN RAN 5 3m` | `TG 101 from 1234` / Encrypted |
 
 OK on a find stops the search and puts the VFO there in the find's mode (every mode in the VFO): DMR with its color code
-and slot as the DMR search does; P25, YSF and NXDN with NAC / DG-ID / RAN Any. No find save on this screen (the find
+and slot as the DMR search does; P25, YSF and NXDN with NAC / DG-ID / RAN Any. Outside the band plan (not an amateur
+simplex frequency) the VFO is receive only, toast "This channel is RX only" (hole hunt B4, below). No find save on this screen (the find
 save writes P25 and DMR channels only).
 
 Receive only, as the DMR search: `radio_sm_tx_check` refuses everything while it runs and no APRS job starts; PTT is
@@ -884,7 +886,8 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   only, not a repeater segment or a repeater of the list, the satellite segments 145.8-146.0 / 435-438, APRS 144.800
   or PMR446), the time-out timer longer than the picture. The radio core checks again (`radio_sstvtx.inc`: every
   check a PTT press gets, `radio_sm_tx_check`: TX inhibit, receive only, band, battery, busy channel lockout; FM,
-  simplex, the callsign, the time-out; nothing else on the air: PTT, APRS, DOTA, cross-band, CW, hotspot, SFR) and
+  simplex, the callsign, the band plan, the time-out; nothing else on the air: PTT, APRS, DOTA, cross-band, CW, hotspot,
+  SFR; nothing moving the receiver: a scan or watch, a search, the spectrum, trunk following) and
   keys the channel's TX frequency with its bandwidth, CTCSS / DCS and power, as PTT would. While it sends: a progress
   bar and "Sending n/240", the TX LED and timer as for PTT; **Back stops it at once** (unkeyed, the page stays: "Sending
   stopped"), so do **PTT** (that press keys no voice), any request that moves the radio (a channel, zone or VFO change,
@@ -3810,7 +3813,7 @@ P25 channel to put on Home). Radio rows HD1-HD4.
 | B1 | **A refused PTT became an unstoppable P25 transmission**: the radio core keys by itself (the 1750 Hz burst, the DMR emergency hot mic, VOX, cross-band: `ptt_down`) and on a P25 letter refuses it (TXDENY_MODE) but sets `sm->ptt`; the native side took `sm->ptt` as its PTT (`scan_allows`, the take's `live_tx_pending`), keyed P25 on the selected letter and, the release never reaching it, held it until the time-out (never with the time-out off) | `native_lab.c` `native_ptt`: set and cleared only by its own PTT branch; only it lets the native receiver take a letter for PTT, arms a transmission or passes `eligible`; a native transmission ends as soon as `native_ptt` or `sm->ptt` goes; while the radio core holds PTT itself the native side leaves the view (its TX denied) alone |
 | S1 | The PTT pill and the radio's selected letter could disagree: during TX the radio drops a selection (RREQ_DUAL / RREQ_MWATCH) but the UI moved the pill anyway (the keys, talk back) | `apply()` refuses a new selection while TX / TX denied ("Not while transmitting", the pill stays); `mw_tick` asks the radio again for the pill's letter after a transmission if they still differ (once a second at most); talk back waits through TX denied too |
 | S2 | The 1750 Hz burst checked the mode of the letter the ring was on, then `dual_talk` keyed the selected one: 1750 Hz on a DMR (or P25) carrier | `tone_burst` tunes the selected letter first (`dual_to_selected`), then checks it is FM |
-| S2b | SSTV send keyed the letter the ring was on; DOTA and cross-band ended the watch there; DOTA's "Current channel" frequency was the ring's letter | SSTV tunes the selected letter first; DOTA and cross-band end the watch on the selected letter; DOTA's "Current channel" source has no frequency while a watch runs (another source must be picked) |
+| S2b | SSTV send keyed the letter the ring was on; DOTA and cross-band ended the watch there; DOTA's "Current channel" frequency was the ring's letter | SSTV tunes the selected letter first (superseded: SSTV send is now refused while a watch runs, "Pre-release hole hunt: transmit safety"); DOTA and cross-band end the watch on the selected letter; DOTA's "Current channel" source has no frequency while a watch runs (another source must be picked) |
 | S3 | Listening only: P25 frames without voice for us within 2.5 s (a late entry still waiting for its link control) were given back with the **8 s** cooldown, so most of a call of ours could be skipped | frames without voice: taken again after 2 s (the zone scan's retry); the whole cooldown only when it happens again within 10 s (another talk group's conversation). Host model, ring of 3 / 6, the call starting while the receiver is elsewhere: late entry heard after 250 / 450 ms; frames 1.5 s before voice: 1.5 s; frames 3 s without voice then voice: 4.8 / 5.0 s (before: over 10 s, failing) |
 | M2 | A DMR row showed only the channel's contact; YSF / NXDN / dPMR values were shown as talk targets although this build can't transmit them | a DMR letter in a pane shows the talk target PTT uses there now (a target for now, Call back: dual watch's snapshot); YSF DG-ID, NXDN RAN, dPMR CC are shown as what the channel receives (pane row 3, not row 2's "PTT talks to") |
 | M3 | With 2 letters, talk back moves the PTT pill and now P25 really goes out there | a short beep with the "Talk back on B" toast (the pill moves with it); the setting's default unchanged (off), the owner decides |
@@ -3922,3 +3925,28 @@ calibration and scales nothing (grep for 1944 / dev_outer_hz / mod bias in our P
 measurement our outer deviation would be the DMR bytes' own, about 1820 Hz (101 % of 1800), so nothing to port.
 Unmeasured on the owner's unit: an SDR check of our P25 TX outer deviation (row RF-6) settles it; if it comes out
 low, the fix belongs in the native path (scale the modulation bytes there), not in a port of 577c242.
+
+## Pre-release hole hunt: transmit safety (branch `txsafe`)
+
+From the beta.7 hole hunt (`docs/holehunt-beta7.md` in the lab repo, items A1, B2, B3, B4, B7, B16). Rule now: **every
+feature that keys by itself repeats its checks in the radio core**; the page's checks are advice only.
+
+| # | Found | Fix |
+|---|---|---|
+| A1 | SSTV send checked the band plan only on its page, on the channel the ring or a scan was on at that moment; the radio core then moved to the selected letter (`dual_to_selected`) and keyed it for up to 2 minutes without the band plan | `radio_sstvtx.inc`: refused while anything moves the receiver (below, `SSTVTX_R_WATCH`, "Stop the scan or watch first" / "Önce taramayı veya izlemeyi durdurun"; the page says the same before asking), and the band plan again on the TX frequency (`xband_check_hz`: 144-146 / 430-440 MHz, not PMR446, a repeater segment, the satellite segments or 144.800; `SSTVTX_R_BAND`, the page names the reason). No more move to the selected letter. DOTA: `dota_key` and the DMR sender's `dmr_ready` refuse a session frequency the band plan refuses (the page's check is repeated). Cross-band already checks both frequencies in the radio core (`xband_begin` -> `xband_check`) |
+| B7 | SSTV's busy test missed the spectrum and the searches, whose polls run before SSTV's and retune | the same `sstvtx_moving`: a scan, dual / multi-watch, the air watch, DMR / all digital / P25 search, the spectrum, DMR / P25 trunk following |
+| B2 | The multi-watch emergency took the selected or first DMR letter without asking whether it may transmit (RX only, TX inhibit, out of band, Any CC / slot); the watch was stopped there and the emergency failed | `dual_dmr_tx`: the letter's channel (or VFO slot) is put on the view for `radio_sm_tx_check` (every PTT check) plus an own DMR ID, the view restored; the selected letter if it passes, else the first that does; none: the watch goes on and the emergency fails (SOS / the lone worker fall back) |
+| B3 | All digital (and DMR / P25) search started over a dual / multi-watch or the air watch stopped the ring with `scan_stop(false)` and left `sm->air` set: the UI's `RREQ_AIR_END` then ended the new search and retuned, or nothing was noted (`persist`) until a power cycle | the three search requests are refused in the radio core while a watch ring runs or `sm->air` is set (`SEARCH_WATCH_ON`); the search screens say "Stop the scan or watch first" before asking. A plain zone / VFO scan is still stopped by a search, as before |
+| B4 | OK on a search find made a TX-capable simplex VFO on any frequency (a public-safety P25 system, a repeater output): the next PTT transmitted there | `ui_dmrsearch.c` `tune_find`: outside the band plan the VFO is receive only (`channel_t.rx_only` through the VFO copy for FM / DMR, DMR with the find's CC / slot; a P25 / YSF / NXDN find's VFO listens to Any and is receive only by `vfox_fix`'s rule anyway) and the toast says "This channel is RX only"; inside it as before. The radio core keeps the flag (`vfox_apply_request`) until the VFO's frequency changes (`vfo_set_hz`, FM / DMR; a native mode keeps `vfox_fix`'s own rule), the mode is set again, or a power off (RAM only: the settings record has no room) |
+| B16 | The callsign check (SSTV's ID, the cross-band's CW ID, the CW beacon, the SFR CW ID, YSF TX) took any 4-7 letters and digits with one of each: "DM32UV", the factory radio name | `radio_cwid_callsign` also wants an ITU shape (`call_shape`, a hunk on upstream's `radio_cwid.c` in `tools/plus_sstvtx.py`): a prefix (a letter, two letters, letter + digit, digit + letter, digit + two letters), one digit, 1-4 letters. TA2DOU, TA2DOU/P (gives TA2DOU), YM2KDZ, W1AW, 2E0ABC, 9A1A, 3DA0XY taken; DM32UV, BAOFENG, 12345, RADIO1, TA22DOU refused |
+
+Host tests (each fails with the code before): `tests/plus/test_sstvtx_radio.inc` (146.520, PMR446, 145.000, 145.825,
+144.800 and 150.000 refused in the core, 433.400 keyed; a zone scan and a dual watch with A on 146.520 refused
+wherever the ring is; the callsign table and DM32UV in the core; the SSTV tests now send on 145.500, the fixture's
+146.520 being outside Region 1's 2 m band), `test_dota_radio.inc` (FM sessions on PMR446, 145.000 and 146.520 and a
+DMR session on PMR446 never key; an FM sender gives up at its first refused key-up), `test_mwatch_radio.inc` (RX-only DMR letters passed over; none usable:
+the watch goes on, the emergency fails), `test_allsearch_sm.inc` (all digital, DMR and P25 search refused over a dual
+watch, a zone scan still stopped), `test_airwatch_radio.inc` (P25 search refused during the air watch, the watch ends
+as usual), `test_vfox_radio.inc` (a find's receive-only VFO in FM and DMR keys nothing, a new frequency transmits
+again, a P25 find stays receive only). Radio rows: `docs/plus-radio-test.md` "Transmit safety (branch `txsafe`)".
+Cost: 632 B flash (96.33 %), no RAM.

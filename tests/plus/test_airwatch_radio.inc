@@ -308,6 +308,26 @@ static void test_air_refused(void)
     printf("Plus air watch: refused while transmitting, off the air band, past F\n");
 }
 
+/* Hole hunt B3: a search asked for during the air watch is refused (before: the ring stopped with sm->air still set,
+ * the UI's RREQ_AIR_END then ended the search, or nothing was noted until a power cycle); the air watch goes on and
+ * ends as usual */
+static void test_air_search_refused(void)
+{
+#if CONFIG_P25_SEARCH
+    air_user();
+    air_start(4);
+    CHECK(sm.air && sm.scan.kind == SCAN_DUAL);
+    radio_req_t r = { .type = RREQ_P25_SEARCH, .arg = 433000000, .arg2 = 434000000 };
+    radio_sm_request(&sm, &r, now);
+    for (int i = 0; i < 20; i++)
+        mw_poll();
+    CHECK(!p25s_on() && sm.air && sm.scan.kind == SCAN_DUAL && sm.dual_n == 4);
+    radio_req_air_end();
+    CHECK(!sm.air && sm.scan.kind == SCAN_OFF && air_noted_as_before());
+    printf("Plus air watch: a search asked for during it is refused, the air watch goes on and ends as usual\n");
+#endif
+}
+
 int main(void)
 {
     int prior = vfox_radio_main();
@@ -316,6 +336,7 @@ int main(void)
     test_air_user_ring();
     test_air_atis();
     test_air_refused();
+    test_air_search_refused();
     printf("Plus air watch, radio core: %d failures\n", failures - before);
     return prior || failures != before ? 1 : 0;
 }
