@@ -604,9 +604,12 @@ static void mw_heard_short(const radio_view_t *v, uint8_t mode, char *out, size_
 		sb_str(&b, "TG ");
 		sb_u32(&b, id, 1);
 	} else {	// the caller's ID gives way last to the bare word
-		sb_str(&b, TEXT_ALT_OPEN "Pvt ");
+		sb_str(&b, TEXT_ALT_OPEN);
+		sb_str(&b, TR("Pvt "));
 		sb_u32(&b, id, 1);
-		sb_str(&b, TEXT_ALT_NEXT "Pvt" TEXT_ALT_CLOSE);
+		sb_str(&b, TEXT_ALT_NEXT);
+		sb_str(&b, TR("Pvt"));
+		sb_str(&b, TEXT_ALT_CLOSE);
 	}
 }
 

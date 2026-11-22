@@ -4216,10 +4216,12 @@ NAC Any can hear another group; the channel's details come back when the call ha
 | Dual watch panes (2 letters) | row 2 of the pane, as before, now with the DMR group kept in the short form and with NXDN / dPMR callers |
 | Dual watch, Large text | unchanged: the letters and names only (no second line) |
 
-The heard group is the one the receiver last named (`p25_lab_p25_caller`, `radio_nxdn_caller`, the DMR call): the first
-moments of a P25 call (before its first link control) say "P25 call" or, as on the single channel, the group of the call
-before until the new one is named. After the call: the row's "Heard 7s ago" and the channel details, as before; the
-single channel's own hang time is not repeated on a row (the row's green ends when the radio leaves RX).
+The heard group is the one the receiver last named (`p25_lab_p25_caller`, `radio_nxdn_caller`, the DMR call). A P25
+receive now starts with the last call's talk group, source and kind cleared (`receive_run`, p25_lab.c; before, they were
+never cleared, so a new call on another letter showed the old TG until its first link control): until that arrives a
+row says "P25 call" and no TG. Checked by `tests/plus/test_p25x_worker.c` (a receive over noise after a call). A zero
+ID is never drawn ("TG 0", "Pvt 0"); "Pvt" / NXDN / dPMR texts are translated ("Ozel"). After the call: the row's "Heard
+7s ago" and the channel details, as before; the single channel's own hang time is not repeated on a row.
 The native P25 receive path (`native_lab.c`) needed no change: it fills `p25_lab_p25_caller` as for the single channel;
 the watch view only read it too late.
 

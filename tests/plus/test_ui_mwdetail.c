@@ -167,12 +167,14 @@ static void start(const char *n)
 {
 	name = n;
 	sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_K);
+	if (large) {
+		ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
+		run("reboot");	/* the setting is read at start; without it these runs were not large at all */
+	}
 	if (turkish && !lang_set(lang_find('t' << 8 | 'r'))) {
 		printf("FAIL %s: no Turkish in this build\n", name);
 		fails++;
 	}
-	if (large)
-		ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
 	run("wait:200");
 }
 

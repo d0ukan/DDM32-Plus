@@ -34,6 +34,8 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   one-line rows (6 letters, Large text) draw it left of the RX pill; NXDN and dPMR letters name their caller instead of
   "FM signal". The group shown is the heard call's, not the channel's setting (RX group list Any, NAC Any). Docs:
   docs/plus.md "Multi-watch: the heard talk group"; radio test rows MW27-MW29.
+  A new P25 receive starts without the last call's talk group (the old one showed on another letter before the first
+  link control); "TG 0" / "Pvt 0" are never drawn; the new texts are translated.
 
 ## v1.0.0-beta.7 (candidate, not released yet)
 
