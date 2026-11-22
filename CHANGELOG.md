@@ -21,6 +21,10 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   band plan. A search find on a repeater says "Repeater: set the TX offset"; setting the offset ends a find's receive
   only. Special-event callsigns (TC100A, TC1453, YM100TC) are accepted; an SFR repeater with its CW ID on and no
   callsign does not start.
+- Transmit safety, third round: the VFO never transmits on a repeater output (also with a reverse split) nor simplex
+  on a repeater input; radio model names (IC7300, FT991A, DM1701 ...) are refused as callsigns, special-event calls
+  keep working with a round 3-digit or a 4-digit number (YM100TC, TC2023X; TC100A and TC1453 are no longer taken);
+  switching the SFR CW ID off lets a repeater role without a callsign start.
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
   radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
   that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved

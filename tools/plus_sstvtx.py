@@ -80,9 +80,10 @@ def prepare_sstvtx(transform, install):
     # to 7 letters and digits, one of each) took "DM32UV", the factory radio name; now it must be shaped like an ITU
     # callsign: a prefix (a letter, two letters, letter + digit, digit + letter, digit + two letters), one digit, 1-4
     # letters. "TA2DOU/P" gives TA2DOU as before (the word ends at '/', '-' or a space). Special-event calls (second
-    # round): 2-4 digits after a one / two character prefix ending in a letter (TC100A, YM100TC, W100AW, TC18MRT, TC1453);
-    # two digits take three letters or more and only four digits may stand alone, so radio model names (DM32UV, AT878,
-    # MD380, UV82, BF888) stay refused ---
+    # round, tightened in the third): 2-4 digits after a one / two character prefix ending in a letter, then letters:
+    # two digits take three letters or more (TC18MRT), three digits a round number and two letters or more (YM100TC,
+    # W100AW), four digits one letter or more (TC2023X). Radio model names stay refused (DM32UV, AT878, MD380, UV82,
+    # BF888, IC7300, TS2000, DM1701, FT991A, AT588UV); so are TC100A and TC1453, too close to them ---
     transform('core/radio/radio_cwid.c', [
         ('uint8_t radio_cwid_callsign(const char *name, char *out, uint8_t cap)\n{\n',
          '// DDM32 Plus: s (n characters, A-Z and 0-9 only) shaped like an ITU callsign: prefix, one digit, 1-4 letters;\n'
@@ -100,7 +101,7 @@ def prepare_sstvtx(transform, install):
          '\twhile (d > 0 && s[d - 1u] <= \'9\')\n\t\td--;\t\t// the number; s[0..d) the prefix\n'
          '\tuint8_t k = (uint8_t)(e - d);\n'
          '\tif (k < 2u || k > 4u || d == 0 || d > 2u || s[d - 1u] < \'A\')\n\t\treturn false;\n'
-         '\treturn k == 4u || (k == 3u ? suf >= 1u : suf >= 3u);\n}\n\n'
+         '\treturn k == 4u ? suf >= 1u : k == 3u ? suf >= 2u && s[e - 1u] == \'0\' : suf >= 3u;\n}\n\n'
          'uint8_t radio_cwid_callsign(const char *name, char *out, uint8_t cap)\n{\n'),
         ('\tif (!word_end(name[n]) || n < RADIO_CWID_CALL_MIN || !letter || !digit) {\n',
          '\tif (!word_end(name[n]) || n < RADIO_CWID_CALL_MIN || !letter || !digit || !call_shape(out, n)) {\n'),

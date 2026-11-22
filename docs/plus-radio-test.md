@@ -830,3 +830,5 @@ TS-1..TS-4, TS-6 and TS-7 expect **nothing transmitted**: watch the red LED and 
 | TS-13 | All digital search find on a repeater output (e.g. 438.900), OK | toast "Repeater: set the TX offset"; PTT refused until the offset is set, then transmits |
 | TS-14 | Radio name "TC100A" (or another special-event call), Tools > SSTV / CW beacon | accepted as the ID |
 | TS-15 | SFR repeater channel with its CW ID on and the radio name "DM32UV"; its role page | the repeater doesn't start, the page says "Set your callsign (the radio name) in qdmr."; with TA2DOU it starts |
+| TS-16 | Third round. VFO 431.050 simplex, PTT; VFO RX 431.050 with TX 438.650 (reverse split), PTT; VFO RX 438.650 TX 431.050, PTT (licence permitting) | the first two refused ("VFO: outside the amateur bands"), the third transmits on 431.050 |
+| TS-17 | Radio name "IC7300", then "TC2023X": Tools > SSTV > OK | IC7300: "Set your callsign (the radio name) in qdmr."; TC2023X accepted as the ID |
