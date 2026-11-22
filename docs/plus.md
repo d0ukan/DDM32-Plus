@@ -3772,7 +3772,7 @@ Host tests added: the burst and the hot mic from every letter of the owner's A /
 Host tests added: a selection during a held P25 call (`test_mwatch_radio.inc`; fails without the fix), the debug link's selection and the UI flows (`test_ui_mwdetail.c`: the radio selecting A, the emergency key on a DMR and an FM letter), the safety net (`test_mwatch_radio.inc`), the VFO letters (`test_vfox_radio.inc`).
 
 Budget (`--plus --stack-check --verify-rebuild`: zero warnings, forced rebuild identical, every task inside its stack;
-radio task 728 B free (720 after the review round), UI 184 B: the radio task's deepest path is still the P25 search's give back):
+radio task 728 B free (720 after the review round, 716 after the second), UI 184 B: the radio task's deepest path is still the P25 search's give back):
 
 | | FLASH B | RAM B (free) |
 |---|---:|---:|
@@ -3780,3 +3780,4 @@ radio task 728 B free (720 after the review round), UI 184 B: the radio task's d
 | the TX target fix | 858,176 (+592) | 209,856 (1,600; the one new flag sits in padding) |
 | Home's details | 859,524 (+1,348) | 209,888 (1,568; +32 B, the 1,500 B floor kept) |
 | review round and the names | 860,584 (+1,060) | 209,904 (1,552; +16 B: the # screen's title) |
+| second review (on `ddm25` 415b519: 864,272 / 209,916) | 865,032 (+760) | 209,920 (1,536; +4 B) |
