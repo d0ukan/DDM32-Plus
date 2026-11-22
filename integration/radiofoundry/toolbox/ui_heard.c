@@ -24,9 +24,6 @@
 #include "ui/ui_heard.h"
 #if CONFIG_VFO_MODES
 #include "radio/vfox.h"
-#if CONFIG_XBAND || CONFIG_DOTA || CONFIG_SSTV_TX
-#include "radio/xband.h"	/* the band plan: a heard station outside it gives a receive-only VFO */
-#endif
 #endif
 
 static heard_list_t list;
@@ -305,13 +302,6 @@ static void __attribute__((noinline)) tune(const heard_t *e)
 		ch.timeslot = ts == 1u || ts == 2u ? (uint8_t)ts : 1u;
 	}
 	vfox_fix(&ch);
-#if CONFIG_XBAND || CONFIG_DOTA || CONFIG_SSTV_TX
-	/* Hole hunt: as a search find, receive only outside the band plan (a repeater segment is kept: the radio core
-	 * refuses simplex on an output until the TX offset is set; CONFIG_VFO_PLAN refuses outside the bands anyway) */
-	uint8_t why = xband_check_hz(e->hz);
-	if (why != XB_R_OK && why != XB_R_REPEATER)
-		ch.rx_only = true;
-#endif
 	radio_req_vfo(true);
 	if (!ui_svc_vfo_apply(&ch)) {
 		ui_toast(TR("VFO: not in this build"));

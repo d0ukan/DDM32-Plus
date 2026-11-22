@@ -354,7 +354,7 @@ Found list: 8 entries, newest first ("433.5000 CC1 TS2 RPT 3m", then "TG 2620 fr
 changes; every 16 steps one find in the range is read again (round robin), so a new call there is caught in about two
 seconds. Up / Down pick a find; OK on it stops the search and puts the VFO there in DMR with its color code and its
 slot (when one slot was seen). A repeater find puts the VFO on its output frequency, simplex: set the TX offset
-before talking through it. Outside the band plan the VFO is receive only (hole hunt B4, "Pre-release hole hunt:
+before talking through it. No band plan on the find's VFO (owner decision 2026-11-22, "Pre-release hole hunt:
 transmit safety"). Not over a dual / multi-watch or the air watch: "Stop the scan or watch first".
 
 Receive only: while it runs `radio_sm_tx_check` refuses everything (PTT, data and ACKs, an SFR repeater role,
@@ -406,8 +406,8 @@ Found list: 8 entries, newest first, with the mode as a field:
 | NXDN | `438.8000 NXDN RAN 5 3m` | `TG 101 from 1234` / Encrypted |
 
 OK on a find stops the search and puts the VFO there in the find's mode (every mode in the VFO): DMR with its color code
-and slot as the DMR search does; P25, YSF and NXDN with NAC / DG-ID / RAN Any. Outside the band plan (not an amateur
-simplex frequency) the VFO is receive only, toast "This channel is RX only" (hole hunt B4, below). No find save on this screen (the find
+and slot as the DMR search does; P25, YSF and NXDN with NAC / DG-ID / RAN Any (receive only by `vfox_fix`'s rule). No
+band plan on an FM / DMR find's VFO (owner decision 2026-11-22; hole hunt B4 below is withdrawn). No find save on this screen (the find
 save writes P25 and DMR channels only).
 
 Receive only, as the DMR search: `radio_sm_tx_check` refuses everything while it runs and no APRS job starts; PTT is
@@ -963,11 +963,11 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   bars. The page shows it at half size, the mode with its length (Left / Right: **Robot 36** 37 s, the default;
   Martin M1 1:56; PD120 2:08), the TX frequency with the callsign. **OK sends**, nothing else does (never by itself).
   Checks on the page: a callsign as the radio name ("Set your callsign (the radio name) in qdmr."), an FM channel,
-  simplex (RX = TX: no repeater), the band plan DOTA and the cross-band use (`ui_xband_refusal`: 144-146 / 430-440 MHz
-  only, not a repeater segment or a repeater of the list, the satellite segments 145.8-146.0 / 435-438, APRS 144.800
-  or PMR446), the time-out timer longer than the picture. The radio core checks again (`radio_sstvtx.inc`: every
+  simplex (RX = TX: no repeater), nothing scanning or watching, the time-out timer longer than the picture. No band
+  plan (owner decision 2026-11-22: only DOTA refuses frequencies outside the amateur bands; until then the page and
+  the radio core refused what `ui_xband_refusal` / `xband_check_hz` refuse). The radio core checks again (`radio_sstvtx.inc`: every
   check a PTT press gets, `radio_sm_tx_check`: TX inhibit, receive only, band, battery, busy channel lockout; FM,
-  simplex, the callsign, the band plan, the time-out; nothing else on the air: PTT, APRS, DOTA, cross-band, CW, hotspot,
+  simplex, the callsign, the time-out; nothing else on the air: PTT, APRS, DOTA, cross-band, CW, hotspot,
   SFR; nothing moving the receiver: a scan or watch, a search, the spectrum, trunk following) and
   keys the channel's TX frequency with its bandwidth, CTCSS / DCS and power, as PTT would. While it sends: a progress
   bar and "Sending n/240", the TX LED and timer as for PTT; **Back stops it at once** (unkeyed, the page stays: "Sending
@@ -4130,11 +4130,11 @@ feature that keys by itself repeats its checks in the radio core**; the page's c
 
 | # | Found | Fix |
 |---|---|---|
-| A1 | SSTV send checked the band plan only on its page, on the channel the ring or a scan was on at that moment; the radio core then moved to the selected letter (`dual_to_selected`) and keyed it for up to 2 minutes without the band plan | `radio_sstvtx.inc`: refused while anything moves the receiver (below, `SSTVTX_R_WATCH`, "Stop the scan or watch first" / "Önce taramayı veya izlemeyi durdurun"; the page says the same before asking), and the band plan again on the TX frequency (`xband_check_hz`: 144-146 / 430-440 MHz, not PMR446, a repeater segment, the satellite segments or 144.800; `SSTVTX_R_BAND`, the page names the reason). No more move to the selected letter. DOTA: `dota_key` and the DMR sender's `dmr_ready` refuse a session frequency the band plan refuses (the page's check is repeated). Cross-band already checks both frequencies in the radio core (`xband_begin` -> `xband_check`) |
+| A1 | SSTV send checked the band plan only on its page, on the channel the ring or a scan was on at that moment; the radio core then moved to the selected letter (`dual_to_selected`) and keyed it for up to 2 minutes without the band plan | `radio_sstvtx.inc` (the band plan part withdrawn 2026-11-22 for SSTV, kept for DOTA: owner decision below): refused while anything moves the receiver (below, `SSTVTX_R_WATCH`, "Stop the scan or watch first" / "Önce taramayı veya izlemeyi durdurun"; the page says the same before asking), and the band plan again on the TX frequency (`xband_check_hz`: 144-146 / 430-440 MHz, not PMR446, a repeater segment, the satellite segments or 144.800; `SSTVTX_R_BAND`, the page names the reason). No more move to the selected letter. DOTA: `dota_key` and the DMR sender's `dmr_ready` refuse a session frequency the band plan refuses (the page's check is repeated). Cross-band already checks both frequencies in the radio core (`xband_begin` -> `xband_check`) |
 | B7 | SSTV's busy test missed the spectrum and the searches, whose polls run before SSTV's and retune | the same `sstvtx_moving`: a scan, dual / multi-watch, the air watch, DMR / all digital / P25 search, the spectrum, DMR / P25 trunk following |
 | B2 | The multi-watch emergency took the selected or first DMR letter without asking whether it may transmit (RX only, TX inhibit, out of band, Any CC / slot); the watch was stopped there and the emergency failed | `dual_dmr_tx`: the letter's channel (or VFO slot) is put on the view for `radio_sm_tx_check` (every PTT check) plus an own DMR ID, the view restored; the selected letter if it passes, else the first that does; none: the watch goes on and the emergency fails (SOS / the lone worker fall back) |
 | B3 | All digital (and DMR / P25) search started over a dual / multi-watch or the air watch stopped the ring with `scan_stop(false)` and left `sm->air` set: the UI's `RREQ_AIR_END` then ended the new search and retuned, or nothing was noted (`persist`) until a power cycle | the three search requests are refused in the radio core while a watch ring runs or `sm->air` is set (`SEARCH_WATCH_ON`); the search screens say "Stop the scan or watch first" before asking. A plain zone / VFO scan is still stopped by a search, as before |
-| B4 | OK on a search find made a TX-capable simplex VFO on any frequency (a public-safety P25 system, a repeater output): the next PTT transmitted there | `ui_dmrsearch.c` `tune_find`: outside the band plan the VFO is receive only (`channel_t.rx_only` through the VFO copy for FM / DMR, DMR with the find's CC / slot; a P25 / YSF / NXDN find's VFO listens to Any and is receive only by `vfox_fix`'s rule anyway) and the toast says "This channel is RX only"; inside it as before. The radio core keeps the flag (`vfox_apply_request`) until the VFO's frequency changes (`vfo_set_hz`, FM / DMR; a native mode keeps `vfox_fix`'s own rule), the mode is set again, or a power off (RAM only: the settings record has no room) |
+| B4 | OK on a search find made a TX-capable simplex VFO on any frequency (a public-safety P25 system, a repeater output): the next PTT transmitted there | **Withdrawn 2026-11-22** (owner decision below). Was: `ui_dmrsearch.c` `tune_find`: outside the band plan the VFO is receive only (`channel_t.rx_only` through the VFO copy for FM / DMR, DMR with the find's CC / slot; a P25 / YSF / NXDN find's VFO listens to Any and is receive only by `vfox_fix`'s rule anyway) and the toast says "This channel is RX only"; inside it as before. The radio core keeps the flag (`vfox_apply_request`) until the VFO's frequency changes (`vfo_set_hz`, FM / DMR; a native mode keeps `vfox_fix`'s own rule), the mode is set again, or a power off (RAM only: the settings record has no room) |
 | B16 | The callsign check (SSTV's ID, the cross-band's CW ID, the CW beacon, the SFR CW ID, YSF TX) took any 4-7 letters and digits with one of each: "DM32UV", the factory radio name | `radio_cwid_callsign` also wants an ITU shape (`call_shape`, a hunk on upstream's `radio_cwid.c` in `tools/plus_sstvtx.py`): a prefix (a letter, two letters, letter + digit, digit + letter, digit + two letters), one digit, 1-4 letters. TA2DOU, TA2DOU/P (gives TA2DOU), YM2KDZ, W1AW, 2E0ABC, 9A1A, 3DA0XY taken; DM32UV, BAOFENG, 12345, RADIO1, TA22DOU refused |
 
 Host tests (each fails with the code before): `tests/plus/test_sstvtx_radio.inc` (146.520, PMR446, 145.000, 145.825,
@@ -4152,9 +4152,9 @@ Cost (first round): 632 B flash, no RAM.
 
 | # | Found | Fix |
 |---|---|---|
-| 1 | The CW beacon keyed whatever letter a scan or the watch ring was on (`radio_sm_tx_check` on the view, then `scan_stop(false)`), repeated unattended, and never asked the band plan | `radio_moving()` (SSTV's rule moved into one helper) refuses it each time it keys; the band plan (`xband_check_hz`) refuses with TXDENY_BAND; the beacon page says "Stop the scan or watch first" before asking |
-| 2, 3 | Heard -> VFO made a VFO that may transmit on any heard frequency; B4's receive only was RAM only and ended with a VFO settings apply or a power off | `CONFIG_VFO_PLAN` in `radio_sm_tx_check`: **the VFO** transmits only on 144-146 / 430-440 MHz, never PMR446, never simplex on a repeater output segment (145.600-145.7875, 438.650-439.425 MHz, half a channel either side); a repeater input with the VFO's split is fine, satellites and APRS are allowed. TXDENY_VFO_PLAN, "VFO: outside the amateur bands" / "VFO: amatör bantların dışında", hint "Tune into a band, then PTT". Whatever made the VFO, and after a restart. Codeplug channels are not affected (CPS-programmed channels are the user's). Heard -> VFO also applies the find's receive-only rule (`ui_heard.c`) |
-| 4 | An in-plan repeater-output find said "RX only", and RREQ_VFO_TX left receive only set | a find on a repeater segment keeps the VFO (simplex on an output is refused by the VFO plan) and says "Repeater: set the TX offset"; RREQ_VFO_TX with a split clears a find's receive only (FM / DMR) |
+| 1 | The CW beacon keyed whatever letter a scan or the watch ring was on (`radio_sm_tx_check` on the view, then `scan_stop(false)`), repeated unattended, and never asked the band plan | `radio_moving()` (SSTV's rule moved into one helper) refuses it each time it keys; (withdrawn 2026-11-22: the band plan, `xband_check_hz`, TXDENY_BAND); the beacon page says "Stop the scan or watch first" before asking |
+| 2, 3 | Heard -> VFO made a VFO that may transmit on any heard frequency; B4's receive only was RAM only and ended with a VFO settings apply or a power off | **Withdrawn 2026-11-22** (owner decision below). Was: `CONFIG_VFO_PLAN` in `radio_sm_tx_check`: **the VFO** transmits only on 144-146 / 430-440 MHz, never PMR446, never simplex on a repeater output segment (145.600-145.7875, 438.650-439.425 MHz, half a channel either side); a repeater input with the VFO's split is fine, satellites and APRS are allowed. TXDENY_VFO_PLAN, "VFO: outside the amateur bands" / "VFO: amatör bantların dışında", hint "Tune into a band, then PTT". Whatever made the VFO, and after a restart. Codeplug channels are not affected (CPS-programmed channels are the user's). Heard -> VFO also applies the find's receive-only rule (`ui_heard.c`) |
+| 4 | An in-plan repeater-output find said "RX only", and RREQ_VFO_TX left receive only set | **Withdrawn 2026-11-22** (owner decision below). Was: a find on a repeater segment keeps the VFO (simplex on an output is refused by the VFO plan) and says "Repeater: set the TX offset"; RREQ_VFO_TX with a split clears a find's receive only (FM / DMR) |
 | 5 | `call_shape` refused real special-event calls (TC100A, TC1453, YM100TC, W100AW, TC18MRT); an SFR repeater with its CW ID on and no callsign repeated unidentified | 2-4 digits after a one / two character prefix ending in a letter; two digits take three letters or more, only four digits may stand alone (DM32UV, AT878, MD380, UV82, BF888, BAOFENG, 12345 stay refused; shape can't tell UV5R or DM1701 from a callsign). The SFR repeater role is not started then (`radio_dmr_view_t.sfr_nocall`); its page says "Set your callsign (the radio name) in qdmr." |
 | 6 | `sm->air` set after its ring stopped (before the UI's RREQ_AIR_END): searches / SSTV refused without a word | the pages also ask the UI's air watch flag (`ui_air_watch_on`, weak) and say "Stop the scan or watch first" (UI only, not host-tested) |
 | 7 | `dual_dmr_tx` reset `view.am` for a letter but not `view.bcast` | reset and restored too |
@@ -4165,7 +4165,7 @@ both callsign lists; the VFO plan (`test_vfox_radio.inc` with `CONFIG_VFO_PLAN`)
 refused, 145.500 allowed, 438.650 simplex refused and with TX 431.050 allowed, 159.125 still refused after a restart,
 a find's receive only cleared by the split, a codeplug channel on 146.520 unaffected.
 
-**Third round** (branch `txsafe3`): callsigns: two digits take three letters or more (TC18MRT), three digits a round
+**Third round** (branch `txsafe3`; its VFO plan and native receive-only parts withdrawn 2026-11-22, owner decision below): callsigns: two digits take three letters or more (TC18MRT), three digits a round
 number and two letters or more (YM100TC, W100AW, TC150TR), four digits a letter or more (TC2023X); no longer accepted:
 **TC100A, TC1453** (shaped like FT991A / DM1701). Refused now too: IC7300, TS2000, TH9800, DM1701, DR1801, HT1000,
 FT991A, FT857D, AT588UV. VFO plan: TX on a repeater output segment is refused whatever RX is (a reverse split), and
@@ -4175,3 +4175,31 @@ well (`vfox_apply_request`); the VFO settings screen's copy is `vfox_fix`'s own.
 checked again when the CW ID setting is switched off (`use_settings`): the role starts. Host tests: both callsign
 lists, 431.050 / 145.100 simplex and the 431.050 -> 438.650 reverse split refused, a P25 VFO copy with receive only
 keys nothing and without it talks, the SFR role started after the CW ID is switched off.
+
+**Owner decision 2026-11-22: band plan only for DOTA** (branch `unplan`). The owner only ever asked that a DOTA
+transfer refuse frequencies outside the amateur bands; the other band-plan transmit rules of the three rounds are
+removed:
+
+- **Removed:** `CONFIG_VFO_PLAN` (`vfo_plan_refused`, `TXDENY_VFO_PLAN`, "VFO: outside the amateur bands" and its tr.po
+  entry, the build flag, `VFO_PLAN_TEST`): the VFO transmits wherever it did before this week (`radio_sm_tx_check`'s
+  older checks: TX inhibit, receive only, the radio's band, P25's own band limit, the air band, the marine table, Any CC
+  / slot ...). B4 and round 2 item 4: a search find (`ui_dmrsearch.c` `tune_find`) and Tools > Heard -> VFO
+  (`ui_heard.c`) no longer make the VFO receive only, no "This channel is RX only" toast for a find; `vfox_apply_request`
+  again ignores a copy's `rx_only` (`vfox_fix` decides, as before), and the `vfo_set_hz` / `RREQ_VFO_TX` hunks that
+  cleared it are gone. The find's "Repeater: set the TX offset" toast is again only for a DMR repeater sync (as before
+  the hole hunt). SSTV send: `SSTVTX_R_BAND` (radio core) and the page's `ui_xband_refusal` check are gone. The CW
+  beacon: its `TXDENY_BAND` band-plan refusal is gone. `xband.c` / `ui_xband.c` are built for the cross-band and DOTA only.
+- **Kept:** DOTA's band plan (the page's typed frequency, `dota_key` and the DMR sender's `dmr_ready` in the radio
+  core); the cross-band's own checks (`xband_begin` -> `xband_check`, unchanged); `radio_moving()` for SSTV send and the
+  CW beacon (refused while a scan, a dual / multi-watch, the air watch, a search, the spectrum or trunk following runs:
+  that keeps them off a letter nobody chose, not a band rule); every `radio_sm_tx_check` check; the callsign shape
+  (`call_shape`); the multi-watch emergency (B2) and search-over-watch (B3) fixes; SFR `sfr_nocall`. A P25 / YSF / NXDN
+  VFO listening to "Any" stays receive only (`vfox_fix`, older than the hole hunt).
+- Host tests changed: `test_vfox_radio.inc` (the find / plan tests replaced by `test_vfox_find_tx`: a find's FM / DMR
+  VFO on 159.125 transmits, a copy's `rx_only` is not kept, a P25 NAC Any VFO stays receive only, a P25 Heard VFO with
+  NAC / TG / ID talks with or without the flag), `test_sstvtx_radio.inc` (146.520, 446.00625, 145.000, 145.825, 144.800,
+  150.000 and 433.400 now key and stop; the CW beacon keys on 146.520 and 145.500), `test_ui_sstvtx.c` (the page's
+  band-plan refusal rows moved to a new case: 145.600, 145.800, 144.800, 162.550 and 446.00625 are asked of the radio
+  core). DOTA's band-plan tests (`test_dota_radio.inc`, `test_ui_dota.c`) are unchanged.
+- Build (`--plus --stack-check --verify-rebuild`): FLASH 869,384 B (96.48 %), RAM 208,616 B (98.66 %), 0 warnings,
+  forced rebuild identical; all host test targets pass, 0 warnings in classic-test. Host-tested only; not run on the radio.

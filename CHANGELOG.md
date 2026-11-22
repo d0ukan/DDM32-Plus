@@ -8,18 +8,17 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 - PC programmers (Windows C# and Rust): a classic menu bar (File, Radio, Tools, Help) on top of the window, reaching the existing pages, the backups and logs folders, the GitHub page and About; the radio entries are off while a radio job holds the port.
 - Transmit safety (pre-release hole hunt; docs/plus.md "Pre-release hole hunt: transmit safety"): SSTV send is
   refused while a scan, a dual / multi-watch, the air watch, a search, the spectrum or trunk following runs ("Stop the
-  scan or watch first"), and the radio core checks the band plan itself before keying (before, a watch letter the page
-  never checked could be keyed for up to 2 minutes); DOTA repeats the band plan in the radio core too. The multi-watch
-  emergency takes the selected or first DMR letter that may transmit (an RX-only letter is passed over). All digital,
-  DMR and P25 search are refused over a dual / multi-watch or the air watch. OK on a search find outside the amateur
-  band plan makes the VFO receive only ("This channel is RX only") until its frequency changes. The radio name must
+  scan or watch first"; before, a watch letter the page never checked could be keyed for up to 2 minutes). DOTA
+  checks the amateur band plan in the radio core too, not only on its page: a session frequency outside it never keys.
+  The multi-watch emergency takes the selected or first DMR letter that may transmit (an RX-only letter is passed
+  over). All digital, DMR and P25 search are refused over a dual / multi-watch or the air watch. The radio name must
   look like a callsign for SSTV, the cross-band and CW IDs ("DM32UV", the factory name, is refused; TA2DOU/P works).
-- Transmit safety, second round: the VFO transmits only in the amateur bands (144-146 / 430-440 MHz, not PMR446, not
-  simplex on a repeater output; a repeater split works), whatever made it and after a restart ("VFO: outside the
-  amateur bands"); codeplug channels are unchanged. The CW beacon is refused during a scan or watch and outside the
-  band plan. A search find on a repeater says "Repeater: set the TX offset"; setting the offset ends a find's receive
-  only. Special-event callsigns (YM100TC, TC18MRT, TC2023X) are accepted; an SFR repeater with its CW ID on and no
-  callsign does not start.
+- Band plan only for DOTA (owner decision 2026-11-22): the VFO, a search find or Tools > Heard -> VFO, SSTV send and
+  the CW beacon have no amateur band plan; they transmit wherever PTT may (the radio's own TX checks: TX inhibit, RX
+  only, the radio's band, the mode's own limits). A P25 / YSF / NXDN VFO that listens to "Any" stays receive only, as
+  before. Only DOTA refuses a frequency outside the amateur bands.
+- Transmit safety, second round: the CW beacon is refused during a scan or watch. Special-event callsigns (YM100TC,
+  TC18MRT, TC2023X) are accepted; an SFR repeater with its CW ID on and no callsign does not start.
 - An emergency (the key, the lone worker, SOS) also ends P25 and DMR trunk following, the P25 search and the DMR /
   all digital search instead of waiting for them: within about 0.3 s the channel is tuned again and the emergency goes
   out there (before this fix it usually failed while a search ran and the search went on). One pressed while
@@ -32,8 +31,7 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   No track takes the radio while an emergency runs (and no AOS pop-up then); an Emergency or SOS key (also as SK1's
   hold function) always reaches the emergency during a track. A rise during the radio's own APRS frame no longer
   skips the auto track for the pass. The AOS pop-up stays 30 s instead of 60 s. Host-tested; radio rows IS-12 to IS-15.
-- Transmit safety, third round: the VFO never transmits on a repeater output (also with a reverse split) nor simplex
-  on a repeater input; radio model names (IC7300, FT991A, DM1701 ...) are refused as callsigns, special-event calls
+- Transmit safety, third round: radio model names (IC7300, FT991A, DM1701 ...) are refused as callsigns, special-event calls
   keep working with a round 3-digit or a 4-digit number (YM100TC, TC2023X; TC100A and TC1453 are no longer taken; a few model names shaped like callsigns, e.g. UV5R or FT8900R, still pass);
   switching the SFR CW ID off lets a repeater role without a callsign start.
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
@@ -91,8 +89,7 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   banner while transmitting (it comes after). Stored in spare settings bits; nothing new in RAM but 24 bytes.
 - SSTV send (owner's request): Tools > SSTV > OK sends a built-in test picture: the DDM32 Plus logo, your callsign (the
   radio name) and colour bars, in Robot 36 (37 s, default), Martin M1 or PD120, on the FM simplex channel in use after
-  an explicit OK, only on amateur frequencies (no repeater, satellite, APRS or PMR446 frequency) and with every TX
-  check PTT has. Back or PTT stops it at once. Receive it with a phone app such as Robot36 or another DM-32 with SSTV.
+  an explicit OK, with every TX check PTT has. Back or PTT stops it at once. Receive it with a phone app such as Robot36 or another DM-32 with SSTV.
 - P25, DMR and All digital search: faster stepping and a better probe of strong carriers (the owner's beta.7 report:
   a DMR radio in the same room on 436.275 was not found and the stepping was slow). Measured only on the host model;
   DMR search on a strong radio nearby is still under investigation and not yet confirmed on the radio. A strong carrier is now probed on its strongest step (or the

@@ -44,7 +44,7 @@ static void sstvtx_start(radio_sm_t *sm, uint8_t mode, uint32_t now_ms)
 	if (sstvtx_phase != SSTVTX_IDLE)
 		return;
 	/* The radio core is the authority (docs/plus.md "SSTV send"): it keys only the channel on view, with nothing
-	 * moving the receiver, after the band plan; never a watch letter the ring or a scan happened to pass */
+	 * moving the receiver; never a watch letter the ring or a scan happened to pass */
 	bool busy = sm->hotspot || sm->ptt || sm->view.state == RS_TX || sm->view.state == RS_TX_DENIED || dota_on() ||
 		    xband_on();
 #if CONFIG_APRS
@@ -70,8 +70,6 @@ static void sstvtx_start(radio_sm_t *sm, uint8_t mode, uint32_t now_ms)
 		sstvtx_refuse(sm, SSTVTX_R_SPLIT, 0);
 	} else if (radio_cwid_callsign(sm->radio_name, call, sizeof call) == 0) {
 		sstvtx_refuse(sm, SSTVTX_R_CALL, 0);
-	} else if (xband_check_hz(ch->tx_hz) != 0) {
-		sstvtx_refuse(sm, SSTVTX_R_BAND, 0);
 	} else if (sm->view.tot_s != 0 && (uint32_t)sm->view.tot_s * 1000u < ms) {
 		sstvtx_refuse(sm, SSTVTX_R_TOT, 0);
 	} else if (board.afsk == NULL || board.afsk->tx_pcm == NULL || board.afsk->tx_busy == NULL ||

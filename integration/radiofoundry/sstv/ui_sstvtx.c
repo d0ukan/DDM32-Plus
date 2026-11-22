@@ -2,9 +2,9 @@
 /* DDM32 Plus Tools > SSTV > OK: send the test picture (radio/radio_sstvtx.h, docs/plus.md "SSTV send"). The page shows
  * the picture at half size (the card with the radio's callsign, dithered to the SSTV screen's colours), the mode with
  * its length (Left / Right: Robot 36, Martin M1, PD120), the TX frequency, then what happens. OK sends after the checks
- * the page can make itself (a callsign as the radio name, an FM simplex channel, the band plan: an amateur frequency,
- * no repeater, satellite or APRS frequency, as DOTA and the cross-band use it; the time-out timer longer than the
- * picture); the radio core checks again and keys. While it sends a progress bar and the line; Back stops it at once,
+ * the page can make itself (a callsign as the radio name, an FM simplex channel, nothing scanning or watching, the
+ * time-out timer longer than the picture; no band plan: owner decision 2026-11-22); the radio core checks again and
+ * keys. While it sends a progress bar and the line; Back stops it at once,
  * so does PTT (the radio core), and leaving the page any other way (ui_sstvtx_tick). Installed as core/ui/ui_sstvtx.c.
  *
  * The preview is drawn only when the page is entered or something else drew the display (ui_strip_draws), like the
@@ -31,7 +31,6 @@ bool ui_air_watch_on(void) __attribute__((weak));
 #include "radio/sstv.h"
 #include "radio/sstv_tx.h"
 #include "radio/radio_sstvtx.h"
-#include "ui/ui_xband.h"
 
 #define PREVIEW_W	(SSTV_TX_CARD_W / 2u)
 #define PREVIEW_H	(SSTV_TX_CARD_H / 2u)
@@ -78,10 +77,6 @@ static const char *why_text(const radio_sstvtx_info_t *in)
 	case SSTVTX_R_TOT: return TR("TX time-out shorter than the picture");
 	case SSTVTX_R_NOMEM: return TR("Not enough memory for SSTV");
 	case SSTVTX_R_WATCH: return TR("Stop the scan or watch first");
-	case SSTVTX_R_BAND: {
-		const char *plan = ui_xband_refusal(ui_view()->ch.tx_hz);
-		return plan != NULL ? plan : TR("Can't transmit there");
-	}
 	default: return TR("Can't transmit there");
 	}
 }
@@ -99,9 +94,6 @@ static const char *refusal(void)
 		return TR("SSTV: tune an FM channel");
 	if (v->ch.rx_hz != v->ch.tx_hz)
 		return TR("Repeater channel (RX and TX differ)");
-	const char *plan = ui_xband_refusal(v->ch.tx_hz);	/* amateur, no repeater / satellite / APRS frequency */
-	if (plan != NULL)
-		return plan;
 	if (v->tot_s != 0 && (uint32_t)v->tot_s * 1000u < sstv_tx_ms(mode) + 100u)
 		return TR("TX time-out shorter than the picture");
 	return NULL;

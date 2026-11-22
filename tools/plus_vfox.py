@@ -106,15 +106,6 @@ def prepare_vfo_modes(transform, install):
          'bool radio_get_vfo(uint8_t index, channel_t *out)\n'),
     ])
     transform('core/radio/radio_sm.c', [
-        # DDM32 Plus (hole hunt B4): an FM / DMR VFO a search find made receive only (ui_dmrsearch.c, outside the band
-        # plan) transmits again once its frequency changes; a native mode's receive only stays as vfox_fix derives it
-        ('static void vfo_set_hz(radio_sm_t *sm, uint32_t hz)\n{\n',
-         'static void vfo_set_hz(radio_sm_t *sm, uint32_t hz)\n{\n'
-         '#if CONFIG_VFO_MODES\n'
-         '\tif (hz != sm->vfo_ch.rx_hz && !vfox_native(sm->vfo_ch.mode)) {\n'
-         '\t\tsm->vfo_ch.rx_only = false;\n'
-         '\t\tif (sm->view.vfo)\n\t\t\tsm->view.ch.rx_only = false;\n\t}\n'
-         '#endif\n'),
         ('#if CONFIG_DUAL_WATCH\n// VFO idx (0 or 1) becomes the one in use',
          '#if CONFIG_VFO_MODES\n#include "radio/radio_vfox.inc"\t// DM32 Plus: the VFO\'s modes, the ring letters\' VFOs\n#endif\n\n'
          '#if CONFIG_DUAL_WATCH\n// VFO idx (0 or 1) becomes the one in use'),
