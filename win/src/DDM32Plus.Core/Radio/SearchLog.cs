@@ -62,7 +62,7 @@ public sealed class SearchLogBook
     {
         public RowKey? Key;     // its key at the last poll
         public RowKey? Row;     // its line (null: none yet, or its calls went back to 0)
-        public DateTime First;  // when it was first seen
+        public DateTime? First; // when its first call was heard (null: no call counted yet, or cleared since)
         public int Calls;       // the radio's counter at the last poll
         public int Counted;     // what this log has counted of it (on Row)
         public int Seen;
@@ -114,6 +114,7 @@ public sealed class SearchLogBook
         {
             e.Row = null;
             e.Counted = 0;
+            e.First = null;     // a line made again takes its first-heard from the next call
         }
         balance.Clear();
         debt.Clear();
@@ -229,7 +230,7 @@ public sealed class SearchLogBook
         {
             if (c.Calls == 0 && c.Group == 0 && c.Source == 0 && c.Caller.Length == 0)
                 return false;   // nothing known yet: taken when it has something
-            e = new Entry { First = c.Time };
+            e = new Entry();
             entries[id] = e;
         }
         e.Seen = poll;
@@ -245,8 +246,8 @@ public sealed class SearchLogBook
             if (groups.TryGetValue(old, out var og))
             {
                 og.Calls -= e.Counted;
-                if (og.First < e.First)
-                    e.First = og.First;   // heard first under the half known key
+                if (e.First is null || og.First < e.First)
+                    e.First = og.First;   // heard first under the half known key (or before its call moved)
                 if (og.Calls <= 0 && !entries.Values.Any(o => o != e && o.Row == old && o.Counted > 0))
                 {
                     groups.Remove(old);
@@ -265,14 +266,15 @@ public sealed class SearchLogBook
         }
         if (e.Row is null)
         {
+            e.First ??= c.Time;     // first heard: its first call, not when it was first seen without one
             if (!groups.TryGetValue(key, out var ng))
                 groups[key] = ng = new SearchGroup
                 {
-                    Mode = c.Mode, Hz = c.Hz, Code = c.Code, Group = c.Group, First = e.First, Last = c.Time, Slot = c.Slot,
+                    Mode = c.Mode, Hz = c.Hz, Code = c.Code, Group = c.Group, First = e.First.Value, Last = c.Time, Slot = c.Slot,
                     Source = c.Source, Caller = c.Caller, Encrypted = c.Encrypted,
                 };
             else if (e.First < ng.First)
-                ng.First = e.First;
+                ng.First = e.First.Value;
             ng.Calls += counted;
             e.Row = key;
             changed = true;

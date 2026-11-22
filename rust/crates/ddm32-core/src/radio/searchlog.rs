@@ -86,7 +86,7 @@ type EntryKey = (char, i64, &'static str, i64);
 struct Entry {
     key: Option<GroupKey>, // its key at the last poll
     row: Option<GroupKey>, // its line (None: none yet, or its calls went back to 0)
-    first: Stamp,          // when it was first seen
+    first: Option<Stamp>,  // when its first call was heard (None: no call counted yet, or cleared since)
     calls: i64,            // the radio's counter at the last poll
     counted: i64,          // what this log has counted of it (on row)
     seen: u64,
@@ -286,6 +286,7 @@ impl SearchLogBook {
         for e in self.entries.values_mut() {
             e.row = None;
             e.counted = 0;
+            e.first = None; // a line made again takes its first-heard from the next call
         }
         self.balance.clear();
         self.debt.clear();
@@ -407,7 +408,7 @@ impl SearchLogBook {
             if c.calls == 0 && c.group == 0 && c.source == 0 && c.caller.is_empty() {
                 return false; // nothing known yet: taken when it has something
             }
-            self.entries.insert(id, Entry { key: None, row: None, first: c.time, calls: 0, counted: 0, seen: 0 });
+            self.entries.insert(id, Entry { key: None, row: None, first: None, calls: 0, counted: 0, seen: 0 });
         }
         let poll = self.poll;
         let (row, prev_calls, prev_counted, mut first) = {
@@ -426,7 +427,8 @@ impl SearchLogBook {
             let others = self.entries.iter().any(|(k, o)| *k != id && o.row.as_ref() == Some(&old) && o.counted > 0);
             if let Some(og) = self.groups.get_mut(&old) {
                 og.calls -= prev_counted;
-                first = first.min(og.first); // heard first under the half known key
+                // heard first under the half known key (or before its call moved)
+                first = Some(first.map_or(og.first, |f| f.min(og.first)));
                 if og.calls <= 0 && !others {
                     self.groups.remove(&old);
                     for o in self.entries.values_mut().filter(|o| o.row.as_ref() == Some(&old)) {
@@ -446,6 +448,8 @@ impl SearchLogBook {
             return changed; // no line until it has a call
         }
         let was = if on_line.is_some() { prev_counted } else { 0 };
+        // first heard: its first call, not when it was first seen without one
+        let first = *e.first.get_or_insert(c.time);
         e.row = Some(key.clone());
         e.counted = counted;
         let g = self.groups.entry(key).or_insert_with(|| SearchGroup {

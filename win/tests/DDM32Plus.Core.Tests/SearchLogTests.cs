@@ -200,9 +200,20 @@ public sealed class SearchLogTests : IDisposable
         Assert.False(b.Add(Poll(0, "", 0, "dmrs.f0=438612500,1,2,1,1,0,91,1,0,0,5"), T0));
         Assert.Equal((0, 0, 0), (b.Groups.Count, b.Frequencies, b.TotalCalls));
         Assert.Single(SearchLogBook.Write(Path.Combine(dir, "a.csv"), b.Groups) is var r ? File.ReadAllLines(r.Path) : []);
-        // its first call: the line, first heard when the entry was first seen
-        Assert.True(b.Add(Poll(0, "", 1, "dmrs.f0=438612500,1,2,1,1,0,91,1,1,0,5"), T0.AddSeconds(5)));
-        Assert.Equal((1, 1, 1, T0), (b.Groups.Count, b.Frequencies, b.TotalCalls, Line(b, 91).First));
+        // its first call an hour later: the line, first heard at that call (not when the entry was first seen)
+        Assert.False(b.Add(Poll(0, "", 0, "dmrs.f0=438612500,1,2,1,1,0,91,1,0,1800,5"), T0.AddSeconds(1800)));
+        Assert.True(b.Add(Poll(0, "", 1, "dmrs.f0=438612500,1,2,1,1,0,91,1,1,0,5"), T0.AddSeconds(3600)));
+        Assert.Equal((1, 1, 1, T0.AddSeconds(3600)), (b.Groups.Count, b.Frequencies, b.TotalCalls, Line(b, 91).First));
+    }
+
+    [Fact]
+    public void ALineMadeAgainAfterClearIsFirstHeardAtItsNextCall()
+    {
+        var b = new SearchLogBook();
+        b.Add(Poll(1, "p25s.f0=433500000,456,655,1,1,0,1"), T0);
+        b.Clear();
+        b.Add(Poll(2, "p25s.f0=433500000,456,655,1,2,0,1"), T0.AddSeconds(600));
+        Assert.Equal((1, T0.AddSeconds(600)), (Line(b, 655).Calls, Line(b, 655).First));
     }
 
     [Fact]
@@ -216,6 +227,7 @@ public sealed class SearchLogTests : IDisposable
         // a later call on TG 2 brings its line back
         b.Add([.. Poll(2, "p25s.f0=433500000,456,2,5,1,0,3"), "p25s.f1=433500000,456,1,9,1,9,4"], T0.AddSeconds(20));
         Assert.Equal((1, 1, 2), (Line(b, 1).Calls, Line(b, 2).Calls, b.TotalCalls));
+        Assert.Equal(T0, Line(b, 2).First);	// made again by the same entry: first heard at its first call
     }
 
     [Fact]

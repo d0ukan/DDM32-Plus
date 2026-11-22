@@ -347,9 +347,19 @@ fn a_line_needs_a_call() {
     let dir = tempfile::tempdir().unwrap();
     let w = searchlog::write(&dir.path().join("a.csv"), &b.groups(), ',', '.').unwrap();
     assert_eq!(1, std::fs::read_to_string(&w.path).unwrap().lines().count());
-    // its first call: the line, first heard when the entry was first seen
-    assert!(b.add(&poll(0, "", 1, "dmrs.f0=438612500,1,2,1,1,0,91,1,1,0,5", 100000), at(5)));
-    assert_eq!((1, 1, 1, T0), (b.groups().len(), b.frequencies(), b.total_calls(), line(&b, 91).first));
+    // its first call an hour later: the line, first heard at that call (not when the entry was first seen)
+    assert!(!b.add(&poll(0, "", 0, "dmrs.f0=438612500,1,2,1,1,0,91,1,0,1800,5", 100000), at(1800)));
+    assert!(b.add(&poll(0, "", 1, "dmrs.f0=438612500,1,2,1,1,0,91,1,1,0,5", 100000), at(3600)));
+    assert_eq!((1, 1, 1, at(3600)), (b.groups().len(), b.frequencies(), b.total_calls(), line(&b, 91).first));
+}
+
+#[test]
+fn a_line_made_again_after_clear_is_first_heard_at_its_next_call() {
+    let mut b = SearchLogBook::new();
+    b.add(&p(1, "p25s.f0=433500000,456,655,1,1,0,1"), T0);
+    b.clear();
+    b.add(&p(2, "p25s.f0=433500000,456,655,1,2,0,1"), at(600));
+    assert_eq!((1, at(600)), (line(&b, 655).calls(), line(&b, 655).first));
 }
 
 #[test]
@@ -366,6 +376,7 @@ fn a_line_whose_last_call_moved_goes() {
     again.push("p25s.f1=433500000,456,1,9,1,9,4".into());
     b.add(&again, at(20));
     assert_eq!((1, 1, 2), (line(&b, 1).calls(), line(&b, 2).calls(), b.total_calls()));
+    assert_eq!(T0, line(&b, 2).first); // made again by the same entry: first heard at its first call
 }
 
 #[test]

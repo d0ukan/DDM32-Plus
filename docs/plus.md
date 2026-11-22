@@ -482,7 +482,9 @@ moved call only when another entry of the engine rose in the same poll or the en
 unchanged: the other entry is read in the next poll); one down while `seq` moved and nothing rose is a new entry too
 (branch `slog3`). A line exists only while it has calls: an entry seen without a call yet makes no line (table, CSV,
 frequency count), and a line whose calls went back to 0 (its only call moved to another talkgroup) goes once no entry
-with calls is on it; a later call brings it back with its first-heard time. The radio's uptime going back (not
+with calls is on it; a later call brings it back with its first-heard time. A line's first-heard is the time of its
+first call (not when its entry was first seen without one); "Clear the log" forgets it, so a line made again after
+the clear is first heard at its next call. The radio's uptime going back (not
 its 49.7 day wrap) or a `seq` going back is a restart: the entries start anew, nothing counted is lost or counted
 twice. `seq` growing more than the entries' calls is calls on entries the PC never saw (more than 8 new between two
 polls): shown as "N calls may be missed"; the balance never goes below 0 (so it never hides a later miss), a call the
