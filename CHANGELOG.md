@@ -5,6 +5,13 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
+- Dual watch / multi-watch transmit fix (owner's beta.7 report: with the FM letter selected PTT went out as P25 on the
+  P25 letter; PTT on a P25 letter did nothing; TALKING stayed on after release; the P25 letter went deaf until a power
+  cycle). PTT now always transmits on the letter Home shows with PTT (the selected one), with its own frequency, mode,
+  power, tones, CC / TS / talk group or NAC / talk group, also while the receiver is on another letter or a P25 call is
+  held there (that letter is let go and the selected one tuned first); a P25 letter transmits as a single P25 channel
+  does; an FM carrier is never keyed on a P25 letter; the TX indicator clears on release, end or refusal; after our
+  over on a P25 letter its reply is waited for 2.5 s without the cooldown.
 - Satellites: ISS notifications and auto track. The pass alarm page gains "Every pass" (the ISS or any satellite:
   every qualifying pass announced with the beeps and banner before and at AOS, armed again by itself and kept across
   power cycles) and "Auto track" (Off / On / APRS): at AOS, when the radio is idle on Home or the Satellites screen, it

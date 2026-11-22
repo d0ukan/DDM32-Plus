@@ -87,6 +87,9 @@ enum { SCAN_P25_PROBE_MS=1200, SCAN_P25_GONE_MS=600, SCAN_P25_RETRY_MS=2000, SCA
 _Static_assert(RADIO_MW_P25_HOLD_MS==SCAN_P25_NO_VOICE_MS, "radio_mwatch.h: the P25 hold is native_lab.c's");
 #endif
 static bool scan_owned, scan_release, scan_quiet, scan_carrier;
+/* DDM32 Plus TX target fix: the take transmitted (PTT released since): no voice after it is the reply's wait, not a
+ * foreign carrier, so it is given back after SCAN_P25_NO_VOICE_MS without a cooldown (before: 8 s deaf after our over) */
+static bool scan_after_tx;
 static uint8_t scan_stop_seen;
 static uint32_t scan_taken_ms, scan_skip_until, scan_settle_until;
 /* The take's last voice and last frame (0: none yet). Kept here: the worker starts over 0.5 s after the last valid
@@ -122,8 +125,13 @@ static bool scan_skipping(const radio_sm_t *sm)
     return scan_key(sm)==scan_skip_pos && (int32_t)(scan_skip_until-hal_millis())>0;
 }
 /* While a scan runs, the native receiver may take a P25 channel only where the scan holds on a signal */
-static bool scan_allows(const radio_sm_t *sm)
+static bool scan_allows(radio_sm_t *sm)
 {
+#if CONFIG_DUAL_WATCH
+    /* DDM32 Plus: PTT on the selected letter of dual watch / the ring: the native transmitter takes it whatever the
+     * ring does there (a quiet stop, the settle after a give back, a cooldown), as on a single channel */
+    if(sm->ptt && sm->scan.kind==SCAN_DUAL && !radio_sm_dual_away(sm,false,0)) return true;
+#endif
     /* Just given back: the radio retunes the FM path and the scan reads the channel again before a retake,
      * so a carrier that is still there (the call goes on) is taken again and one that is gone lets it move on */
     if(scan_on(&sm->scan) && (int32_t)(scan_settle_until-hal_millis())>0) return false;
@@ -158,6 +166,9 @@ static void scan_give_back(radio_sm_t *sm)
         if(scan_voice_ms) {
             if(now-scan_voice_ms<SCAN_P25_END_MS) return;
             cause=&scan_n.ended;
+        } else if(scan_after_tx) {
+            if(now-scan_taken_ms<SCAN_P25_NO_VOICE_MS) return;
+            cause=&scan_n.ended;    /* no reply to our over: back to the ring, no cooldown */
         } else if(zone && scan_sync_ms && now-scan_sync_ms>=SCAN_P25_GONE_MS) cause=&scan_n.tails;
         else if(zone && !scan_sync_ms && now-scan_taken_ms>=SCAN_P25_PROBE_MS) {
             bool again=scan_quiet && scan_key(sm)==scan_skip_pos &&
@@ -176,7 +187,7 @@ static void scan_give_back(radio_sm_t *sm)
         if(voice_owner){pending_start=0;nt_stop(&test,test.session,NT_USER_STOP);}
     }
     if(voice_owner || test.owned || p25_lab_busy()) return;   /* the worker is still letting go */
-    scan_release=scan_owned=false;
+    scan_release=scan_owned=scan_after_tx=false;
     scan_settle_until=hal_millis()+SCAN_P25_SETTLE_MS;
     channel_selected=channel_handoff=false;
     live_restore_pending=false;channel_denial=0;
@@ -517,12 +528,14 @@ static void channel_service(radio_sm_t *sm)
 #endif
         if(!p25_lab_set_channel(ch->p25_nac,codeplug_p25_tx_nac(ch),ch->p25_tg,ch->p25_id,ch->p25_squelch==1))return;
         channel_selected=live_enabled=live_rx_pending=true;
-        live_tx_pending=false;channel_denial=0;
+        /* DDM32 Plus: PTT already held (pressed before the take, e.g. on a letter of the ring): it keys now */
+        live_tx_pending=sm->ptt && !channel_denial;
+        if(!sm->ptt)channel_denial=0;
 #if CONFIG_P25_ANY
         selected_rx_note(ch);
 #endif
 #if CONFIG_P25_SCAN
-        scan_owned=scan_on(&sm->scan);scan_release=false;scan_taken_ms=hal_millis();
+        scan_owned=scan_on(&sm->scan);scan_release=scan_after_tx=false;scan_taken_ms=hal_millis();
         scan_voice_ms=scan_sync_ms=0;scan_n.takes+=scan_owned;
 #endif
     }
@@ -556,7 +569,7 @@ void native_lab_init(void) {
 #if CONFIG_P25_CHANNELS
     channel_selected=channel_handoff=false;channel_denial=0;channel_tx_ms=0;
 #if CONFIG_P25_SCAN
-    scan_owned=scan_release=scan_quiet=scan_carrier=false;scan_stop_seen=0;
+    scan_owned=scan_release=scan_quiet=scan_carrier=scan_after_tx=false;scan_stop_seen=0;
     scan_taken_ms=scan_skip_until=scan_settle_until=scan_voice_ms=scan_sync_ms=0;scan_skip_pos=0;
     scan_n=(__typeof__(scan_n)){0};
 #endif
@@ -661,6 +674,10 @@ static void live_next(radio_sm_t *sm)
     if (sid && (!eligible(sm) || !p25_lab_live_begin(sid))) {
         deny(sid);
         native_lab_voice_release(sid);
+#if CONFIG_P25_CHANNELS
+        /* DDM32 Plus: a P25 transmission refused while PTT is held shows as refused (until release), not as nothing */
+        if(channel_selected && sm->ptt && !channel_denial) channel_denial=TXDENY_BUSY;
+#endif
     }
     if (!tx && rx &&
 #if !CONFIG_P25_CHANNELS
@@ -676,12 +693,52 @@ static void live_next(radio_sm_t *sm)
 #endif
 }
 #endif
+/* DDM32 Plus: the native receiver hands the channel back: the TX / TX denied / RX it showed goes with it. Left in the
+ * view (a give back of the ring or a zone scan right after our over, the drain's TX the last shown) the radio core
+ * took it for its own transmission: Home showed TALKING after release, the ring stood still (scan_talked) and the
+ * retune waited for the end of a TX that never came, until the time-out or a power cycle */
+static void native_view_clear(radio_sm_t *sm)
+{
+    if(!sm->ptt && (sm->view.state==RS_TX || sm->view.state==RS_TX_DENIED || sm->view.state==RS_RX)) {
+        sm->view.state=RS_IDLE;sm->view.tx_deny=0;sm->view.tot_warning=false;sm->serial++;
+    }
+}
 static void restore_channel(radio_sm_t *sm)
 {
+    native_view_clear(sm);
     sm->audio_out=sm->green_out=sm->red_out=-1;
     radio_req_t r={.type=RREQ_RETUNE};
     radio_sm_request(sm,&r,hal_millis());
 }
+#if CONFIG_DEV_TX && CONFIG_P25_CHANNELS
+/* A request (or PTT on another letter of the ring) takes the channel from the native receiver: 0 once it is let go,
+ * NATIVE_REQUEST_WAIT while the worker still lets go (the radio task keeps the request) */
+static int channel_let_go(radio_sm_t *sm)
+{
+#if CONFIG_P25_SCAN
+    scan_owned=scan_release=false;   /* the user's request takes over from the scan's hold */
+#endif
+#if CONFIG_P25_SEARCH
+    search_owned=search_release=false;  /* the radio task ends the search for the request */
+#endif
+#if CONFIG_P25_TRUNK
+    trunk_owned=trunk_release=trunk_moving=false;   /* the radio task ends the following or it takes over again */
+#endif
+#if CONFIG_P25_ANY
+    reselect=false;     /* the request's own handoff selects the channel again */
+#endif
+    if(voice_owner || test.owned || p25_lab_busy()) {
+        channel_handoff=true;live_enabled=live_rx_pending=live_tx_pending=false;
+        p25_lab_channel_stop();
+        if(voice_owner){pending_start=0;nt_stop(&test,test.session,NT_INTERRUPTED);}
+        return NATIVE_REQUEST_WAIT;
+    }
+    channel_selected=channel_handoff=false;
+    live_enabled=live_restore_pending=false;
+    native_view_clear(sm);
+    return 0;
+}
+#endif
 void native_lab_service(radio_sm_t *sm, uint32_t now)
 {
     if(updater())return;
@@ -787,15 +844,35 @@ int native_lab_request(radio_sm_t *sm, const radio_req_t *r)
     /* PTT during the DMR search is the radio core's: it stops the search, nothing is keyed (receive only) */
     if(r->type==RREQ_PTT && dmrs_on())return 0;
 #endif
+#if CONFIG_DUAL_WATCH
+    /* DDM32 Plus (docs/plus.md "Multi-watch", the TX target): PTT in dual watch or the ring talks on the selected letter,
+     * never on the one the receiver happens to be on (before: C selected, the ring on or held by a call on B, keyed P25
+     * on B). The native receiver holding another letter lets it go first (the request waits), then the radio core tunes
+     * the selected one: a P25 / YSF letter is keyed below, an FM / DMR one by the radio core (returned to it) */
+    if(r->type==RREQ_PTT && r->arg && !sm->ptt && !live_owner() && radio_sm_dual_away(sm,false,0)) {
+        if(channel_selected || channel_handoff) {
+            int w=channel_let_go(sm);
+            if(w)return w;
+            sm->audio_out=sm->green_out=sm->red_out=-1;  /* the board is back in FM: fresh speaker / LED decisions */
+        }
+        if(radio_sm_dual_away(sm,true,hal_millis())==2) { channel_denial=TXDENY_MODE;return 1; }
+    }
+#endif
     if(r->type==RREQ_PTT && (codeplug_mode_p25(sm->view.ch.mode) || channel_selected || live_owner())) {
+        /* DDM32 Plus: PTT noted before the channel is looked at, so a letter of the ring is taken for it (scan_allows)
+         * and a take that comes later keys at once */
+        bool down=r->arg && !sm->ptt;
+        if(down) { channel_denial=radio_sm_tx_check(sm);sm->ptt=true; }
         if(!channel_selected && codeplug_mode_p25(sm->view.ch.mode)) channel_service(sm);
         if(!r->arg) {
             sm->ptt=false;live_tx_pending=false;channel_denial=0;
             p25_lab_live_up();
             if(live_owner() && test.state==NT_ARMED)nt_stop(&test,test.session,NT_USER_STOP);
-        } else if(!sm->ptt) {
-            channel_denial=radio_sm_tx_check(sm);
-            sm->ptt=true;
+#if CONFIG_P25_SCAN
+            /* a take of the ring that transmitted: the reply's wait from now (scan_give_back) */
+            if(scan_owned) { scan_after_tx=true;scan_taken_ms=hal_millis();scan_voice_ms=scan_sync_ms=0; }
+#endif
+        } else if(down) {
 #if CONFIG_YSF_TX
             if(!channel_denial && codeplug_mode_ysf(sm->view.ch.mode))ysf_tx_callsign(sm);
 #endif
@@ -814,27 +891,7 @@ int native_lab_request(radio_sm_t *sm, const radio_req_t *r)
         if(r->type==RREQ_POWER_OFF) {
             sm->ptt=false;channel_denial=0;p25_lab_live_up();
         } else if(sm->ptt || live_owner())return 1;
-#if CONFIG_P25_SCAN
-        scan_owned=scan_release=false;   /* the user's request takes over from the scan's hold */
-#endif
-#if CONFIG_P25_SEARCH
-        search_owned=search_release=false;  /* the radio task ends the search for the request */
-#endif
-#if CONFIG_P25_TRUNK
-        trunk_owned=trunk_release=trunk_moving=false;   /* the radio task ends the following or it takes over again */
-#endif
-#if CONFIG_P25_ANY
-        reselect=false;     /* the request's own handoff selects the channel again */
-#endif
-        if(voice_owner || test.owned || p25_lab_busy()) {
-            channel_handoff=true;live_enabled=live_rx_pending=live_tx_pending=false;
-            p25_lab_channel_stop();
-            if(voice_owner){pending_start=0;nt_stop(&test,test.session,NT_INTERRUPTED);}
-            return NATIVE_REQUEST_WAIT;
-        }
-        channel_selected=channel_handoff=false;
-        live_enabled=live_restore_pending=false;
-        return 0;
+        return channel_let_go(sm);
     }
 #endif
 #if CONFIG_DEV_TX
