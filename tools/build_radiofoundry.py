@@ -731,6 +731,7 @@ def main():
         "CONFIG_AIR_PROV="+("y" if args.plus else "n"),	# DDM32 Plus airfields by province (round 16, tools/plus_airprov.py)
         "CONFIG_SPECTRUM_COLOR="+("y" if args.plus else "n"),	# DDM32 Plus spectrum in colour (round 16, tools/plus_airprov.py)
         "CONFIG_SSTV_TX="+("y" if args.plus else "n"),	# DDM32 Plus SSTV send (docs/plus.md, tools/plus_sstvtx.py)
+        "CONFIG_RF_FIXES="+("y" if args.plus else "n"),	# DDM32 Plus upstream RadioFoundry fixes (tools/plus_rfports.py)
         f"OPT=-Os -ffile-prefix-map={DEST}=/radiofoundry -fdebug-prefix-map={DEST}=/radiofoundry "
         f"-DRFOUNDRY_SOURCE_EPOCH={git(UP, 'show', '-s', '--format=%ct', 'HEAD')}"]
     if args.classic:
