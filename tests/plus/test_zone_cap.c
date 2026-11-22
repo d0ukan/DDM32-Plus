@@ -228,22 +228,24 @@ static void test_new_joins(void)
 static void test_copy_into_all(void)
 {
 	fresh();
-	for (uint16_t n = 1; n <= 5; n++) {
+	for (uint16_t n = 1; n <= 8; n++) {	/* past the 6 built-in channels a fresh codeplug starts from */
 		channel_t c = kind_of(n);
 		CHECK(codeplug_set_channel(n, &c));
 	}
 	uint16_t at, n;
-	CHECK(zone_edit_new("B", &at) == ZONE_EDIT_OK && at == 1);
-	channel_t c = kind_of(6);
-	CHECK(zone_edit_add_join(0, 2, 6, &c) == ZONE_EDIT_OK && holds(0, (const uint16_t[]){ 1, 2, 6, 3, 4, 5 }, 6));
+	CHECK(zone_edit_new("B", &at) == ZONE_EDIT_OK && at == 1 && holds(0, (const uint16_t[]){ 1, 2, 3, 4, 5, 6, 7, 8 }, 8));
+	channel_t c = kind_of(9);
+	CHECK(zone_edit_add_join(0, 2, 9, &c) == ZONE_EDIT_OK);
+	CHECK(holds(0, (const uint16_t[]){ 1, 2, 9, 3, 4, 5, 6, 7, 8 }, 9));
 	CHECK(holds(1, NULL, 0) && last_note(&n) == ZONE_NOTE_IDLE);
 	/* Home on All channels: at the end, once */
-	CHECK(zone_edit_add_join(0, ZONE_POS_JOIN, 7, &c) == ZONE_EDIT_OK &&
-	      holds(0, (const uint16_t[]){ 1, 2, 6, 3, 4, 5, 7 }, 7));
+	CHECK(zone_edit_add_join(0, ZONE_POS_JOIN, 10, &c) == ZONE_EDIT_OK);
+	CHECK(holds(0, (const uint16_t[]){ 1, 2, 9, 3, 4, 5, 6, 7, 8, 10 }, 10));
 	CHECK(zone_edit_rename(0, "X") == ZONE_EDIT_OK);
-	CHECK(zone_edit_add_join(ZONE_NONE, ZONE_POS_JOIN, 8, &c) == ZONE_EDIT_OK);
-	CHECK(zone_edit_add_unzoned(1) == ZONE_EDIT_OK);	/* "Added to the zone: 1" replaces "In no zone: channel 8" */
-	CHECK(last_note(&n) == ZONE_NOTE_ADDED && n == 1 && last_note(&n) == ZONE_NOTE_IDLE && holds(1, (const uint16_t[]){ 8 }, 1));
+	CHECK(zone_edit_add_join(ZONE_NONE, ZONE_POS_JOIN, 11, &c) == ZONE_EDIT_OK);
+	CHECK(zone_edit_add_unzoned(1) == ZONE_EDIT_OK);	/* "Added to the zone: 1" replaces "In no zone: channel 11" */
+	CHECK(last_note(&n) == ZONE_NOTE_ADDED && n == 1 && last_note(&n) == ZONE_NOTE_IDLE);
+	CHECK(holds(1, (const uint16_t[]){ 11 }, 1));
 }
 
 /* A codeplug with the old 16-channel zone records (layout byte past 4): All channels holds 16, then it is full */
