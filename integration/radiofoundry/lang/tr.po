@@ -4833,32 +4833,32 @@ msgid " d"
 msgstr " g"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  # tone  2 sky"
-msgstr "OK durdur  # ton  2 gök"
+msgid "OK stop  # arm tone  <> UTC"
+msgstr "OK durdur  # akt. ton  <> UTC"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  # APRS  2 sky"
-msgstr "OK durdur  # APRS  2 gök"
+msgid "OK stop  # APRS via ISS"
+msgstr "OK durdur  # ISS'ten APRS"
 
 #: core/ui/ui_sat.c
-msgid "OK track  # APRS  2 sky"
-msgstr "OK takip  # APRS  2 gök"
+msgid "OK track  # APRS via ISS"
+msgstr "OK takip  # ISS'ten APRS"
 
 #: core/ui/ui_sat.c
-msgid "OK alarm  # APRS  2 sky"
-msgstr "OK alarm  # APRS  2 gök"
+msgid "OK alarm  # APRS via ISS"
+msgstr "OK alarm  # ISS'ten APRS"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  2 sky  <> UTC"
-msgstr "OK durdur  2 gök  <> UTC"
+msgid "OK stop  ^v pick  <> UTC"
+msgstr "OK durdur  ^v seç  <> UTC"
 
 #: core/ui/ui_sat.c
-msgid "OK track  2 sky  <> UTC"
-msgstr "OK takip  2 gök  <> UTC"
+msgid "^v pick  OK track  <> UTC"
+msgstr "^v seç  OK takip  <> UTC"
 
 #: core/ui/ui_sat.c
-msgid "OK alarm  2 sky  <> UTC"
-msgstr "OK alarm  2 gök  <> UTC"
+msgid "^v pick  OK alarm  <> UTC"
+msgstr "^v seç  OK alarm  <> UTC"
 
 #: core/ui/ui_sat.c
 msgid "Tracking off: VFO stays"
@@ -4935,6 +4935,22 @@ msgstr " kurulu"
 #: core/ui/ui_sat.c
 msgid "Every ISS pass: other alarm off"
 msgstr "Her ISS geçişi: diğer alarm kapalı"
+
+#: core/ui/ui_sat.c
+msgid "2 sky  ^v pick  <> UTC"
+msgstr "2 gök  ^v seç  <> UTC"
+
+#: core/ui/ui_sat.c
+msgid "# APRS  1 freq  2 sky"
+msgstr "# APRS  1 frek  2 gök"
+
+#: core/ui/ui_sat.c
+msgid "Pos: GPS"
+msgstr "Konum: GPS"
+
+#: core/ui/ui_sat.c
+msgid "Pos: typed"
+msgstr "Konum: elle"
 
 #: core/ui/ui_sat.c
 msgid "2 sky"

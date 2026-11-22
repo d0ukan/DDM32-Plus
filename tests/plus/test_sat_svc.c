@@ -463,35 +463,155 @@ static void sky_from_gps(uint8_t k, int32_t start)
 	run_s(6);		/* the screen's last look lapses (SEEN_MS) */
 }
 
-/* The GPS has the time but no fix: the typed position is the observer (the altitude 0) */
+/* A fresh service (SAT_SVC_TEST); the fake GPS keeps the time and gives or withholds the fix, the settings a typed position */
+void sat_svc_test_reset(void);
+extern unsigned sat_svc_test_sky_runs;
+
+static sat_view_t view_after(int32_t s)
+{
+	run_s(s);
+	return view_now();
+}
+
+/* The typed position serves while no GPS fix has been seen since power on; the first fix replaces it once; a lost
+ * fix is not replaced by it again (away from home it would be the wrong place) and nothing is searched again */
 static void typed_position(uint8_t k, int32_t start)
 {
-	printf("  sky: the typed position without a GPS fix\n");
-	scenario("typed", start);
+	printf("  position: typed until the first GPS fix, then the GPS for good\n");
+	sat_svc_test_reset();
+	now_ms += 1000;
+	gps_on = true;
 	fix_off = true;
 	typed_on = true;
+	scenario("typed", start);
 	sat_alarm_set(k, 5, 0, 0);
 	run_s(5);
 	run_until_found();
 	sat_view_t v = view_now();
-	CHECK(v.clock == SAT_CLOCK_OK && v.alarm.state == SAT_AL_ARMED);
-	sat_obs_t o;
+	CHECK(v.clock == SAT_CLOCK_OK && v.alarm.state == SAT_AL_ARMED && v.pos_src == SAT_POS_TYPED);
+	sat_obs_t o, og;
 	sat_observer(TLAT, TLON, 0, &o);
+	sat_observer(LAT, LON, ALT, &og);
 	sky_against(k, v.alarm.aos, v.alarm.aos + 600, &o);
 	screen = false;
-	/* ... not Ankara's: its look angles differ */
-	sat_obs_t og;
-	sat_observer(LAT, LON, ALT, &og);
-	sgp4_t p;
-	sat_look_t l;
-	CHECK(sgp4_init(&p, &sat_table[k].el) == SGP4_OK && sat_eval(&p, &sat_table[k], v.alarm.aos + 300, &og, &l) == SGP4_OK);
-	sat_look_t lt;
-	CHECK(sat_eval(&p, &sat_table[k], v.alarm.aos + 300, &o, &lt) == SGP4_OK);
-	CHECK(fabsf(l.az - lt.az) > 1.0f || fabsf(l.el - lt.el) > 1.0f);
+	run_s(6);
+	/* the first GPS fix: takes over once, far from the typed one */
+	fix_off = false;
+	run_s(3);
+	run_until_found();
+	v = view_now();
+	CHECK(v.pos_src == SAT_POS_GPS && v.alarm.state == SAT_AL_ARMED);
+	sky_against(k, v.alarm.aos, v.alarm.aos + 600, &og);
+	screen = false;
+	run_s(6);
+	/* the fix lost: the GPS position stays; no new search, no flapping */
+	int32_t aos = view_now().alarm.aos;
+	fix_off = true;
+	for (int i = 0; i < 6; i++) {
+		v = view_after(5);
+		CHECK(v.pos_src == SAT_POS_GPS && v.alarm.state == SAT_AL_ARMED && v.alarm.aos == aos);
+	}
+	sky_against(k, aos, aos + 600, &og);
+	screen = false;
 	sat_alarm_set(SAT_NONE, 0, 0, 0);
-	run_s(1);
+	run_s(6);
+	/* a GPS fix seen first, then lost, with a typed position set: still the GPS position */
+	printf("  position: a lost GPS fix is not replaced by the typed position\n");
+	sat_svc_test_reset();
+	now_ms += 1000;
+	fix_off = false;
+	typed_on = true;
+	scenario("fix then none", start + 20000);
+	run_s(3);
+	CHECK(view_now().pos_src == SAT_POS_GPS);
+	fix_off = true;
+	run_s(10);
+	CHECK(view_now().pos_src == SAT_POS_GPS);
+	sat_alarm_set(k, 5, 0, 0);
+	run_until_found();
+	v = view_now();
+	sky_against(k, v.alarm.aos, v.alarm.aos + 600, &og);
+	screen = false;
+	sat_alarm_set(SAT_NONE, 0, 0, 0);
+	run_s(6);
 	fix_off = false;
 	typed_on = false;
+}
+
+/* The sky plot's keys: quick changes between passes never mix their points, a closed plot is not worked on, a failed
+ * run is tried again after a while */
+static void sky_races(uint8_t k, int32_t start)
+{
+	printf("  sky: A, B, A asks; close; a failed run retried\n");
+	scenario("sky races", start);
+	sat_alarm_set(k, 5, 10, 0);
+	run_until_found();
+	sat_view_t v = view_now();
+	sat_obs_t o;
+	sat_observer(LAT, LON, ALT, &o);
+	int32_t a0 = v.alarm.aos, a1 = a0 + 600, b0 = a0 + 700, b1 = a0 + 1300;
+	sgp4_t p;
+	CHECK(sgp4_init(&p, &sat_table[k].el) == SGP4_OK);
+	screen = true;
+	focus = k;
+	int bad = 0, seen = 0;
+	for (int i = 0; i < 400; i++) {
+		bool is_a = (i / 3 + (i % 5 == 0)) % 2 == 0;
+		int32_t s0 = is_a ? a0 : b0, s1 = is_a ? a1 : b1;
+		const uint8_t *az, *el;
+		uint8_t n = sat_sky(k, s0, s1, &az, &el);
+		if (n > 1) {
+			seen++;
+			for (int j = 0; j < n; j += n - 1) {
+				sat_look_t l;
+				double t = (double)s0 + (double)(s1 - s0) * j / (double)(n - 1);
+				CHECK(sat_eval(&p, &sat_table[k], t, &o, &l) == SGP4_OK);
+				double da = fabs((double)az[j] * 360.0 / 256.0 - (double)l.az);
+				da = da > 180.0 ? 360.0 - da : da;
+				bad += da > 0.75 || fabs((double)el[j] - (double)(l.el < 0.0f ? 0.0f : l.el)) > 0.51;
+			}
+		}
+		poll_once();
+		if (i % 7 == 0)
+			poll_once();
+	}
+	for (int i = 0; i < 400 && seen == 0; i++) {		/* then it settles on A: the points come */
+		const uint8_t *az, *el;
+		seen += sat_sky(k, a0, a1, &az, &el) > 1;
+		poll_once();
+	}
+	CHECK(bad == 0);
+	CHECK(seen > 0);
+	/* closed: nothing is worked out for an ask that was withdrawn */
+	const uint8_t *az, *el;
+	(void)sat_sky(k, a0, a1 + 400, &az, &el);
+	sat_sky_close();
+	unsigned runs = sat_svc_test_sky_runs;
+	for (int i = 0; i < 100; i++)
+		poll_once();
+	CHECK(sat_svc_test_sky_runs == runs);
+	/* a failed run (an empty span) is tried again after SKY_RETRY_MS, not before */
+	screen = true;
+	CHECK(sat_sky(k, a0, a0, &az, &el) == 0);
+	for (int i = 0; i < 20; i++) {
+		(void)sat_sky(k, a0, a0, &az, &el);
+		poll_once();
+	}
+	unsigned r1 = sat_svc_test_sky_runs;
+	CHECK(sat_sky(k, a0, a0, &az, &el) == 1);
+	for (int i = 0; i < 60; i++) {		/* about 1.5 s */
+		(void)sat_sky(k, a0, a0, &az, &el);
+		poll_once();
+	}
+	CHECK(sat_svc_test_sky_runs == r1);
+	for (int i = 0; i < 480; i++) {		/* 12 s on */
+		(void)sat_sky(k, a0, a0, &az, &el);
+		poll_once();
+	}
+	CHECK(sat_svc_test_sky_runs > r1);
+	screen = false;
+	sat_alarm_set(SAT_NONE, 0, 0, 0);
+	run_s(6);
 }
 
 /* --- Tracking --- */
@@ -1131,7 +1251,8 @@ int main(void)
 	popup_track(iss, t0 + 640000);
 	own_frame_and_hold_gone(iss, t0 + 700000);
 	auto_after_own_frame(iss, t0 + 760000);
-	typed_position(iss, t0 + 820000);
+	sky_races(iss, t0 + 800000);
+	typed_position(iss, t0 + 860000);
 	if (failures) {
 		printf("test_sat_svc: %d failures\n", failures);
 		return 1;

@@ -16,13 +16,15 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   transmits: OK does nothing on the plot, and an auto track or the AOS pop-up carry on as before; under a held auto
   track the plot may be shown (on Tools > Satellites key `2` and the plot's Back are not taken as the "any key ends the
   track" key). Messages instead of a plot: "Waiting for the GPS time", "Waiting for a GPS position", "no pass soon",
-  "Looking for the pass", "bad elements". The key is named on the pages: "2 sky" (Turkish "2 gök") ends Tools >
-  Satellites' hint row (the ISS row's hint loses "via ISS", the others "^v pick", for the room) and sits at the right of
-  the "145.825 APRS" line on Tools > ISS. FLASH +3,088 B (876,068 B, 97.22 %), RAM +184 B (2,288 B free), stacks
+  "Looking for the pass", "bad elements". The key is named on the pages: the hint rows alternate every 3 s between
+  the usual hint and one with "2 sky" (Turkish "2 gök"), and "2 sky" sits at the right of the "145.825 APRS" line on
+  Tools > ISS. The plot is map-style (north up, east right, like Gpredict). FLASH +3,672 B (876,652 B, 97.28 %), RAM +200 B (2,272 B free), stacks
   unchanged: the points are worked out by the radio task (the UI task has no stack for SGP4).
-- Satellites and the sky plot now also use the position the APRS settings hold when the GPS has the time but no fix (a
-  typed position, Settings > Location, as the beacons use it; with position ambiguity set the same blur applies, and
-  the altitude is taken as 0). The time still comes from the GPS alone: the radio has no clock of its own, so with no
+- Satellites and the sky plot now also use the position the APRS settings hold (a typed position, Settings > Location,
+  as the beacons use it; with position ambiguity set the same blur applies, and the altitude is taken as 0) but only
+  until the first GPS fix since power on: that fix replaces it for good and is kept when lost (never back to the typed
+  one: away from home it would be the wrong place). The source shows in the titles ("Pos: GPS" / "Pos: typed"). One
+  line turns the fallback off: `SAT_TYPED_POS` in `sat.h` (the owner has not confirmed it yet). The time still comes from the GPS alone: the radio has no clock of its own, so with no
   GPS time nothing can be predicted. The Satellites page's hint now reads "Needs a GPS fix or a typed position".
 
 ## v1.0.0-beta.8 (2026-11-22, beta: not yet confirmed on the radio)

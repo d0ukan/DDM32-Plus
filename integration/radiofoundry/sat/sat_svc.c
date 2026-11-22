@@ -48,6 +48,7 @@
 #define MOVED_E7	2000000	/* 0.2 degree (about 20 km): the passes are searched again */
 #define JUMP_S		60	/* the GPS time against the running clock: a bigger jump searches again */
 #define ALARM_GAP_S	5	/* the pass after one is looked for from this long after its set (found to 2 s) */
+#define SKY_RETRY_MS	10000u	/* a failed sky plot run is tried again after this long */
 #define SKY_STEP_S	20	/* the sky plot: points about this far apart (a long pass: SAT_SKY_MAX evenly) */
 #define AUTO_WAIT_S	3	/* auto track: the radio core's hold awaited this many seconds at most */
 
@@ -76,6 +77,7 @@ static struct {
 	uint32_t anchor_ms, clock_ms, live_ms;
 	uint32_t gps_hms, gps_date;
 	bool clock_ok, pos_ok, searching;
+	uint8_t pos_src;	/* SAT_POS_* of e.lat / e.lon */
 	bool cancel;		/* auto track: PTT was pressed, it ends once released */
 	int32_t lat, lon, alt;	/* where the observer was set up */
 	int32_t pass_lat, pass_lon;	/* where the passes were searched from */
@@ -227,22 +229,28 @@ static void clock_update(uint32_t now_ms)
 		}
 	}
 	int32_t lat, lon, alt = 0;
+	uint8_t src = SAT_POS_GPS;
 	bool have = gps && g.fix;
 	if (have) {
 		lat = g.lat;
 		lon = g.lon;
 		alt = g.alt_m != APRS_ALT_NONE ? g.alt_m : 0;
-	} else {
+	} else if (SAT_TYPED_POS && e.pos_src != SAT_POS_GPS) {
 		uint32_t err_m;
 		bool dmr;
 		have = aprs_position_now(&lat, &lon, &err_m, &dmr);
+		src = SAT_POS_TYPED;
 	}
 	if (have) {
 		int32_t dlat = lat - e.lat, dlon = lon - e.lon;
-		if (!e.pos_ok || dlat > 10000 || dlat < -10000 || dlon > 10000 || dlon < -10000) {	/* 0.001 deg */
+		/* the first GPS fix after a typed position takes over at once, whatever the distance (once: after it the
+		 * typed one is never used again); otherwise a move of 0.001 degree */
+		if (!e.pos_ok || src != e.pos_src || dlat > 10000 || dlat < -10000 || dlon > 10000 || dlon < -10000) {
 			e.lat = lat;
 			e.lon = lon;
 			e.alt = alt;
+			e.pos_src = src;
+			view.pos_src = src;
 			sat_observer(e.lat, e.lon, e.alt, &e.obs);
 			dlat = e.lat - e.pass_lat;
 			dlon = e.lon - e.pass_lon;
@@ -268,6 +276,22 @@ static __attribute__((noinline)) bool live_look(uint8_t i, double t, sat_look_t 
 	return ok;
 }
 
+#ifdef SAT_SVC_TEST
+/* Host tests: a fresh service (everything the radio task owns), and a count of the sky plot's runs */
+unsigned sat_svc_test_sky_runs;
+static void sky_reset_state(void);
+void sat_svc_test_reset(void)
+{
+	memset(&e, 0, sizeof e);
+	e.track = SAT_NONE;
+	e.rise_sat = SAT_NONE;
+	e.anchor_ms = 0;
+	view = (sat_view_t){ .live = SAT_NONE, .track = SAT_NONE, .alarm = { .target = SAT_NONE } };
+	memset(&al, 0, sizeof al);
+	sky_reset_state();
+}
+#endif
+
 /* --- The sky plot's points (sat_sky: the UI asks, this works one job a poll, like the pass search) --- */
 
 static volatile struct {	/* UI task writes, in a critical section */
@@ -279,9 +303,26 @@ static struct {		/* radio task writes; the UI reads az / el only once n is publi
 	uint8_t sat, n_want, done;
 	int32_t aos, los;
 	bool fail;
+	uint32_t fail_ms;	/* when the run failed (n 1) */
 	volatile uint8_t n;	/* points ready: 0 none, 1 failed, else the count */
 	uint8_t az[SAT_SKY_MAX], el[SAT_SKY_MAX];
 } sky = { .sat = SAT_NONE };
+
+void sat_sky_close(void)
+{
+	taskENTER_CRITICAL();
+	sky_ask.want = false;
+	taskEXIT_CRITICAL();
+}
+
+#ifdef SAT_SVC_TEST
+static void sky_reset_state(void)
+{
+	memset((void *)&sky_ask, 0, sizeof sky_ask);
+	memset(&sky, 0, sizeof sky);
+	sky.sat = SAT_NONE;
+}
+#endif
 
 uint8_t sat_sky(uint8_t idx, int32_t aos, int32_t los, const uint8_t **az, const uint8_t **el)
 {
@@ -313,20 +354,29 @@ static __attribute__((noinline)) bool sky_job(int evals)
 	taskEXIT_CRITICAL();
 	if (!want)
 		return false;
-	if (sky.sat != idx || sky.aos != aos || sky.los != los) {
+	uint32_t now_ms = hal_millis();
+	bool retry = sky.n == 1 && now_ms - sky.fail_ms >= SKY_RETRY_MS;	/* a failed run is tried again after a while */
+	if (sky.sat != idx || sky.aos != aos || sky.los != los || retry) {
 		int32_t n = (los - aos) / SKY_STEP_S + 1;
+		/* whole, in the critical section: the UI's sat_sky never sees a key of one pass with the points of another */
+		taskENTER_CRITICAL();
 		sky.n = 0;
 		sky.sat = idx;
 		sky.aos = aos;
 		sky.los = los;
+		taskEXIT_CRITICAL();
 		sky.done = 0;
 		sky.fail = idx >= sat_count || los <= aos;
 		sky.n_want = n < 2 ? 2 : n > SAT_SKY_MAX ? SAT_SKY_MAX : (uint8_t)n;
+#ifdef SAT_SVC_TEST
+		sat_svc_test_sky_runs++;
+#endif
 	}
 	if (sky.n != 0)
 		return false;		/* done (or failed) */
 	sgp4_t p;
 	if (sky.fail || sgp4_init(&p, &sat_table[idx].el) != SGP4_OK) {
+		sky.fail_ms = now_ms;
 		sky.n = 1;
 		return true;
 	}
@@ -334,6 +384,7 @@ static __attribute__((noinline)) bool sky_job(int evals)
 		sat_look_t l;
 		double t = (double)aos + (double)(los - aos) * (double)sky.done / (double)(sky.n_want - 1u);
 		if (sat_eval(&p, &sat_table[idx], t, &e.obs, &l) != SGP4_OK) {
+			sky.fail_ms = now_ms;
 			sky.n = 1;
 			return true;
 		}

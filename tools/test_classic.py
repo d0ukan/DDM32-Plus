@@ -395,7 +395,7 @@ def main():
     # core (the alarm against a one-second scan, the tracking's requests, step hysteresis, PTT, the set); the radio's
     # Doppler against tests/plus/sat_doppler_ref.py (its own Python SGP4 and frames on the same tle.txt); the screen
     # in the simulator (tracking, the alarm page, its banner and tone on Home)
-    run(['clang',*flags,'-DCONFIG_SATELLITES=1','-I'+str(ROOT/'tests/native/stubs'),ROOT/'tests/plus/test_sat_svc.c',
+    run(['clang',*flags,'-DCONFIG_SATELLITES=1','-DSAT_SVC_TEST=1','-I'+str(ROOT/'tests/native/stubs'),ROOT/'tests/plus/test_sat_svc.c',
          APP/'core/radio/sgp4.c',APP/'core/radio/sat.c',APP/'core/radio/sat_svc.c',APP/'core/radio/sat_data.c','-lm',
          '-o',OUT/'test_sat_svc'],cwd=ROOT)
     run([OUT/'test_sat_svc'],cwd=ROOT)

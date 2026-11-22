@@ -48,6 +48,8 @@ void sat_view(sat_view_t *out)
 }
 
 void sat_seen(uint8_t focus) { focus_seen = focus; }
+static int sky_closes;
+void sat_sky_close(void) { sky_closes++; }
 
 void sat_track(uint8_t idx)
 {
@@ -151,6 +153,9 @@ static void fake_reset(bool clock)
 	fv.rate_ms = -5432;
 	fv.cost_us = 1500;
 	t0 = (int32_t)sat_table[iss].el.epoch + 2 * 86400;
+	t0 -= t0 % 6;		/* the hints alternate every 3 s of this clock: the first one first */
+	fv.pos_src = SAT_POS_GPS;
+	sky_closes = 0;
 	fv.pass[iss] = (sat_pass_t){ t0 + 300, t0 + 900, 47, SAT_PASS_OK };
 	fv.pass[so50] = (sat_pass_t){ t0 + 7200, t0 + 7800, 23, SAT_PASS_OK };
 	fv.pass[ao91] = (sat_pass_t){ t0 + 18000, t0 + 18600, 61, SAT_PASS_OK };
@@ -616,12 +621,14 @@ static void prep_real(void)
 	for (int k = 0; k < 60 && fv.pass[iss].max_el < real_min_el; k++)
 		fv.pass[iss] = real_pass_of(iss, fv.pass[iss].los + 60);
 	t0 = fv.pass[iss].aos + (fv.pass[iss].los - fv.pass[iss].aos) / 3;
+	t0 -= fake_now() % 6;	/* the clock now a multiple of 6 s: the first hint of the alternation */
 	fv.pass[so50] = real_pass_of(so50, t0);
 	fv.pass[ao91] = real_pass_of(ao91, t0);
 	fv.pass[po101] = real_pass_of(po101, t0);
 	live_at(iss, t0);
 }
 static void prep_real_held(void) { prep_real(); prep_held(); }
+static void prep_typed(void) { prep_real(); fv.pos_src = SAT_POS_TYPED; }
 static void prep_no_pos(void) { fv.clock = SAT_CLOCK_NO_POS; }
 static void prep_no_pass(void) { fv.pass[iss] = (sat_pass_t){ 0, 0, 0, SAT_PASS_NONE }; }
 static void prep_unknown(void) { fv.pass[iss] = (sat_pass_t){ 0, 0, 0, SAT_PASS_UNKNOWN }; }
@@ -763,6 +770,34 @@ static int sky_checks(void)
 	bad += iss_flow(n = "Sky under a held track, from Satellites", SATS, prep_real_held, "2 wait:1200 back wait:300",
 			T("screen=satellites shows=Satellites hides=Max_", "screen=satellites hides=Maks_"), false);
 	ISS_SKY_CHECK(cancels == 0 && fv.track == iss && fake_auto, n);
+	/* the key is not the held track's end; any other key on the Satellites plot ends it, as on the page */
+	bad += iss_flow(n = "Sky under a held track: another key ends it", SATS, prep_real_held, "2 wait:300 up wait:300",
+			T("screen=satellites", "screen=satellites"), false);
+	ISS_SKY_CHECK(cancels == 1, n);
+	bad += iss_flow(n = "Sky under a held track: Back then Back", SATS, prep_real_held, "2 wait:300 back wait:300",
+			T("screen=satellites shows=Satellites", "screen=satellites shows=Uydular"), false);
+	ISS_SKY_CHECK(cancels == 0 && sky_closes == 1, n);
+	/* where the position is from: on the pages and the plot */
+	bad += iss_flow(n = "Position source: GPS", SATS, prep_real, "wait:1200",
+			T("shows=Pos:_GPS", "shows=Konum:_GPS"), true);
+	bad += iss_flow(n = "Position source: typed, Satellites", SATS, prep_typed, "wait:1200",
+			T("shows=Pos:_typed", "shows=Konum:_elle"), true);
+	bad += iss_flow(n = "Position source: typed, ISS", ISSP, prep_typed, "wait:1200",
+			T("shows=Pos:_typed", "shows=Konum:_elle"), true);
+	bad += iss_flow(n = "Position source: typed, sky plot", ISSP, prep_typed, "2 wait:1200",
+			T("shows=Pos:_typed shows=Max_", "shows=Konum:_elle shows=Maks_"), true);
+	bad += iss_flow(n = "Position source: GPS, sky plot", ISSP, prep_real, "2 wait:1200",
+			T("shows=Pos:_GPS", "shows=Konum:_GPS"), true);
+	/* hints alternate every 3 s so ^v pick, <> UTC and 2 sky are all named */
+	bad += iss_flow(n = "Satellites hints rotate", SATS, prep_real, "wait:200",
+			T("shows=OK_track__#_APRS_via_ISS hides=2_sky__^v", "shows=OK_takip"), false);
+	bad += iss_flow(n = "Satellites hints rotate: the sky key", SATS, prep_real, "wait:3200 right left",
+			T("shows=2_sky__^v_pick shows=<>_UTC hides=OK_track", "shows=2_g hides=OK_takip"), false);
+	bad += iss_flow(n = "ISS hint rotates: the sky key", ISSP, prep_real, "wait:3200 down up",
+			T("shows=#_APRS__1_freq hides=OK_track", "shows=#_APRS__1_frek hides=OK_takip"), false);
+	/* the plot closing tells the service */
+	bad += iss_flow(n = "Sky: Back tells the service", ISSP, prep_real, "2 wait:300 back wait:300", "screen=iss", false);
+	ISS_SKY_CHECK(sky_closes == 1, n);
 	/* the stopped cases: no GPS time, no position, no pass, still searching, elements that do not run */
 	bad += iss_flow("Sky: no GPS time", ISSP, prep_no_clock, "2 wait:1200",
 			T("screen=iss shows=Waiting_for_the_GPS_time shows=Needs_a_GPS_fix shows=typed_position shows=Back hides=Max_",
@@ -828,7 +863,7 @@ int main(int argc, char **argv)
 	}
 	const sat_flow_t checks[] = {
 		{ { "Sat list: soonest first, the ISS can be tracked", SATS, "",
-		    "screen=satellites shows=ISS shows=SO-50 shows=AO-91 shows=OK_track__#_APRS__2_sky", 0, false },
+		    "screen=satellites shows=ISS shows=SO-50 shows=AO-91 shows=OK_track__#_APRS_via_ISS", 0, false },
 		  true, SAT_NONE, SAT_NONE, 0, 0, -1, -1 },
 		{ { "Sat live lines: Az/El, range rate, Doppler in kHz", SATS, "",
 		    "shows=Az_123 shows=El_-1.2 shows=2345_km__-5.43_km/s shows=+7.9_kHz shows=OK:_track_in_the_VFO", 0, false },
@@ -839,7 +874,7 @@ int main(int argc, char **argv)
 		  true, 0, -1, 0, 0, -1, -1 },
 		{ { "Sat stop tracking", SATS, "ok ok", "toast=Tracking_off:_VFO_stays", 2, false },
 		  true, SAT_NONE, -1, 0, 0, -1, -1 },
-		{ { "Sat nothing to track: OK alarm", SATS, "down", "shows=OK_alarm__2_sky__<>_UTC", 1, false },
+		{ { "Sat nothing to track: OK alarm", SATS, "down", "shows=^v_pick__OK_alarm", 1, false },
 		  true, SAT_NONE, SAT_NONE, 0, 0, -1, -1 },
 		{ { "Sat alarm page", SATS, "down ok",
 		    "screen=satellites shows=Pass_alarm shows=For shows=SO-50 shows=Before_AOS shows=5_min "

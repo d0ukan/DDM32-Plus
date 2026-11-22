@@ -147,8 +147,16 @@ typedef struct {
 	int32_t in_s;		/* seconds to the rise (SOON), when taken (a banner held back during TX says the time left) */
 } sat_alarm_event_t;
 
+/* Where the observer's position comes from. SAT_TYPED_POS 1: with no GPS fix seen since power on, the position the APRS
+ * settings hold (a typed one, aprs_position_now) is used; a GPS fix, once there is one, replaces it for good and is kept
+ * when it is lost (never back to the typed one: away from home it would be the wrong place). Set to 0 to take the GPS
+ * fix alone, as before beta.9 (the one line that turns the fallback off) */
+#define SAT_TYPED_POS	1
+enum { SAT_POS_NONE, SAT_POS_GPS, SAT_POS_TYPED };
+
 typedef struct {
 	uint8_t clock;		/* SAT_CLOCK_* */
+	uint8_t pos_src;	/* SAT_POS_*: where the position is from */
 	uint8_t live;		/* the satellite of the live fields (the focus, or the one tracked), SAT_NONE */
 	uint8_t track;		/* the satellite tracked, SAT_NONE */
 	uint8_t track_state;	/* SAT_TRK_* (why the last tracking ended) */
@@ -176,6 +184,7 @@ void sat_track(uint8_t idx);		/* follow this satellite's pass in the VFO; SAT_NO
  * runs SGP4 itself: its stack has no room for it */
 #define SAT_SKY_MAX	64
 uint8_t sat_sky(uint8_t idx, int32_t aos, int32_t los, const uint8_t **az, const uint8_t **el);
+void sat_sky_close(void);	/* the plot is closed: the radio task stops working points out */
 void sat_arm(bool on);			/* the arming tone instead of the CTCSS on the uplink */
 /* Arm the pass alarm (target SAT_NONE: off) with SAT_OPT_* opts, replacing one armed before */
 void sat_alarm_set(uint8_t target, uint8_t lead_min, uint8_t min_el, uint8_t opts);

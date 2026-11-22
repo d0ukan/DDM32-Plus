@@ -1390,13 +1390,14 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   Key `2` on Tools > ISS (the ISS) and on Tools > Satellites (the satellite in focus) opens a polar plot of that
   satellite's next pass, or the one under way, from your location; Back returns to the page. Key 2 was free on both pages
   (Satellites: 0 is the alarm page, # APRS via the ISS, OK, arrows and UTC; Tools > ISS: 1 the downlink, # APRS, OK, the
-  alarm rows), so the same key does it on both. The hint says so where it fits: Satellites' hints end "2 sky" ("2 gök"; the
-  ISS row's hint lost its "via ISS" and the others their "^v pick" for the room); on Tools > ISS the hint row is full, so
-  "2 sky" sits at the right of the "145.825 APRS" line.
+  alarm rows), so the same key does it on both. The hint row is too narrow for everything, so the hints alternate every 3 s (by the
+  prediction clock, redrawn with the live values): Satellites shows its usual hint, then "2 sky  ^v pick  <> UTC"
+  ("2 gök  ^v seç  <> UTC"); Tools > ISS its usual hint, then "# APRS  1 freq  2 sky"; "2 sky" also stays at the right of
+  the "145.825 APRS" line.
   - **What is drawn** (nothing but lines, no map bitmap): a circle, the horizon (elevation 0 at the edge, the zenith in
     the centre, so the radius is proportional to 90 - elevation), rings at 30 and 60 degrees, a cross, N / E / S / W
-    outside it (Turkish K / D / G / B), north up and east to the right as on a map (a view down on the compass, so east is on
-    the right, not on the left as on a sky chart held overhead). The pass is a white line through its
+    outside it (Turkish K / D / G / B), north up and east to the right: a map-style plot (a view down on the compass, like Gpredict),
+    not the mirrored sky chart held overhead where east is on the left. The pass is a white line through its
     points, the rise a filled green square, the set an open red one, the satellite now a filled warning-color dot at the
     live azimuth and elevation (from the same once-a-second live look the page prints; not drawn below the horizon).
     Under it: "AOS hh:mm  LOS hh:mm" (local time, the page's offset), "Max 47°  AOS in m:ss" ("LOS in m:ss" and the rx
@@ -1417,21 +1418,27 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     each time, and the arrays are small enough to keep. The plot is thus as accurate as the lists: the rise and set
     marks sit on the horizon circle and the highest point at the radius of the search's top elevation (checked to a few
     pixels against `sat_eval` in the UI test). A new ask for the same pass is answered at once; a different pass starts
-    over.
-  - **Location without a GPS fix.** The satellite code used the GPS fix alone. It now takes the position the APRS settings
-    hold when the GPS has no fix (`aprs_position_now`: a typed position, Settings > Location, the way the beacons use it,
-    with the same position-ambiguity blur if one is set; the altitude is taken as 0) in `clock_update`, so the lists, the
-    pass alarm, auto track and the plot all work indoors with a typed position. The TIME still comes from the GPS: the radio
-    has no clock of its own that firmware reads (as in the Clock tools), so with no GPS time since power on nothing can be
-    predicted and the pages say "Waiting for the GPS time". A GPS fix, when there is one, wins; a position that moved by
-    0.001 degree is taken over, as before. The Satellites page's hint line is now "Needs a GPS fix or a typed position".
+    over (key, count and points are reset together in a critical section, so a quick A, B, A never shows one pass's
+    points under another's key); closing the plot (`sat_sky_close`) withdraws the ask; a run that failed is tried again
+    after 10 s.
+  - **Location without a GPS fix** (switch: `#define SAT_TYPED_POS` in `integration/radiofoundry/sat/sat.h`, 1 = on; set it
+    to 0 and the typed-position fallback is gone, as before beta.9). The satellite code used the GPS fix alone. It now
+    takes the position the APRS settings hold (`aprs_position_now`: a typed position, Settings > Location; the same
+    position-ambiguity blur as the beacons; the altitude taken as 0) ONLY while no GPS fix has been seen since power on.
+    The first GPS fix replaces it once, however far away, and from then on the GPS position stays: a lost fix does not
+    bring the typed position back (away from home it would be the wrong place for passes, alarms and auto track), so the
+    two never alternate and nothing is searched again when the fix comes and goes. The source is named in the title of
+    Tools > Satellites and Tools > ISS ("Pos: GPS" / "Pos: typed", Turkish "Konum: GPS" / "Konum: elle") and on the last
+    row of the sky plot. The TIME still comes from the GPS: the radio has no clock of its own that firmware reads (as in
+    the Clock tools), so with no GPS time since power on nothing can be predicted ("Waiting for the GPS time"). The owner
+    has not confirmed this fallback yet. The Satellites page's hint line is now "Needs a GPS fix or a typed position".
   - **No interference.** Nothing on the plot tunes, tracks or transmits: OK does nothing there, the pass alarm, the AOS
     pop-up, Doppler tracking and auto track run as before. While a held (auto) track holds the radio the plot may be shown:
     on Tools > ISS the keys were already the page's; on Tools > Satellites the "any key ends the track" rule
-    (`ui_sat_auto_key`) leaves key 2 and the open plot's keys (Back) alone, and any other key there ends the track as it
-    did. The plot keeps the service looking at the satellite shown (`sat_seen`), which it does anyway while a satellite page
+    (`ui_sat_auto_key`) leaves key 2 and, while the plot is open, Back alone; any other key, on the plot too, ends the
+    track as on the page. The plot keeps the service looking at the satellite shown (`sat_seen`), which it does anyway while a satellite page
     is open; closing it stops that after 4 s as before.
-  - **Cost.** FLASH 872,980 -> 876,068 B (+3,088, 97.22 % of 901,120 B), RAM 209,168 B (2,288 B free, the floor 1,500; +184 B: the
+  - **Cost.** FLASH 872,980 -> 876,652 B (+3,672, 97.28 % of 901,120 B), RAM 209,184 B (2,272 B free, the floor 1,500; +200 B: the
     points 128 B, the ask and the state in the service 36 B, the page's state in the UI 20 B); stacks unchanged (radio 676 B
     free, UI 184 B free: the plot's own frame is under the Satellites screen's, and no SGP4 runs in the UI task).
     Build: zero warnings, forced rebuild identical.

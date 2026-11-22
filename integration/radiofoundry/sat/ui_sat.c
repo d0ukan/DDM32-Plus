@@ -195,6 +195,12 @@ static bool sb_alarm(sbuf_t *b, const sat_view_t *v)
 	return true;
 }
 
+/* Where the position is from, for the title of the Satellites and ISS pages (and the plot's last row) */
+static const char *pos_name(const sat_view_t *v)
+{
+	return v->pos_src == SAT_POS_NONE ? "" : v->pos_src == SAT_POS_GPS ? TR("Pos: GPS") : TR("Pos: typed");
+}
+
 /* The focused satellite (or the one tracked) now */
 static int live(int y, const sat_view_t *v)
 {
@@ -652,7 +658,7 @@ bool ui_sat_auto_key(const input_event_t *ev)
 		return true;
 	}
 	if (!sat_auto_on() || (!pass && ui_depth() != 0 && (ui_frame()->scr == SCR_ISS ||
-	    (ui_frame()->scr == SCR_SATELLITES && (sky_page || ev->action == ACT_DIGIT_2)))))
+	    (ui_frame()->scr == SCR_SATELLITES && (ev->action == ACT_DIGIT_2 || (sky_page && ev->action == ACT_BACK))))))
 		return false;
 	if (pass ? ev->gesture != GESTURE_DOWN :
 	    ev->gesture != GESTURE_PRESS && ev->gesture != GESTURE_LONG && ev->action != ACT_ENC_STEP)
@@ -837,7 +843,7 @@ static void __attribute__((noinline)) sky_draw(const sat_view_t *v, uint8_t i, i
 		sky_note(y, sky_n ? TR("bad elements") : GLYPH_ELLIPSIS, NULL);
 		sky_n = 0;
 	} else {
-		int th = 3 * (s->h + 1) + 2;
+		int th = 4 * (s->h + 1) + 2;
 		sky_frame(y, ui_layout.hint_y - y - th);
 		sky_pass();
 		bool up = p->aos <= v->now;
@@ -863,8 +869,10 @@ static void __attribute__((noinline)) sky_draw(const sat_view_t *v, uint8_t i, i
 		if (v->live == i && v->live_ok) {
 			sb_init(&b, buf, sizeof buf);
 			sb_azel(&b, v);
-			sky_row(s, y, buf, v->el10 >= 0 ? ui_col.warn : ui_col.dim);
+			y = sky_row(s, y, buf, v->el10 >= 0 ? ui_col.warn : ui_col.dim);
 		}
+		if (v->pos_src != SAT_POS_NONE)
+			gfx_text(s, 0, y, pos_name(v), ui_col.dim);
 	}
 	ui_draw_bottom(&ui_st, TR("Back"));
 	ui_draw_banner(&ui_st);
@@ -875,6 +883,7 @@ static bool sky_key(const input_event_t *ev)
 {
 	if (ev->action == ACT_BACK && ev->gesture == GESTURE_PRESS) {
 		sky_page = false;
+		sat_sky_close();
 		ui_dirty();
 		return true;
 	}
@@ -890,13 +899,13 @@ static void sat_draw(void)
 	sat_view_t v;
 	uint8_t idx[SAT_MAX];
 	gfx_clear(ui_col.bg);
-	int y = ui_draw_top(ui_view(), &ui_st, sky_page ? TR("Sky") : alarm_page ? TR("Pass alarm") : TR("Satellites"),
-			    sky_page && sky_idx < sat_count ? sat_table[sky_idx].name : "") + 2;
-	const font_t *s = ui_layout.small, *m = ui_layout.medium;
 	if (sel >= sat_count)
 		sel = 0;
 	sat_seen(sel);
 	sat_view(&v);
+	int y = ui_draw_top(ui_view(), &ui_st, sky_page ? TR("Sky") : alarm_page ? TR("Pass alarm") : TR("Satellites"),
+			    sky_page && sky_idx < sat_count ? sat_table[sky_idx].name : alarm_page ? "" : pos_name(&v)) + 2;
+	const font_t *s = ui_layout.small, *m = ui_layout.medium;
 	if (sky_page) {
 		sky_draw(&v, sky_idx, y);
 		return;
@@ -957,17 +966,21 @@ static void sat_draw(void)
 		y += rh;
 	}
 	gfx_hline(0, y + 2, gfx_width(), ui_col.line);
-	live(y + 5, &v);
 	bool can = can_track(&v, sel);
-	/* "2 sky" in each hint; a hint too wide drops its last groups first (ui_draw_hint) */
+	/* The hints alternate every 3 s with one that names key 2 (the sky plot): room for both ^v pick / <> UTC and 2 sky
+	 * does not exist in one row */
+	if ((v.now / 3) & 1)
+		ui_draw_bottom(&ui_st, TR("2 sky  ^v pick  <> UTC"));
+	else
 	ui_draw_bottom(&ui_st, v.track == sel && sat_table[sel].arm10 ?
-		       TR("OK stop  # tone  2 sky")
-		       : is_iss(sel) ? (v.track == sel ? TR("OK stop  # APRS  2 sky")
-					: can ? TR("OK track  # APRS  2 sky")
-					: TR("OK alarm  # APRS  2 sky"))
-		       : v.track == sel ? TR("OK stop  2 sky  <> UTC")
-		       : can ? TR("OK track  2 sky  <> UTC")
-		       : TR("OK alarm  2 sky  <> UTC"));
+		       TR("OK stop  # arm tone  <> UTC")
+		       : is_iss(sel) ? (v.track == sel ? TR("OK stop  # APRS via ISS")
+					: can ? TR("OK track  # APRS via ISS")
+					: TR("OK alarm  # APRS via ISS"))
+		       : v.track == sel ? TR("OK stop  ^v pick  <> UTC")
+		       : can ? TR("^v pick  OK track  <> UTC")
+		       : TR("^v pick  OK alarm  <> UTC"));
+	live(y + 5, &v);
 	ui_draw_banner(&ui_st);
 }
 
@@ -1125,12 +1138,12 @@ static void iss_draw(void)
 	sbuf_t b;
 	sat_view_t v;
 	gfx_clear(ui_col.bg);
-	int y = ui_draw_top(ui_view(), &ui_st, sky_page ? TR("Sky") : "ISS", sky_page ? "ISS" : "") + 2;
 	const font_t *s = ui_layout.small;
 	uint8_t i = iss_index();
 	if (i != SAT_NONE)
 		sat_seen(i);
 	sat_view(&v);
+	int y = ui_draw_top(ui_view(), &ui_st, sky_page ? TR("Sky") : "ISS", sky_page ? "ISS" : pos_name(&v)) + 2;
 	if (sky_page) {
 		sky_draw(&v, i, y);
 		return;
@@ -1156,8 +1169,10 @@ static void iss_draw(void)
 		sb_str(&b, TR("Track from AOS-10 min"));
 	}
 	gfx_text(s, 0, y, buf, c);
-	ui_draw_bottom(&ui_st, v.track != SAT_NONE ? TR("OK stop  # APRS  1 freq")
-						   : TR("OK track  # APRS  1 freq"));
+	if ((v.now / 3) & 1)
+		ui_draw_bottom(&ui_st, TR("# APRS  1 freq  2 sky"));
+	else
+		ui_draw_bottom(&ui_st, v.track != SAT_NONE ? TR("OK stop  # APRS  1 freq") : TR("OK track  # APRS  1 freq"));
 	ui_draw_banner(&ui_st);
 }
 
