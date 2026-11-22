@@ -179,49 +179,69 @@ bool radio_sm_dual_keeps(radio_sm_t *sm, const radio_req_t *req)
 #if CONFIG_DMR_EMERGENCY
 static void scan_stop_asked(radio_sm_t *sm, bool cancel, uint32_t now_ms);
 
-// Letter i's mode now (FM when it can't be read): the channel's, or the VFO's as its slot keeps it
-static uint8_t __attribute__((noinline)) dual_mode(radio_sm_t *sm, uint8_t i)
+// Letter i can carry the emergency (hole hunt B2): a DMR channel or VFO (as its slot keeps it) that passes the TX checks
+// every PTT press gets (radio_sm_tx_check: TX inhibit, receive only, the band, the air band, a marine VFO, Any color
+// code or slot) with an own DMR ID. The check reads the view: the letter is put there for it, then the view as it was
+static bool __attribute__((noinline)) dual_dmr_tx(radio_sm_t *sm, uint8_t i)
 {
 	const radio_dual_ref_t *r = &sm->dual[i];
-	if (dual_ref_here(sm, r)) {
-		return sm->view.ch.mode;
-	}
 	channel_t ch;
-	if (r->vfo) {
+	bool here = dual_ref_here(sm, r);
+	if (here) {
+		ch = sm->view.ch;
+	} else if (r->vfo) {
 #if CONFIG_VFO_MODES
 		uint32_t talk;
 		bool seeded;
-		if (r->pos >= 2 && r->pos < RADIO_DUAL_SLOTS) {
+		if (r->pos >= 2 && r->pos < RADIO_DUAL_SLOTS)
 			vfox_slot_get(&sm->vfox_x[r->pos - 2u], &ch, &talk, &seeded);
-			return ch.mode;
-		}
-		if (sm->vfox_at >= 2 && r->pos == sm->vfo_idx) {
+		else if (sm->vfox_at >= 2 && r->pos == sm->vfo_idx)
 			vfox_slot_get(&sm->vfox_park, &ch, &talk, &seeded);	// waiting while a C..F VFO is in use
-			return ch.mode;
-		}
+		else
 #endif
-		return r->pos == sm->vfo_idx ? sm->vfo_ch.mode : sm->vfo_other.ch.mode;
+			ch = r->pos == sm->vfo_idx ? sm->vfo_ch : sm->vfo_other.ch;
+	} else {
+		zone_t z;
+		if (dual_read(sm, r, &z, &ch) == NULL)
+			return false;
 	}
-	zone_t z;
-	return dual_read(sm, r, &z, &ch) != NULL ? ch.mode : (uint8_t)RADIO_MODE_FM;
+	if (ch.mode != RADIO_MODE_DMR || (ch.dmr_id == 0 && sm->own_id == 0))
+		return false;
+	if (here)
+		return radio_sm_tx_check(sm) == TXDENY_NONE;
+	channel_t keep = sm->view.ch;
+	bool vfo = sm->view.vfo;
+	sm->view.ch = ch;
+	sm->view.vfo = r->vfo;
+#if CONFIG_AM_RX
+	bool am = sm->view.am;
+	sm->view.am = false;		// the receiver's letter's (an air band letter is refused by its frequency)
+#endif
+	uint8_t deny = radio_sm_tx_check(sm);
+	sm->view.ch = keep;
+	sm->view.vfo = vfo;
+#if CONFIG_AM_RX
+	sm->view.am = am;
+#endif
+	return deny == TXDENY_NONE;
 }
 
 // DDM32 Plus (docs/plus.md "The TX target", third review): an emergency asked for (the user's key, the lone worker, SOS)
 // while the watch runs. Its alarm, hot mic and talk target are the channel the radio is on, which in the ring is the
-// letter it happens to be on: the watch ends on the selected letter when it is DMR, else on the first DMR letter A..F
-// (the UI follows the stop and says which: "Watch off: on A"). No DMR letter: the watch goes on and the emergency fails
-// as on any FM channel. Called from emergency_tick before dmr_emergency_tick takes the start
+// letter it happens to be on: the watch ends on the selected letter when it is a DMR letter that may transmit
+// (dual_dmr_tx), else on the first such letter A..F (the UI follows the stop and says which: "Watch off: on A"). None:
+// the watch goes on and the emergency fails as on any FM channel (SOS / the lone worker fall back). Called from emergency_tick before dmr_emergency_tick takes the start
 static void __attribute__((noinline)) mw_emergency(radio_sm_t *sm, uint32_t now_ms)
 {
 	uint8_t n = dual_count(sm), pick = RADIO_DUAL_SLOTS;
 	if (sm->ptt || sm->view.state == RS_TX) {
 		return;	// PTT first: it ends, then the emergency goes on the channel it was on
 	}
-	if (sm->dual_sel < n && dual_mode(sm, sm->dual_sel) == RADIO_MODE_DMR) {
+	if (sm->dual_sel < n && dual_dmr_tx(sm, sm->dual_sel)) {
 		pick = sm->dual_sel;
 	}
 	for (uint8_t i = 0; i < n && pick == RADIO_DUAL_SLOTS; i++) {
-		if (dual_mode(sm, i) == RADIO_MODE_DMR) {
+		if (dual_dmr_tx(sm, i)) {
 			pick = i;
 		}
 	}

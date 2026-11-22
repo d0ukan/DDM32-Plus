@@ -146,3 +146,52 @@ static void test_plus_allsearch_sm(void)
     printf("Plus all digital search in the state machine: FM sweep, native P25 probe found/played/hang/give back, "
            "DMR after P25, PTT never keys, the other search, idle stop\n");
 }
+
+/* Hole hunt B3: no search over a dual watch (the ring would be stopped with scan_stop(false), the air watch's flag left
+ * set). The all digital, DMR and P25 searches are refused while it runs; the ring goes on. A plain zone scan is still
+ * stopped by the search, as before */
+static void test_plus_allsearch_watch(void)
+{
+#if CONFIG_DUAL_WATCH
+    int failed = failures;
+    classic_select(false);
+    sm.view.ch.mode = RADIO_MODE_FM;
+    radio_dual_ref_t ref[2] = { { false, 0, 0 }, { false, 0, 1 } };
+    radio_req_dual(ref, 0);
+    run(300);
+    CHECK(scan_on(&sm.scan) && sm.scan.kind == SCAN_DUAL);
+    static const uint8_t types[] = { RREQ_ALL_SEARCH, RREQ_DMR_SEARCH,
+#if CONFIG_P25_SEARCH
+                                     RREQ_P25_SEARCH,
+#endif
+    };
+    for (unsigned i = 0; i < sizeof types; i++) {
+        radio_req_t r = { .type = types[i], .arg = 433000000, .arg2 = 434000000 };
+        if (native_lab_request(&sm, &r) == 0)
+            radio_sm_request(&sm, &r, now);
+        as_wait(200);
+        CHECK(!dmrs_on() && sm.scan.kind == SCAN_DUAL);
+#if CONFIG_P25_SEARCH
+        CHECK(!p25s_on());
+#endif
+    }
+    radio_req_dual(NULL, 0);
+    run(300);
+    CHECK(!scan_on(&sm.scan));
+    /* a zone scan: the search stops it and runs, as before */
+    radio_req_t z = { .type = RREQ_SCAN, .arg = RSCAN_ZONE };
+    radio_sm_request(&sm, &z, now);
+    run(300);
+    CHECK(scan_on(&sm.scan) && sm.scan.kind == SCAN_ZONE);
+    radio_req_t r = { .type = RREQ_ALL_SEARCH, .arg = 433000000, .arg2 = 434000000 };
+    if (native_lab_request(&sm, &r) == 0)
+        radio_sm_request(&sm, &r, now);
+    CHECK(dmrs_on() && !scan_on(&sm.scan));
+    r.arg = 0;
+    radio_sm_request(&sm, &r, now);
+    as_wait(200);
+    CHECK(!dmrs_on());
+    printf("Plus all digital search: refused over a dual watch (all digital, DMR%s), a zone scan stopped as before: "
+           "%d failures\n", CONFIG_P25_SEARCH ? ", P25" : "", failures - failed);
+#endif
+}

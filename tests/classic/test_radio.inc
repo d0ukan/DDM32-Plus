@@ -332,6 +332,7 @@ int main(void)
 #endif
 #if CONFIG_ALL_SEARCH
     test_plus_allsearch_sm();
+    test_plus_allsearch_watch();
 #endif
 #if CONFIG_P25_TRUNK
     test_plus_trunk_sm();

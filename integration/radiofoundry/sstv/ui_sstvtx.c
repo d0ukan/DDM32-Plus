@@ -69,6 +69,11 @@ static const char *why_text(const radio_sstvtx_info_t *in)
 	case SSTVTX_R_CALL: return TR("Set your callsign (the radio name) in qdmr.");
 	case SSTVTX_R_TOT: return TR("TX time-out shorter than the picture");
 	case SSTVTX_R_NOMEM: return TR("Not enough memory for SSTV");
+	case SSTVTX_R_WATCH: return TR("Stop the scan or watch first");
+	case SSTVTX_R_BAND: {
+		const char *plan = ui_xband_refusal(ui_view()->ch.tx_hz);
+		return plan != NULL ? plan : TR("Can't transmit there");
+	}
 	default: return TR("Can't transmit there");
 	}
 }
@@ -80,6 +85,8 @@ static const char *refusal(void)
 	char call[RADIO_CWID_CALL_MAX + 1];
 	if (callsign(call) == 0)
 		return TR("Set your callsign (the radio name) in qdmr.");
+	if (v->scan != 0)	/* a scan or a watch: the channel on view is the ring's, not the selected letter */
+		return TR("Stop the scan or watch first");
 	if (v->ch.mode != RADIO_MODE_FM || v->am)
 		return TR("SSTV: tune an FM channel");
 	if (v->ch.rx_hz != v->ch.tx_hz)

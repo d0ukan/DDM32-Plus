@@ -135,10 +135,10 @@ static void __attribute__((noinline)) alls_request(radio_sm_t *sm, const radio_r
 #if CONFIG_APRS
 	aprs_busy = sm->aprs_phase != APRS_RF_OFF;
 #endif
-	if (busy || sm->ptt || aprs_busy)
-		return;
+	if (busy || sm->ptt || aprs_busy || SEARCH_WATCH_ON(sm))
+		return;	// not over a watch (hole hunt B3): the screen says "Stop the scan or watch first"
 	if (scan_on(&sm->scan))
-		scan_stop(sm, false, now_ms);
+		scan_stop(sm, false, now_ms);	// a plain scan
 	bool again = dmrs_on();		// a new range (the DMR search was ended by radio_sm_request: dmrs_own_request)
 	uint32_t lo = (uint32_t)req->arg, step = 12500u;
 #if CONFIG_SEARCH_RANGE

@@ -6561,3 +6561,7 @@ msgstr "{Altılı izleme|Altılı}"
 #: core/ui/ui_mwatch.inc
 msgid " on"
 msgstr " açık"
+
+#: core/ui/ui_sstvtx.c core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
+msgid "Stop the scan or watch first"
+msgstr "Önce taramayı veya izlemeyi durdurun"

@@ -273,6 +273,38 @@ static void test_dota_receiver_dmr_vfo(void)
 	CHECK(dr_same(&before, &after) && sm.view.vfo && hw.rx_hz == 145500000);
 }
 
+/* The radio core repeats the band plan before keying (hole hunt A1: every self-keying feature checks in the core, not
+ * only on its page): a session on PMR446 or a repeater input never keys, FM or DMR; stopped, the channel comes back */
+static void test_dota_band_plan(void)
+{
+	static const struct { uint32_t hz; uint8_t method; } cases[] = {
+		{ 446006250u, DOTA_FM }, { 145000000u, DOTA_FM }, { 146520000u, DOTA_FM }, { 446006250u, DOTA_DMR },
+	};
+	for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+		setup_codeplug();
+		start();
+		signal(120, false);
+		poll_for(1000);
+		dr_place_t before = dr_place();
+		dr_reset();
+		dota_req_t r = dr_req(DOTA_SEND, cases[i].method);
+		r.hz = cases[i].hz;
+		CHECK(dota_start(&r));
+		dr_run(100);
+		CHECK(dota_owns_radio() && hw.rx_hz == cases[i].hz);	/* on the session's channel ... */
+		dr_run(6000);	/* (an FM sender gives up when its first key-up is refused) */
+		CHECK(hw.tx_calls == dr_tx0 && dr_spans == 0 && sm.view.state != RS_TX);	/* ... never keyed */
+		dota_stop();
+		for (int k = 0; k < 200 && dota_owns_radio(); k++)
+			dr_run(100);
+		CHECK(!dota_owns_radio() && hw.tx_calls == dr_tx0);
+		dr_run(200);
+		dr_place_t after = dr_place();
+		CHECK(dr_same(&before, &after));
+	}
+	printf("Plus DOTA radio core: the band plan again before keying: PMR446, a repeater input, 146.520 never keyed\n");
+}
+
 int main(void)
 {
 	int prior = classic_radio_main();
@@ -280,6 +312,7 @@ int main(void)
 	test_dota_sender_fm();
 	test_dota_stop();
 	test_dota_receiver_dmr_vfo();
+	test_dota_band_plan();
 	printf("Plus DOTA in the radio core: %d failures (upstream's and Classic's suites with it built in: %s)\n",
 	       failures - before, prior ? "FAILED" : "passed");
 	return prior != 0 || failures != before;

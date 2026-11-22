@@ -250,6 +250,10 @@ static void p25s_draw(void)
 static void restart(void)
 {
 	uint32_t lo, hi;
+	if (ui_view()->scan == 3 /* SCAN_DUAL: dual / multi-watch, the air watch */) {
+		ui_toast(TR("Stop the scan or watch first"));	/* the radio core refuses it over a watch (hole hunt B3) */
+		return;
+	}
 #if CONFIG_SEARCH_RANGE
 	lo = ui_srange_request(&rng, ui_view()->ch.rx_hz, &hi);	/* the step rides on lo (srange.h) */
 #else

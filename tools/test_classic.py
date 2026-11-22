@@ -815,7 +815,7 @@ def main():
     argv_dota[argv_dota.index(str(cwrad))]=str(dotarad)
     argv_dota[argv_dota.index('-o')+1]=str(OUT/'test_radio_dota')
     run([*argv_dota,'-DCONFIG_DOTA=1','-I'+str(ROOT/'tests/classic'),'-Wl,--wrap=beep_play',
-         *(str(APP/'core/radio'/f) for f in ('dota.c','dota_proto.c','dota_rec.c','dota_import.c')),
+         *(str(APP/'core/radio'/f) for f in ('dota.c','dota_proto.c','dota_rec.c','dota_import.c','xband.c')),
          str(APP/'core/aprs/ax25.c'),str(APP/'core/aprs/hdlc.c')],cwd=host)
     run([OUT/'test_radio_dota'],cwd=host)
     # DDM32 Plus cross-band store and forward in the radio core: the same suites with it built in, then a DMR call on A

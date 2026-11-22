@@ -396,6 +396,62 @@ static void test_vfox_dual(void)
     printf("Plus VFO P25 in dual watch: taken while the watch holds there, given back\n");
 }
 
+/* Hole hunt B4: OK on a search find outside the band plan (ui_dmrsearch.c tune_find: RREQ_VFO_SET, then the VFO's copy
+ * with rx_only) makes the VFO receive only: PTT keys nothing. A new frequency (FM / DMR) transmits again; a find inside
+ * the band plan (rx_only false) transmits as before */
+static void test_vfox_find_rx_only(void)
+{
+    static const uint8_t modes[] = { RADIO_MODE_FM, RADIO_MODE_DMR };
+    for (unsigned i = 0; i < sizeof modes; i++) {
+        vx_start();
+        vx_request(RREQ_VFO_SET, 159125000);
+        channel_t c = sm.view.ch;
+        c.rx_hz = c.tx_hz = 159125000;
+        vfox_set_mode(&c, modes[i], 0);
+        c.rx_only = true;
+        radio_req_vfo_apply(&c);
+        vx_pump(5);
+        CHECK(sm.view.vfo && sm.view.ch.rx_hz == 159125000 && sm.view.ch.mode == modes[i]);
+        CHECK(sm.vfo_ch.rx_only && radio_sm_tx_check(&sm) == TXDENY_RX_ONLY);
+        int tx0 = hw.tx_calls;
+        vx_request(RREQ_PTT, 1);
+        vx_pump(5);
+        CHECK(hw.tx_calls == tx0);
+        vx_request(RREQ_PTT, 0);
+        vx_pump(20);
+        /* the same frequency again keeps it; a new one ends it */
+        vx_request(RREQ_VFO_SET, 159125000);
+        CHECK(radio_sm_tx_check(&sm) == TXDENY_RX_ONLY);
+        vx_request(RREQ_VFO_SET, 145500000);
+        vx_pump(5);
+        CHECK(!sm.vfo_ch.rx_only && !sm.view.ch.rx_only && radio_sm_tx_check(&sm) == TXDENY_NONE);
+        /* a find inside the band plan: the VFO transmits */
+        vx_request(RREQ_VFO_SET, 433500000);
+        c = sm.view.ch;
+        c.rx_hz = c.tx_hz = 433500000;
+        vfox_set_mode(&c, modes[i], 0);
+        c.rx_only = false;
+        radio_req_vfo_apply(&c);
+        vx_pump(5);
+        CHECK(sm.view.ch.rx_hz == 433500000 && radio_sm_tx_check(&sm) == TXDENY_NONE);
+    }
+    /* a P25 find stays receive only after a new frequency (NAC Any: vfox_fix's own rule) */
+    vx_start();
+    vx_request(RREQ_VFO_SET, 159125000);
+    channel_t c = sm.view.ch;
+    c.rx_hz = c.tx_hz = 159125000;
+    vfox_set_mode(&c, RADIO_MODE_P25, 0);
+    c.rx_only = true;
+    radio_req_vfo_apply(&c);
+    vx_pump(5);
+    vx_request(RREQ_VFO_SET, 145500000);
+    vx_pump(5);
+    CHECK(sm.view.ch.mode == RADIO_MODE_P25 && radio_sm_tx_check(&sm) != TXDENY_NONE);
+    vx_request(RREQ_VFO, 0);
+    vx_pump(20);
+    printf("Plus every mode in the VFO: a search find outside the band plan is receive only until the frequency changes\n");
+}
+
 int main(void)
 {
     int prior = mwatch_radio_main();
@@ -407,6 +463,7 @@ int main(void)
     test_vfox_dual();
     test_vfox_ring();
     test_vfox_ring_tx();
+    test_vfox_find_rx_only();
     printf("Plus every mode in the VFO, radio core: %d failures\n", failures - before);
     return prior || failures != before ? 1 : 0;
 }

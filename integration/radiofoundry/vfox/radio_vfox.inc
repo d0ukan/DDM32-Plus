@@ -139,6 +139,11 @@ static void __attribute__((noinline)) vfox_apply_request(radio_sm_t *sm, bool bu
 	if (tones_valid(&in.tx_tone))
 		v->tx_tone = in.tx_tone;
 	vfox_fix(v);
+	// DDM32 Plus (hole hunt B4): a search find outside the band plan asks for receive only on an FM / DMR VFO (the
+	// settings screen's copy is vfox_fix's own; a native mode keeps vfox_fix's rule); it holds until the frequency
+	// changes (vfo_set_hz), the mode is set again, or a power off
+	if (in.rx_only && !vfox_native(v->mode))
+		v->rx_only = true;
 	sm->vfo_seeded = true;
 	vfox_retune(sm, now_ms);
 }

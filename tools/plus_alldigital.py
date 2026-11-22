@@ -50,6 +50,22 @@ def prepare_alldigital(transform, install):
 
     # --- The radio core ---
     transform('core/radio/radio_sm.c', [
+        # Hole hunt B3: no search over a dual / multi-watch or the air watch. Their requests stopped the ring with
+        # scan_stop(false) and left sm->air set: the UI then ended the air watch (RREQ_AIR_END), which ended the new
+        # search too, or nothing was noted (persist) until a power cycle. Refused; the screens say "Stop the scan or
+        # watch first" (ui_dmrsearch.c, ui_p25search.c). A plain scan is still stopped by a search, as before
+        ('#include "radio/radio_sm.h"\n',
+         '#include "radio/radio_sm.h"\n'
+         '#if CONFIG_AIR_WATCH\n'
+         '#define SEARCH_WATCH_ON(sm) ((sm)->air || (scan_on(&(sm)->scan) && (sm)->scan.kind == SCAN_DUAL))\n'
+         '#else\n#define SEARCH_WATCH_ON(sm) (scan_on(&(sm)->scan) && (sm)->scan.kind == SCAN_DUAL)\n#endif\n'),
+        ('\t\tif (busy || sm->ptt || aprs_busy || board.dmr == NULL)\n\t\t\tbreak;\n',
+         '\t\tif (busy || sm->ptt || aprs_busy || board.dmr == NULL || SEARCH_WATCH_ON(sm))\n\t\t\tbreak;\n'),
+        ('\t\t\t\tp25s_stop();\n\t\t\t\ttune(sm, now_ms);\n\t\t\t}\n\t\t\tbreak;\n\t\t}\n\t\tbool aprs_busy = false;\n'
+         '#if CONFIG_APRS\n\t\taprs_busy = sm->aprs_phase != APRS_RF_OFF;\n#endif\n\t\tif (busy || sm->ptt || aprs_busy)\n',
+         '\t\t\t\tp25s_stop();\n\t\t\t\ttune(sm, now_ms);\n\t\t\t}\n\t\t\tbreak;\n\t\t}\n\t\tbool aprs_busy = false;\n'
+         '#if CONFIG_APRS\n\t\taprs_busy = sm->aprs_phase != APRS_RF_OFF;\n#endif\n'
+         '\t\tif (busy || sm->ptt || aprs_busy || SEARCH_WATCH_ON(sm))\n'),
         # its side, before the DMR search's poll, which hands this kind over
         ("// Every poll while searching: the sweep's reading, or what the probe heard; retune when the engine moves on\n"
          'static void __attribute__((noinline)) dmrs_service(radio_sm_t *sm, uint32_t now_ms)\n{\n'

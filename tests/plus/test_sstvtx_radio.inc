@@ -92,9 +92,14 @@ static radio_sstvtx_info_t st_info(void)
 	return in;
 }
 
+/* Channel 1's frequency for these tests: 145.500 (an amateur simplex frequency the band plan allows; the fixture's
+ * 146.520 is outside Region 1's 2 m band) */
+static uint32_t st_hz = 145500000u;
+
 static void st_begin(uint16_t channel_step)
 {
 	setup_codeplug();
+	chans[1].rx_hz = chans[1].tx_hz = st_hz;
 	start();
 	signal(120, false);
 	poll_for(500);
@@ -108,15 +113,15 @@ static void st_begin(uint16_t channel_step)
 	hw.tx_calls = hw.tx_off_calls = 0;
 }
 
-/* Robot 36 sent whole on channel 1 (146.520 FM simplex) */
+/* Robot 36 sent whole on channel 1 (145.500 FM simplex) */
 static void test_sstvtx_sent(void)
 {
 	st_begin(0);
-	CHECK(sm.view.channel_number == 1 && hw.rx_hz == 146520000);
+	CHECK(sm.view.channel_number == 1 && hw.rx_hz == 145500000);
 	uint32_t want_n, want = st_expect(SSTV_TX_ROBOT36, "TA2DOU", &want_n);
 	uint16_t seq = radio_sstvtx_seq();
 	req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
-	CHECK(sm.view.state == RS_TX && hw.tx_calls == 1 && hw.tx_hz == 146520000 && hw.tx_power == sm.view.power);
+	CHECK(sm.view.state == RS_TX && hw.tx_calls == 1 && hw.tx_hz == 145500000 && hw.tx_power == sm.view.power);
 	CHECK(hw.tx_bw == (radio_bw_t)sm.view.ch.bw && hw.tx_tone.type == sm.view.ch.tx_tone.type);
 	CHECK(st_info().state == SSTVTX_KEYUP && st_info().lines == 240 && radio_sstvtx_seq() != seq);
 	poll_for(100);
@@ -130,8 +135,8 @@ static void test_sstvtx_sent(void)
 	in = st_info();
 	CHECK(sm.view.state == RS_IDLE && in.state == SSTVTX_SENT && in.line == 240 && hw.tx_off_calls == 1);
 	CHECK(st_pulled == want_n && st_sum == want);	/* the very picture, whole */
-	CHECK(st_stops == 1 && hw.rx_hz == 146520000 && !sm.ptt);
-	printf("Plus SSTV send radio core: Robot 36 on 146.520: %u samples played (%u.%03u s), unkeyed once\n",
+	CHECK(st_stops == 1 && hw.rx_hz == 145500000 && !sm.ptt);
+	printf("Plus SSTV send radio core: Robot 36 on 145.500: %u samples played (%u.%03u s), unkeyed once\n",
 	       (unsigned)st_pulled, (unsigned)(st_pulled / 8000u), (unsigned)(st_pulled % 8000u / 8u));
 }
 
@@ -243,6 +248,89 @@ static void test_sstvtx_stops(void)
 	printf("Plus SSTV send radio core: stopped by Back, PTT, a channel step and the time-out; refusals checked\n");
 }
 
+/* Hole hunt A1 / B7: the radio core is the authority. The band plan again before keying (146.520 is outside Region 1's
+ * 2 m band, 446.00625 PMR446, 145.000 a repeater input, 145.825 the satellite segment); nothing moving the receiver: a
+ * scan, a dual watch (before: the core moved to the selected letter and keyed it unchecked) */
+static void test_sstvtx_core_checks(void)
+{
+	static const uint32_t refused[] = { 146520000u, 446006250u, 145000000u, 145825000u, 144800000u, 150000000u };
+	for (unsigned i = 0; i < sizeof refused / sizeof refused[0]; i++) {
+		st_hz = refused[i];
+		st_begin(0);
+		CHECK(sm.view.ch.tx_hz == refused[i]);
+		req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
+		st_refused(SSTVTX_R_BAND, 0);
+	}
+	st_hz = 433400000u;	/* the band plan allows it: keyed, then stopped */
+	st_begin(0);
+	req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
+	CHECK(sm.view.state == RS_TX && hw.tx_hz == 433400000u);
+	req(RREQ_SSTV_TX, SSTV_TX_MODES);
+	CHECK(sm.view.state != RS_TX);
+	st_hz = 145500000u;
+	/* a zone scan runs: refused, the scan goes on */
+	st_begin(0);
+	req(RREQ_SCAN, RSCAN_ZONE);
+	poll_for(500);
+	CHECK(scan_on(&sm.scan));
+	req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
+	st_refused(SSTVTX_R_WATCH, 0);
+	CHECK(scan_on(&sm.scan));
+	req(RREQ_SCAN, RSCAN_STOP);
+	poll_for(500);
+#if CONFIG_DUAL_WATCH
+	/* dual watch, A selected on 146.520 (out of the band plan), the ring on B: refused, nothing keyed anywhere */
+	st_hz = 146520000u;
+	st_begin(0);
+	radio_dual_ref_t ref[2] = { { false, 0, 0 }, { false, 0, 1 } };
+	radio_req_dual(ref, 0);
+	poll_for(300);
+	CHECK(scan_on(&sm.scan) && sm.scan.kind == SCAN_DUAL);
+	hw.tx_calls = 0;
+	for (int i = 0; i < 6; i++) {	/* wherever the ring is when the request lands */
+		req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
+		st_refused(SSTVTX_R_WATCH, 0);
+		CHECK(sm.scan.kind == SCAN_DUAL);
+		poll_for(170);
+	}
+	radio_req_dual(NULL, 0);
+	poll_for(300);
+	st_hz = 145500000u;
+#endif
+	printf("Plus SSTV send radio core: the band plan and a scan / dual watch refused in the core\n");
+}
+
+/* Hole hunt B16: the radio name is the station's identification only when it is shaped like an ITU callsign: a prefix
+ * (a letter, two letters, letter and digit, digit and letter, or digit and two letters), one digit, 1 to 4 letters */
+static void test_sstvtx_callsign(void)
+{
+	static const char *const good[] = { "TA2DOU", "TA2DOU/P", "YM2KDZ", "ta2dou-7", "W1AW", "N4ABC", "VE3ABC",
+					    "KD2ABCD", "2E0ABC", "9A1A", "4X6TT", "A61AB", "3DA0XY", "M0ABC" };
+	static const char *const bad[] = { "DM32UV", "BAOFENG", "12345", "RADIO1", "Dogan", "DM-32UV", "TA22DOU",
+					   "1A2BC3", "W1", "TA2DOU1", "ABCD1EF", "1234A" };
+	char cs[RADIO_CWID_CALL_MAX + 1];
+	for (unsigned i = 0; i < sizeof good / sizeof good[0]; i++) {
+		if (radio_cwid_callsign(good[i], cs, sizeof cs) == 0) {
+			printf("  callsign refused: %s\n", good[i]);
+			CHECK(false);
+		}
+	}
+	for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+		if (radio_cwid_callsign(bad[i], cs, sizeof cs) != 0) {
+			printf("  not a callsign, taken: %s\n", bad[i]);
+			CHECK(false);
+		}
+	}
+	CHECK(radio_cwid_callsign("TA2DOU/P", cs, sizeof cs) == 6 && strcmp(cs, "TA2DOU") == 0);
+	/* the radio core refuses the factory radio name */
+	st_begin(0);
+	strcpy(sm.radio_name, "DM32UV");
+	req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
+	st_refused(SSTVTX_R_CALL, 0);
+	printf("Plus SSTV send radio core: callsigns: %u taken, %u refused (DM32UV, BAOFENG, 12345 among them)\n",
+	       (unsigned)(sizeof good / sizeof good[0]), (unsigned)(sizeof bad / sizeof bad[0]));
+}
+
 int main(void)
 {
 	int prior = classic_radio_main();
@@ -250,6 +338,8 @@ int main(void)
 	test_sstvtx_sent();
 	test_sstvtx_refusals();
 	test_sstvtx_stops();
+	test_sstvtx_core_checks();
+	test_sstvtx_callsign();
 	printf("Plus SSTV send in the radio core: %d failures (upstream's and Classic's suites with it built in: %s)\n",
 	       failures - before, prior ? "FAILED" : "passed");
 	return prior != 0 || failures != before;
