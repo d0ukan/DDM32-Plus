@@ -33,12 +33,7 @@ enum {
 	SSTVTX_R_AUDIO,		/* the board has no tone path or refused it */
 	SSTVTX_R_KEY,		/* the board would not key */
 	SSTVTX_R_WATCH,		/* a scan, dual / multi-watch, air watch, search, spectrum or trunk following runs */
-	SSTVTX_R_BAND,		/* the band plan refuses the TX frequency (xband_check_hz) */
 };
-
-/* The band plan (radio/xband.h, built with SSTV send): 0 (XB_R_OK) for an amateur frequency that is no repeater,
- * satellite, APRS or PMR446 frequency. The radio core checks it again before keying (the page's check is advice) */
-uint8_t xband_check_hz(uint32_t hz);
 
 typedef struct {
 	uint8_t state, mode, why, deny;

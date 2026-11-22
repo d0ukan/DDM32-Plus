@@ -24,8 +24,7 @@ def main(ROOT, APP, OUT, flags, host):
          tp / 'test_sstvtx.c', core / 'radio/sstv_tx.c', core / 'radio/sstv.c', *art, '-lm', '-o', OUT / 'test_sstvtx'],
         cwd=ROOT)
     run([OUT / 'test_sstvtx'], cwd=ROOT)
-    # The page through the real UI, English and Turkish (the tables made from tr.po); the band plan is the cross-band's
-    # (radio/xband.c and ui_xband.c built for SSTV send alone hold just that)
+    # The page through the real UI, English and Turkish (the tables made from tr.po)
     run(['make', 'out/gen/lang_tables.h'], cwd=host, stdout=subprocess.DEVNULL)
     command = run(['make', '-Bn', 'uiFlowTest', 'SANITIZE=1'], cwd=host, capture_output=True, text=True).stdout
     argv = shlex.split(next(line for line in command.splitlines() if ' -o uiFlowTest ' in line))
@@ -33,8 +32,8 @@ def main(ROOT, APP, OUT, flags, host):
     argv[argv.index('-o') + 1] = str(OUT / 'test_ui_sstvtx')
     run([*argv, '-I' + str(host), '-I' + str(core), '-DCONFIG_P25_CHANNELS=1', '-DCONFIG_DEV_TX=1',
          '-DCONFIG_MSG_RX=1', '-DCONFIG_SSTV=1', '-DCONFIG_SSTV_TX=1', '-DCONFIG_LANG_TR=1',
-         *(str(core / 'ui' / f) for f in ('ui_sstvtx.c', 'ui_sstv.c', 'ui_msg.c', 'ui_scratch.c', 'ui_xband.c')),
-         *(str(core / 'radio' / f) for f in ('xband.c', 'radio_cwid.c', 'sstv.c', 'sstv_tx.c'))], cwd=host)
+         *(str(core / 'ui' / f) for f in ('ui_sstvtx.c', 'ui_sstv.c', 'ui_msg.c', 'ui_scratch.c')),
+         *(str(core / 'radio' / f) for f in ('radio_cwid.c', 'sstv.c', 'sstv_tx.c'))], cwd=host)
     run([OUT / 'test_ui_sstvtx'], cwd=host)
 
 
@@ -55,6 +54,6 @@ def radio(argv_cw, cwrad, fixture, ROOT, APP, OUT, host):
     core = APP / 'core'
     run([*argv, '-DCONFIG_SSTV_TX=1', '-DCONFIG_PLUS_ART=1', '-DCONFIG_CW_BEACON=1', str(core / 'radio/cw_beacon.c'), '-I' + str(ROOT / 'tests/classic'),
          '-DpvPortMalloc=__builtin_malloc', '-DvPortFree=__builtin_free',
-         str(core / 'radio/radio_sstvtx.c'), str(core / 'radio/sstv_tx.c'), str(core / 'radio/xband.c'),
+         str(core / 'radio/radio_sstvtx.c'), str(core / 'radio/sstv_tx.c'),
          str(core / 'ui/art_data.c')], cwd=host)
     run([OUT / 'test_radio_sstvtx'], cwd=host)

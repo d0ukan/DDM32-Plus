@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* DDM32 Plus SSTV send (core/ui/ui_sstvtx.c, docs/plus.md "SSTV send") through the real UI in upstream's simulator,
  * on the DM-32UV's display class (240 x 320, insets 10 x 5, key map M), in English and in Turkish. The radio task's
- * side (radio_req_sstv_tx, radio_sstvtx_info) is a fake the test drives as the radio core would; the band plan is the
- * real one (radio/xband.c, ui/ui_xband.c built for SSTV send alone), the card and the receive screen too.
+ * side (radio_req_sstv_tx, radio_sstvtx_info) is a fake the test drives as the radio core would; the card and the
+ * receive screen are the real ones.
  *
  * Covers: Tools > SSTV says "OK send" and OK opens the page; the page (the preview, the mode with its length, the TX
  * frequency with the callsign, the hint) for each mode (Left / Right); every refusal the page makes itself (no
- * callsign, not FM, a repeater channel, a repeater / satellite / APRS frequency, outside the amateur bands, the
- * time-out timer too short) with nothing asked of the radio; a start (the mode asked), the progress while it sends
+ * callsign, not FM, a repeater channel, the time-out timer too short) with nothing asked of the radio; no band plan
+ * (owner decision 2026-11-22: a repeater / satellite / APRS / PMR446 frequency or one outside the amateur bands is
+ * asked of the radio core); a start (the mode asked), the progress while it sends
  * (keys other than Back refused), Back stops (the stop asked, the page stays), "Picture sent", the radio core's own
  * refusals told, leaving the page another way stops it; the layout of every page; no PTT transmission anywhere. Each
  * case runs in a child process (the screens' static state starts over). */
@@ -191,11 +192,6 @@ static void refusals(void)
 	static const struct { uint32_t rx, tx; uint8_t mode; const char *why; } t[] = {
 		{ 145500000, 145500000, RADIO_MODE_DMR, "SSTV: tune an FM channel" },
 		{ 145600000, 145000000, RADIO_MODE_FM, "Repeater channel (RX and TX differ)" },
-		{ 145600000, 145600000, RADIO_MODE_FM, "Repeater frequency" },
-		{ 145800000, 145800000, RADIO_MODE_FM, "Satellite segment" },
-		{ 144800000, 144800000, RADIO_MODE_FM, "APRS frequency" },
-		{ 162550000, 162550000, RADIO_MODE_FM, "Not an amateur band" },
-		{ 446006250, 446006250, RADIO_MODE_FM, "PMR446: no repeaters allowed" },
 	};
 	for (unsigned i = 0; i < sizeof t / sizeof t[0]; i++) {
 		channel(t[i].rx, t[i].tx, t[i].mode);
@@ -215,6 +211,21 @@ static void refusals(void)
 	expect_tr("toast", "Set your callsign (the radio name) in qdmr.");
 	layout();
 	check(f_starts == 0, "nothing asked of the radio");
+	ok_run("expect:tx=0");
+}
+
+/* No band plan on the page (owner decision 2026-11-22): each of these is asked of the radio core */
+static void no_plan(void)
+{
+	start("no band plan");
+	static const uint32_t hz[] = { 145600000, 145800000, 144800000, 162550000, 446006250 };
+	for (unsigned i = 0; i < sizeof hz / sizeof hz[0]; i++) {
+		channel(hz[i], hz[i], RADIO_MODE_FM);
+		ok_run("ok wait:100 expect:screen=sstv-tx");
+		check(f_starts == (int)i + 1, "asked of the radio");
+		f_set(SSTVTX_STOPPED, 0, 0, 0);
+		ok_run("wait:3000");
+	}
 	ok_run("expect:tx=0");
 }
 
@@ -302,7 +313,7 @@ typedef void (*case_fn)(void);
 
 int main(void)
 {
-	static const case_fn all[] = { page, refusals, send, radio_refusals, leave };
+	static const case_fn all[] = { page, refusals, no_plan, send, radio_refusals, leave };
 	int bad = 0, run = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		for (unsigned i = 0; i < sizeof all / sizeof all[0]; i++) {

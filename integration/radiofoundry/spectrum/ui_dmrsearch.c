@@ -38,18 +38,6 @@ bool ui_air_watch_on(void) __attribute__((weak));
 #endif
 #if CONFIG_ALL_SEARCH && CONFIG_VFO_MODES
 #include "radio/vfox.h"
-#if CONFIG_XBAND || CONFIG_DOTA || CONFIG_SSTV_TX
-#include "radio/xband.h"
-/* Hole hunt B4: a find becomes a VFO that may transmit only on a frequency the band plan allows (amateur, no satellite,
- * APRS or PMR446 frequency); elsewhere receive only (a public-safety P25 system). A repeater segment: the VFO is kept
- * (the radio core refuses simplex on an output until the TX offset is set, CONFIG_VFO_PLAN) */
-#define FIND_PLAN(hz)	xband_check_hz(hz)
-#define FIND_RPT	XB_R_REPEATER
-#endif
-#endif
-#ifndef FIND_PLAN
-#define FIND_PLAN(hz)	0
-#define FIND_RPT	0xFFu
 #endif
 
 #if CONFIG_SEARCH_RANGE
@@ -399,10 +387,9 @@ static void restart(void)
 }
 
 #if CONFIG_ALL_SEARCH
-/* OK on a P25 / YSF / NXDN find, or on a DMR find the band plan keeps receive only: the VFO there in that mode,
- * listening to every NAC / DG-ID / RAN (the VFO's defaults for the mode, radio/vfox.h; DMR: the find's color code and
- * slot when known); receive only unless tx (hole hunt B4). False when this build's VFO has no such mode */
-static bool tune_other(const dmrs_found_t *f, bool tx)
+/* OK on a P25 / YSF / NXDN find: the VFO there in that mode, listening to every NAC / DG-ID / RAN (the VFO's defaults
+ * for the mode, radio/vfox.h); false when this build's VFO has no such mode */
+static bool tune_other(const dmrs_found_t *f)
 {
 #if CONFIG_VFO_MODES
 	static const uint8_t mode_of[DMRS_MODES] = { RADIO_MODE_DMR, RADIO_MODE_P25, RADIO_MODE_YSF, RADIO_MODE_NXDN };
@@ -412,40 +399,26 @@ static bool tune_other(const dmrs_found_t *f, bool tx)
 	vfox_set_mode(&c, mode_of[f->mode], 0);
 	c.p25_tg = 0;		/* YSF DG-ID / NXDN RAN: any; P25: every talkgroup */
 	c.p25_squelch = 0;
-	if (f->mode == DMRS_MODE_DMR) {
-		if (f->cc != DMRS_CC_NONE)
-			c.color_code = (uint8_t)(f->cc & 15u);
-		if ((f->ts_mask & 3u) == 1u || (f->ts_mask & 3u) == 2u)
-			c.timeslot = (f->ts_mask & 1u) ? 1u : 2u;
-	}
-	c.rx_only = !tx;	/* the VFO keeps it until its frequency changes (or a power off) */
 	radio_req_vfo_set(f->hz);
 	radio_req_vfo_apply(&c);
 	return true;
 #else
-	(void)f, (void)tx;
+	(void)f;
 	return false;
 #endif
 }
 #endif
 
 /* OK on a find: the search stops and the VFO goes there in DMR, with the color code and the slot when known (the all
- * digital search: in the find's mode); receive only where the band plan does not allow transmitting */
+ * digital search: in the find's mode) */
 static void tune_find(const dmrs_found_t *f)
 {
-	uint8_t why = FIND_PLAN(f->hz);
-	bool rpt = why == FIND_RPT, tx = why == 0 || rpt;
-	(void)tx;
 	req_search(0, 0);
 	sel_hz = 0;
 #if CONFIG_ALL_SEARCH
-	if (f->mode != DMRS_MODE_DMR || !tx) {
-		if (!tune_other(f, tx))
+	if (f->mode != DMRS_MODE_DMR) {
+		if (!tune_other(f))
 			ui_toast(TR("VFO: not in this build"));
-		else if (!tx)
-			ui_toast(TR("This channel is RX only"));
-		else if (rpt)
-			ui_toast(TR("Repeater: set the TX offset"));
 		ui_go_home();
 		return;
 	}
@@ -458,7 +431,7 @@ static void tune_find(const dmrs_found_t *f)
 		radio_req_dmr_timeslot((f->ts_mask & 1u) ? 1u : 2u);
 	ui_go_home();
 	/* A repeater's output: the VFO is simplex there, so PTT would talk on the output; say so */
-	if ((f->sync_mask & DMRS_SYNC_BS) || rpt)
+	if (f->sync_mask & DMRS_SYNC_BS)
 		ui_toast(TR("Repeater: set the TX offset"));
 }
 

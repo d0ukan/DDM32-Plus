@@ -248,25 +248,23 @@ static void test_sstvtx_stops(void)
 	printf("Plus SSTV send radio core: stopped by Back, PTT, a channel step and the time-out; refusals checked\n");
 }
 
-/* Hole hunt A1 / B7: the radio core is the authority. The band plan again before keying (146.520 is outside Region 1's
- * 2 m band, 446.00625 PMR446, 145.000 a repeater input, 145.825 the satellite segment); nothing moving the receiver: a
- * scan, a dual watch (before: the core moved to the selected letter and keyed it unchecked) */
+/* Hole hunt A1 / B7: the radio core is the authority: nothing moving the receiver: a scan, a dual watch (before: the
+ * core moved to the selected letter and keyed it unchecked). No band plan (owner decision 2026-11-22: only DOTA refuses
+ * frequencies outside the amateur bands): a simplex FM channel the TX checks allow keys wherever it is (146.520,
+ * 446.00625, 145.000, 145.825, 144.800, 150.000, 433.400), then stopped */
 static void test_sstvtx_core_checks(void)
 {
-	static const uint32_t refused[] = { 146520000u, 446006250u, 145000000u, 145825000u, 144800000u, 150000000u };
-	for (unsigned i = 0; i < sizeof refused / sizeof refused[0]; i++) {
-		st_hz = refused[i];
+	static const uint32_t keyed[] = { 146520000u, 446006250u, 145000000u, 145825000u, 144800000u, 150000000u,
+					  433400000u };
+	for (unsigned i = 0; i < sizeof keyed / sizeof keyed[0]; i++) {
+		st_hz = keyed[i];
 		st_begin(0);
-		CHECK(sm.view.ch.tx_hz == refused[i]);
+		CHECK(sm.view.ch.tx_hz == keyed[i]);
 		req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
-		st_refused(SSTVTX_R_BAND, 0);
+		CHECK(sm.view.state == RS_TX && hw.tx_hz == keyed[i]);
+		req(RREQ_SSTV_TX, SSTV_TX_MODES);
+		CHECK(sm.view.state != RS_TX);
 	}
-	st_hz = 433400000u;	/* the band plan allows it: keyed, then stopped */
-	st_begin(0);
-	req(RREQ_SSTV_TX, SSTV_TX_ROBOT36);
-	CHECK(sm.view.state == RS_TX && hw.tx_hz == 433400000u);
-	req(RREQ_SSTV_TX, SSTV_TX_MODES);
-	CHECK(sm.view.state != RS_TX);
 	st_hz = 145500000u;
 	/* a zone scan runs: refused, the scan goes on */
 	st_begin(0);
@@ -279,7 +277,7 @@ static void test_sstvtx_core_checks(void)
 	req(RREQ_SCAN, RSCAN_STOP);
 	poll_for(500);
 #if CONFIG_DUAL_WATCH
-	/* dual watch, A selected on 146.520 (out of the band plan), the ring on B: refused, nothing keyed anywhere */
+	/* dual watch, A selected on 146.520, the ring on B: refused, nothing keyed anywhere */
 	st_hz = 146520000u;
 	st_begin(0);
 	radio_dual_ref_t ref[2] = { { false, 0, 0 }, { false, 0, 1 } };
@@ -297,7 +295,7 @@ static void test_sstvtx_core_checks(void)
 	poll_for(300);
 	st_hz = 145500000u;
 #endif
-	printf("Plus SSTV send radio core: the band plan and a scan / dual watch refused in the core\n");
+	printf("Plus SSTV send radio core: no band plan (7 frequencies keyed); a scan / dual watch refused in the core\n");
 }
 
 /* Hole hunt B16: the radio name is the station's identification only when it is shaped like an ITU callsign: a prefix
@@ -342,39 +340,34 @@ static void test_sstvtx_callsign(void)
 #if CONFIG_CW_BEACON
 #include "radio/cw_beacon.h"
 #endif
-/* Hole hunt, second round: the CW beacon checks the band plan in the radio core each time it keys (146.520, outside
- * Region 1's 2 m band, refused; 145.500 keyed); an SFR repeater role with its CW ID on and the radio name no callsign
- * is not started (no unidentified repeating), with a callsign it is */
+/* Hole hunt, second round: the CW beacon has no band plan (owner decision 2026-11-22: only DOTA refuses frequencies
+ * outside the amateur bands): 146.520 and 145.500 both keyed (a scan or a watch still refuses it: test_scan.inc); an
+ * SFR repeater role with its CW ID on and the radio name no callsign is not started (no unidentified repeating), with
+ * a callsign it is */
 static void test_txsafe2(void)
 {
 #if CONFIG_CW_BEACON
-	cw_beacon_view_t bv;
-	st_hz = 146520000u;
-	st_begin(0);
-	int tx0 = hw.tx_calls;
+	static const uint32_t keyed[] = { 146520000u, 145500000u };
 	radio_req_t rb = { .type = RREQ_CW_BEACON, .arg = CW_BEACON_CQ, .arg2 = 0 };
-	radio_sm_request(&sm, &rb, now);
-	for (int i = 0; i < 5; i++) {
-		now += 10;
-		radio_sm_tick(&sm, now);
-	}
-	cw_beacon_view(&bv);
-	CHECK(!bv.on && !bv.keying && bv.refused == TXDENY_BAND && hw.tx_calls == tx0);
-	st_hz = 145500000u;
-	st_begin(0);
-	tx0 = hw.tx_calls;
-	radio_sm_request(&sm, &rb, now);
-	now += 10;
-	radio_sm_tick(&sm, now);
-	cw_beacon_view(&bv);
-	CHECK(bv.keying && hw.tx_calls == tx0 + 1 && hw.tx_hz == 145500000u);
-	for (int i = 0; i < 6000 && bv.keying; i++) {
+	for (unsigned k = 0; k < sizeof keyed / sizeof keyed[0]; k++) {
+		cw_beacon_view_t bv;
+		st_hz = keyed[k];
+		st_begin(0);
+		int tx0 = hw.tx_calls;
+		radio_sm_request(&sm, &rb, now);
 		now += 10;
 		radio_sm_tick(&sm, now);
 		cw_beacon_view(&bv);
+		CHECK(bv.keying && hw.tx_calls == tx0 + 1 && hw.tx_hz == keyed[k]);
+		for (int i = 0; i < 6000 && bv.keying; i++) {
+			now += 10;
+			radio_sm_tick(&sm, now);
+			cw_beacon_view(&bv);
+		}
+		CHECK(!bv.keying && sm.view.state != RS_TX);
 	}
-	CHECK(!bv.keying && sm.view.state != RS_TX);
-	printf("Plus CW beacon radio core: the band plan before keying (146.520 refused, 145.500 keyed)\n");
+	st_hz = 145500000u;
+	printf("Plus CW beacon radio core: no band plan (146.520 and 145.500 keyed)\n");
 #endif
 #if CONFIG_SFR_CWID
 	setup_codeplug();
