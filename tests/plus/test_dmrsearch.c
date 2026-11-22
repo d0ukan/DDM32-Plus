@@ -80,6 +80,14 @@ static const dmrs_found_t *entry(const dmrs_view_t *v, uint32_t hz, uint16_t cc,
 	return NULL;
 }
 
+/* The PC's search log: the calls counted since power on (dmrs_peek's seq) */
+static uint16_t calls_seq(void)
+{
+	dmrs_peek_t pk;
+	(void)dmrs_peek(0u, &pk);
+	return pk.seq;
+}
+
 /* The found list keyed by frequency + mode + color code + group (owner 2026-11-21): calls of one key are ONE entry with
  * a call counter, another talkgroup (or color code) on the same frequency is its own entry; reports that don't name
  * the color code or the talkgroup yet go to the entry the probe holds or the newest that fits; a call counted before
@@ -120,13 +128,17 @@ static void test_found_key(void)
 	hold(&h, 500u);
 	h.call = true;
 	h.ts_mask = 3;
+	uint16_t seq0 = calls_seq();
 	hold(&h, 100u);
 	CHECK(dmrs_snapshot(&v) && v.found[0].dst == 91 && v.found[0].calls == 3);
+	CHECK(calls_seq() == (uint16_t)(seq0 + 1u));
 	h.dst = 9;
 	h.src = 2860003;
 	hold(&h, 1000u);
 	CHECK(dmrs_snapshot(&v) && entries_at(&v, F) == 2 && v.found[0].dst == 9 && v.found[0].calls == 1 &&
 	      v.found[0].src == 2860003 && (e = entry(&v, F, 1, 91)) && e->calls == 2);
+	/* the PC's search log: the moved call is ONE call (seq), each entry its own serial */
+	CHECK(calls_seq() == (uint16_t)(seq0 + 1u) && e && v.found[0].id != e->id);
 	h.call = false;
 	CHECK(hold(&h, 5000u) != 0 && dmrs_phase() == DMRS_SWEEP);
 	/* Hit again later (a revisit or the next pass): TG 91 again, the reports without a talkgroup first */

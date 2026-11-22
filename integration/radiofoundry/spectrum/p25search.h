@@ -50,6 +50,7 @@ typedef struct {
 	uint32_t src;
 	uint32_t heard_ms;	/* when it was last heard */
 	uint16_t calls;
+	uint16_t id;		/* the entry's serial, given when it was made (the PC's search log follows an entry by it) */
 } p25s_found_t;
 
 typedef struct {
@@ -96,6 +97,7 @@ bool p25s_snapshot(p25s_view_t *out);
 /* The PC's search log: the state and found entry i, not counted as a look (p25search.c) */
 typedef struct {
 	uint8_t phase, found_n;
+	uint16_t seq;		/* calls counted since power on (a call moved to another entry counts once) */
 	uint32_t at_hz, lo_hz, hi_hz;
 	p25s_found_t f;
 } p25s_peek_t;

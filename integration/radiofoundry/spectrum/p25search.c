@@ -27,6 +27,8 @@ static bool revisiting;
 /* The found list's key (p25search.h): found[0] is the entry of the probe held now (held), a call counted there and when */
 static bool held, credited;
 static uint32_t credit_ms;
+/* The PC's search log (searchlog_view.c): entry serials and the calls counted since power on */
+static uint16_t ids, calls_seq;
 #if CONFIG_SEARCH_FAST
 /* The faster sweep (P25S_QUICK_MS): the step's stage, the step before it when only its quick reading was taken, and
  * the step a look back came from */
@@ -431,6 +433,7 @@ static bool pick(uint16_t nac, uint16_t tg, bool *fresh)
 	memset(&s.found[0], 0, sizeof s.found[0]);
 	s.found[0].hz = s.at_hz;
 	s.found[0].nac = P25S_NAC_NONE;
+	s.found[0].id = ++ids;
 	*fresh = true;
 	return true;
 }
@@ -445,13 +448,13 @@ void p25s_probe_found(uint16_t nac, uint16_t tg, uint32_t src, uint32_t now_ms)
 	if (!s.playing)
 		s.probes_p25++;
 	s.playing = true;
-	bool fresh = false, call;
+	bool fresh = false, call, moved = false;
 	if (held && fits(&s.found[0], nac, tg)) {
 		call = now_ms - s.found[0].heard_ms > P25S_CALL_GAP_MS;	/* the probe's entry (on top) */
 	} else {
 		/* Not held yet, or the report names another NAC / talkgroup than the held entry's: that key's entry. A call
 		 * just counted on the held entry was this one's (its link control came late) */
-		bool moved = held && credited && now_ms - credit_ms < P25S_MOVE_MS;
+		moved = held && credited && now_ms - credit_ms < P25S_MOVE_MS;
 		if (!pick(nac, tg, &fresh)) {
 			end_write();
 			return;
@@ -471,6 +474,8 @@ void p25s_probe_found(uint16_t nac, uint16_t tg, uint32_t src, uint32_t now_ms)
 		f->src = src;
 	if (call) {
 		f->calls++;
+		if (!moved)
+			calls_seq++;	/* a moved call was counted when it began */
 		credited = true;
 		credit_ms = now_ms;
 	}
@@ -582,6 +587,7 @@ bool p25s_peek(unsigned i, p25s_peek_t *out)
 		out->lo_hz = s.lo_hz;
 		out->hi_hz = s.hi_hz;
 		out->found_n = s.found_n;
+		out->seq = calls_seq;
 		bool have = i < s.found_n && i < P25S_FOUND_MAX;
 		if (have)
 			memcpy(&out->f, &s.found[i], sizeof out->f);

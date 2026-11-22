@@ -295,8 +295,8 @@ static uint32_t __attribute__((noinline)) all_heard(uint32_t now)
             char src[11];
             h.bursts=DMRS_MIN_BURSTS;
             h.cc=p25_lab_ysf_dgid();
-            p25_lab_ysf_caller(src,NULL);
-            dmrs_call_pack(src,&h.dst,&h.src);
+            /* a callsign heard before the take (another frequency's call) is not this one's, as P25's below */
+            if(p25_lab_ysf_caller(src,NULL)!=search_seq0)dmrs_call_pack(src,&h.dst,&h.src);
         }
     } else
 #endif

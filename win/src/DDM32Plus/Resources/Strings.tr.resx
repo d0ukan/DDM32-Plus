@@ -1446,7 +1446,7 @@ Telsizdeki önceki paket hâlâ kullanımda.</value>
     <value>Arama kaydı</value>
   </data>
   <data name="SLog_Text" xml:space="preserve">
-    <value>Telsizde **P25 arama**, **DMR arama** ya da **Tüm dijital arama**yı başlatın (Araçlar), kabloyu takıp **Kaydı başlat**a basın. Program her saniye aramanın bulduklarını okur (yalnızca okur; telsize hiçbir şey göndermez) ve her konuşmayı burada ve günlük bir CSV dosyasında tutar; açık bırakırsanız bütün gece. Ses kaydedilmez.</value>
+    <value>Telsizde **P25 arama**, **DMR arama** ya da **Tüm dijital arama**yı başlatın (Araçlar), kabloyu takıp **Kaydı başlat**a basın. Program her saniye aramanın bulduklarını okur (yalnızca okur; telsize hiçbir şey göndermez) ve her konuşmayı burada ve her kayıt oturumunun kendi CSV dosyasında tutar (üzerine yazılmaz); açık bırakırsanız bütün gece: kayıt sürerken bilgisayar uykuya geçmez, kablo çıkarsa ya da telsiz yeniden başlarsa beklenir. Ses kaydedilmez.</value>
   </data>
   <data name="SLog_Start" xml:space="preserve">
     <value>Kaydı başlat</value>
@@ -1512,6 +1512,21 @@ Telsizdeki önceki paket hâlâ kullanımda.</value>
     <value>İlk duyulma</value>
   </data>
   <data name="SLog_ClearAsk" xml:space="preserve">
-    <value>Kayıtlar temizlensin mi? Tablo ve bugünün CSV dosyası boşaltılır; geri alınamaz.</value>
+    <value>Kayıtlar temizlensin mi? Tablo ve bu oturumun CSV dosyası boşaltılır (bundan sonra yalnızca yeni konuşmalar sayılır); geri alınamaz.</value>
+  </data>
+  <data name="SLog_Waiting" xml:space="preserve">
+    <value>{0}: telsiz bekleniyor (port 5 saniyede bir yeniden deneniyor; tablo korunuyor).</value>
+  </data>
+  <data name="SLog_NoFirmware" xml:space="preserve">
+    <value>Bu telsizin yazılımında arama kaydı yok (DDM32 Plus v1.0.0-beta.7 veya sonrası gerekir).</value>
+  </data>
+  <data name="SLog_Locked" xml:space="preserve">
+    <value>CSV dosyası başka bir programda açık (Excel?): kapatılana kadar kayıt {0} dosyasına yazılıyor.</value>
+  </data>
+  <data name="SLog_SearchStopped" xml:space="preserve">
+    <value>{0} arama: durdu ({1})</value>
+  </data>
+  <data name="SLog_Missed" xml:space="preserve">
+    <value>({0} konuşma kaçmış olabilir: telsiz iki okuma arasında 8'den fazla buldu)</value>
   </data>
 </root>

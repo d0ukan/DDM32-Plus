@@ -262,53 +262,119 @@ public static class DebugReaders
         (0x09, SearchLogBook.SectionP25), (0x09, SearchLogBook.SectionDmr), (0x09, SearchLogBook.SectionAll),
     };
 
-    /// <summary>The search log runs all night: a radio busy for a while (a menu, a restart) is waited for this many
-    /// polls (about a minute at one a second) before the run ends.</summary>
-    public const int SearchLogSilentPolls = 60;
+    /// <summary>The search log runs all night: a radio that does not answer at all for this long (seconds: a menu, a
+    /// restart, the cable out) ends the run, or with --reconnect closes the port and waits for the radio.</summary>
+    public const double SearchLogSilentSeconds = 60.0;
 
-    /// <summary>search log: --port P [--count N]. Every second the p25s, dmrs and alls sections, printed as the live reader
-    /// prints a poll ("=== poll N" ... "=== end N"), until <see cref="ToolContext.Cancel"/> or N polls.</summary>
+    /// <summary>With --reconnect: the port is tried again this often (seconds) while the radio is away.</summary>
+    public const double SearchLogRetrySeconds = 5.0;
+
+    /// <summary>Polls in a row that the radio answered without any search log section (a firmware before
+    /// v1.0.0-beta.7, Classic, or one built without the searches) before the run ends with exit 4.</summary>
+    public const int SearchLogMissingPolls = 3;
+
+    /// <summary>The line the reader prints before it ends with exit 4 (the page shows its own sentence).</summary>
+    public const string SearchLogMissingLine = "NO_SEARCHLOG: this radio's firmware has no search log (needs v1.0.0-beta.7)";
+
+    /// <summary>The line printed while the radio is away (--reconnect): "WAITING: COM14 ...".</summary>
+    public const string SearchLogWaiting = "WAITING:";
+
+    /// <summary>search log: --port P [--count N] [--reconnect]. Every second the p25s, dmrs and alls sections, printed as
+    /// the live reader prints a poll ("=== poll N" ... "=== end N"), until <see cref="ToolContext.Cancel"/> or N polls.
+    /// A radio silent for <see cref="SearchLogSilentSeconds"/> ends the run with exit 3; with --reconnect (the page's
+    /// all night run) the port is closed instead and opened again every <see cref="SearchLogRetrySeconds"/> ("WAITING:"
+    /// lines) until the radio answers again, through a cable pull, a sleep of the PC or a radio restart. A radio that
+    /// answers without the search log ends it with exit 4 (<see cref="SearchLogMissingLine"/>).</summary>
     public static void SearchLog(IReadOnlyList<string> argv, ToolContext ctx)
     {
-        var a = new Args(argv, ["--port", "--count"], [], ["--port"]);
+        var a = new Args(argv, ["--port", "--count"], ["--reconnect"], ["--port"]);
         var portName = a.Get("--port")!;
         if (!int.TryParse(a.Get("--count") ?? "0", NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) || count < 0)
             throw new ToolExit("2");
-        var raw = Open(ctx, portName);
-        int code;
-        try
+        var reconnect = a.Has("--reconnect");
+        var polls = 0;
+        var first = true;
+        while (true)
         {
-            ctx.Print($"SEARCHLOG: {portName} open, read only, every 1 s");
-            var link = new DebugLinkClient(new DebugLinkPort(raw, SearchLogAllowed, "searchlog"), ctx.Clock, portName);
-            code = PollSearch(link, count, ctx);
+            int code;
+            IRawSerial? raw = null;
+            try
+            {
+                raw = Open(ctx, portName);
+                ctx.Print(first ? $"SEARCHLOG: {portName} open, read only, every 1 s" : $"SEARCHLOG: {portName} open again");
+                first = false;
+                var link = new DebugLinkClient(new DebugLinkPort(raw, SearchLogAllowed, "searchlog"), ctx.Clock, portName);
+                code = PollSearch(link, count, ref polls, ctx);
+            }
+            catch (Exception e) when (reconnect && PortTrouble(e))
+            {
+                ctx.Print($"error={e.Message}");
+                code = 3;
+            }
+            finally
+            {
+                try
+                {
+                    raw?.Close();
+                }
+                catch (Exception e) when (PortTrouble(e))
+                {
+                    // a port that went away closes with an error: it is closed all the same
+                }
+            }
+            if (code == 4)
+                ctx.Print(SearchLogMissingLine);
+            if (code != 3 || !reconnect || ctx.Cancel.IsCancellationRequested || (count != 0 && polls >= count))
+            {
+                if (code != 0 && !(code == 3 && reconnect))
+                    throw new ToolExit(code.ToString(CultureInfo.InvariantCulture));
+                return;
+            }
+            ctx.Print($"{SearchLogWaiting} {portName}: no radio; trying again in {SearchLogRetrySeconds:0} s");
+            Wait(ctx, SearchLogRetrySeconds);
+            if (ctx.Cancel.IsCancellationRequested)
+                return;
         }
-        finally
-        {
-            raw.Close();
-        }
-        if (code != 0)
-            throw new ToolExit(code.ToString(CultureInfo.InvariantCulture));
     }
 
-    public static int PollSearch(DebugLinkClient link, int count, ToolContext ctx)
+    /// <summary>A serial port that went away (a cable pull, a sleep of the PC, a new COM number): worth trying again.
+    /// A refused frame, a missing port factory or radio access switched off are not.</summary>
+    public static bool PortTrouble(Exception e) => e switch
     {
-        int n = 0, silent = 0;
-        while ((count == 0 || n < count) && !ctx.Cancel.IsCancellationRequested)
+        ToolContext.NoPortGivenException or RadioAccess.DisabledException => false,
+        IOException or UnauthorizedAccessException or TimeoutException or InvalidOperationException => true,
+        _ => false,
+    };
+
+    /// <summary>The polls of one open port: 0 after <paramref name="count"/> polls (all of the run, counted in
+    /// <paramref name="polls"/>) or a stop, 3 when the radio was silent for <see cref="SearchLogSilentSeconds"/>, 4 when
+    /// it answered <see cref="SearchLogMissingPolls"/> times in a row without the search log.</summary>
+    public static int PollSearch(DebugLinkClient link, int count, ref int polls, ToolContext ctx)
+    {
+        var heard = ctx.Clock.Monotonic();
+        var missing = 0;
+        while ((count == 0 || polls < count) && !ctx.Cancel.IsCancellationRequested)
         {
-            n++;
+            var n = ++polls;
             var started = ctx.Clock.Monotonic();
             ctx.Print($"=== poll {n}");
-            int[] codes = [PrintView(link, "view p25s", SearchLogBook.SectionP25, ctx),
-                PrintView(link, "view dmrs", SearchLogBook.SectionDmr, ctx),
-                PrintView(link, "view alls", SearchLogBook.SectionAll, ctx)];
+            var text = new List<string>();
+            int[] codes = [PrintView(link, "view p25s", SearchLogBook.SectionP25, ctx, text),
+                PrintView(link, "view dmrs", SearchLogBook.SectionDmr, ctx, text),
+                PrintView(link, "view alls", SearchLogBook.SectionAll, ctx, text)];
             ctx.Print($"=== end {n}");
-            silent = codes.All(c => c == -1) ? silent + 1 : 0;
-            if (silent >= SearchLogSilentPolls)
+            if (codes.Any(c => c != -1))
+                heard = ctx.Clock.Monotonic();
+            else if (ctx.Clock.Monotonic() - heard >= SearchLogSilentSeconds)
             {
-                ctx.Print($"No answer from the radio for {silent} polls; stopping.");
+                ctx.Print($"No answer from the radio for {SearchLogSilentSeconds:0} s; stopping.");
                 return 3;
             }
-            if (count == 0 || n < count)
+            // answered (ok, unknown command, bad argument: not busy) and no search log in it: an older firmware
+            missing = codes.All(c => c is 0 or 1 or 2) && !SearchLogBook.HasSearchLog(text) ? missing + 1 : 0;
+            if (missing >= SearchLogMissingPolls)
+                return 4;
+            if (count == 0 || polls < count)
                 Wait(ctx, Math.Max(0.0, 1.0 - (ctx.Clock.Monotonic() - started)));
         }
         return 0;
@@ -448,7 +514,7 @@ public static class DebugReaders
         }
     }
 
-    private static int PrintView(DebugLinkClient link, string name, byte section, ToolContext ctx)
+    private static int PrintView(DebugLinkClient link, string name, byte section, ToolContext ctx, List<string>? sink = null)
     {
         var (code, data) = Query(link, name, 0x09, section, ctx);
         if (code == 0 && data is { Length: >= 5 })
@@ -456,7 +522,10 @@ public static class DebugReaders
             ctx.Print($"uptime_ms={U32(data, 0)}");
             var text = Ascii(data.AsSpan(5)).TrimEnd();
             if (text.Length > 0)
+            {
                 ctx.Print(text);
+                sink?.AddRange(text.Split('\n'));
+            }
         }
         return code;
     }

@@ -5,7 +5,8 @@
 //! without backup) and the data packs (RadioID CSV, AD 2.18 text / PDF, the CPS pack writer and its region guard).
 //!
 //! A port of the C# program (win/src/DDM32Plus.Core), itself held byte for byte to the Python tools (pc/radiotools).
-// unsafe only in radio::cable::windows (the Windows device list); everything else is safe code
+// unsafe only in radio::cable::windows (the Windows device list) and sys::win (keep awake, the list separator);
+// everything else is safe code
 #![deny(unsafe_code)]
 
 pub mod app_info;
@@ -17,4 +18,5 @@ pub mod pytext;
 pub mod radio;
 pub mod releases;
 pub mod storage;
+pub mod sys;
 pub mod update;

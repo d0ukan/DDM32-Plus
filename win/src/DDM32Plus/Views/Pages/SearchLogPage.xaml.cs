@@ -2,6 +2,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -18,9 +19,13 @@ public sealed record SearchRow(string First, string Time, string Mode, string Mh
 
 /// <summary>
 /// Arama kaydı / Search log: "Kaydı başlat" is the user's approval to open the port for this page. Every second
-/// DebugReaders.SearchLog reads the radio's P25 and DMR search finds (read only, not counted as a look); every new call
-/// becomes a row (newest first) and a line in logs\search-YYYYMMDD.csv, until "Durdur". The radio runs the search
-/// itself (Tools > P25 search / DMR search); this page only keeps what it finds, all night if left on.
+/// DebugReaders.SearchLog reads the radio's P25, DMR and all digital search finds (read only, not counted as a look);
+/// every call is counted on its line (newest first) and in this session's logs\search-YYYYMMDD-HHMMSS.csv, until
+/// "Durdur". The radio runs the search itself (Tools > P25 search / DMR search / All digital search); this page only
+/// keeps what it finds, all night if left on: Windows is kept awake while it logs, and the reader (--reconnect) waits
+/// for a radio that went away (cable, sleep, restart) with the table kept. One CSV per session (docs/plus.md "Search log
+/// on the PC"): named after the moment the log started, never overwritten by a later session, a run past midnight stays
+/// in it; a stop and a new start in the same program run go on in the same file.
 /// </summary>
 public partial class SearchLogPage : UserControl, IPage
 {
@@ -29,12 +34,14 @@ public partial class SearchLogPage : UserControl, IPage
     private CancellationTokenSource? cancel;
     private List<string>? block;
     private bool stopping;
+    private bool noFirmware;
     private string status = "";
     private string error = "";
     private SearchLogBook book = new();
     private readonly ObservableCollection<SearchRow> rows = [];
     private string? csvPath;
-    private DateTime day = DateTime.Now;
+    private string? writtenPath;
+    private DateTime? started;
 
     public SearchLogPage() => InitializeComponent();
 
@@ -74,15 +81,18 @@ public partial class SearchLogPage : UserControl, IPage
 
     private string Searches()
     {
-        string One(string name, bool? on, long? at) => on switch
+        string One(string name, bool? on, long? at, DateTime? stopped) => on switch
         {
             true => Loc.F("SLog_SearchOn", name, at is { } hz ? SearchLogBook.Mhz(hz) : "-"),
+            false when stopped is { } t => Loc.F("SLog_SearchStopped", name, t.ToString("HH:mm", CultureInfo.InvariantCulture)),
             false => Loc.F("SLog_SearchOff", name),
             _ => Loc.F("SLog_SearchNone", name),
         };
-        return One("P25", book.P25On, book.P25AtHz) + "   " + One("DMR", book.DmrOn, book.DmrAtHz) + "   " +
-               One(Loc.T("SLog_All"), book.AllOn, book.AllAtHz) + "   " +
-               Loc.F("SLog_Count", book.TotalCalls, book.Frequencies);
+        return One("P25", book.P25On, book.P25AtHz, book.P25StoppedAt) + "   " +
+               One("DMR", book.DmrOn, book.DmrAtHz, book.DmrStoppedAt) + "   " +
+               One(Loc.T("SLog_All"), book.AllOn, book.AllAtHz, book.AllStoppedAt) + "   " +
+               Loc.F("SLog_Count", book.TotalCalls, book.Frequencies) +
+               (book.Missed > 0 ? " " + Loc.F("SLog_Missed", book.Missed) : "");
     }
 
     private async void OnStart(object sender, RoutedEventArgs e)
@@ -91,14 +101,31 @@ public partial class SearchLogPage : UserControl, IPage
             return;
         block = null;
         stopping = false;
+        noFirmware = false;
         error = "";
+        started ??= DateTime.Now;   // the session (its CSV file) begins with its first start
         status = Loc.F("Live_Connecting", port);
         cancel = new CancellationTokenSource();
         Refresh();
-        var end = await runner.RunAsync(DebugReaders.SearchLog, ["--port", port], null, OnLine, writes: false, cancel.Token);
+        KeepAwake.On();
+        RunEnd end;
+        try
+        {
+            end = await runner.RunAsync(DebugReaders.SearchLog, ["--port", port, "--reconnect"], null, OnLine, writes: false,
+                cancel.Token);
+        }
+        finally
+        {
+            KeepAwake.Off();
+        }
         var stamp = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
         if (end.AccessOff)
             status = Loc.T("Radio_Disabled");
+        else if (noFirmware || end.Error is { PyType: "SystemExit", Message: "4" })
+        {
+            status = Loc.F("Live_Stopped", stamp);
+            error = Loc.T("SLog_NoFirmware");
+        }
         else if (stopping || end.Error is null)
             status = Loc.F("Live_Stopped", stamp);
         else
@@ -123,26 +150,27 @@ public partial class SearchLogPage : UserControl, IPage
         Refresh();
     }
 
-    /// <summary>"Kayıtları temizle": after a confirmation, the table and the day's CSV file are emptied; a running log goes
-    /// on from nothing (what the radio still lists counts again as found).</summary>
+    /// <summary>"Kayıtları temizle": after a confirmation, the table and this session's CSV file are emptied; a running
+    /// log goes on in a new session file, counting only calls heard from now on.</summary>
     private void OnClear(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(Window.GetWindow(this), Loc.T("SLog_ClearAsk"), AppInfo.Name, MessageBoxButton.YesNo,
                 MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
             return;
         rows.Clear();
-        book = new SearchLogBook();
+        book.Clear();
         try
         {
-            if (csvPath is not null && File.Exists(csvPath))
-                File.Delete(csvPath);
+            foreach (var p in new[] { csvPath, csvPath is null ? null : SearchLogBook.SidePath(csvPath) })
+                if (p is not null && File.Exists(p))
+                    File.Delete(p);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             error = ex.Message;
         }
-        csvPath = null;
-        day = DateTime.Now;
+        csvPath = writtenPath = null;
+        started = Running ? DateTime.Now : null;
         Refresh();
     }
 
@@ -170,7 +198,18 @@ public partial class SearchLogPage : UserControl, IPage
             block = null;
             return;
         }
-        block?.Add(s);
+        if (block is null)
+        {
+            if (s.StartsWith(DebugReaders.SearchLogWaiting, StringComparison.Ordinal) && state?.Port is { } port)
+            {
+                status = Loc.F("SLog_Waiting", port);
+                Refresh();
+            }
+            else if (s.StartsWith("NO_SEARCHLOG", StringComparison.Ordinal))
+                noFirmware = true;
+            return;
+        }
+        block.Add(s);
     }
 
     private void Take(List<string> lines)
@@ -181,7 +220,10 @@ public partial class SearchLogPage : UserControl, IPage
             var groups = book.Groups;
             try
             {
-                csvPath = SearchLogBook.Write(state.Paths.Logs, groups, day);
+                csvPath ??= SearchLogBook.SessionPath(state.Paths.Logs, started ?? now);
+                var r = SearchLogBook.Write(csvPath, groups, SearchLogBook.ListSeparator());
+                writtenPath = r.Path;
+                error = r.Locked ? Loc.F("SLog_Locked", r.Path) : "";
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -192,7 +234,7 @@ public partial class SearchLogPage : UserControl, IPage
                 rows.Add(Row(g));
         }
         status = Loc.F("SLog_Running", now.ToString("HH:mm:ss", CultureInfo.InvariantCulture)) +
-                 (csvPath is null ? "" : "  " + Loc.F("SLog_File", csvPath));
+                 (writtenPath is null ? "" : "  " + Loc.F("SLog_File", writtenPath));
         Refresh();
     }
 
@@ -202,4 +244,20 @@ public partial class SearchLogPage : UserControl, IPage
         c.Group == 0 ? "-" : c.Group.ToString(CultureInfo.InvariantCulture),
         c.Caller.Length > 0 ? c.Caller : c.Source == 0 ? "-" : c.Source.ToString(CultureInfo.InvariantCulture) + (c.Encrypted ? " (enc)" : ""),
         c.Calls.ToString(CultureInfo.InvariantCulture));
+}
+
+/// <summary>Keeps Windows from sleeping while the search log runs all night (SetThreadExecutionState with
+/// ES_SYSTEM_REQUIRED | ES_CONTINUOUS on the UI thread, which lives as long as the program; the screen may still go
+/// off). Off gives the PC its normal sleep back.</summary>
+internal static class KeepAwake
+{
+    private const uint EsContinuous = 0x80000000, EsSystemRequired = 0x00000001;
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint SetThreadExecutionState(uint flags);
+
+    public static void On() => SetThreadExecutionState(EsContinuous | EsSystemRequired);
+
+    public static void Off() => SetThreadExecutionState(EsContinuous);
 }

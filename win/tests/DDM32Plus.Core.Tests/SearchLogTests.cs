@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+using System.Globalization;
+using System.Text;
 using DDM32Plus.Core.Radio;
 using Xunit;
 
 namespace DDM32Plus.Core.Tests;
 
 /// <summary>The search log (SearchLog.cs): the firmware's p25s / dmrs / alls sections (searchlog_view.c) become call
-/// rows.</summary>
+/// rows, counted by the radio's own entries (ID) and its call sequence (seq).</summary>
 public sealed class SearchLogTests : IDisposable
 {
     private readonly string dir = Path.Combine(Path.GetTempPath(), "ddm32-slog-" + Guid.NewGuid().ToString("N"));
@@ -17,21 +19,28 @@ public sealed class SearchLogTests : IDisposable
             Directory.Delete(dir, true);
     }
 
-    private static string[] Poll(string p25 = "", string dmr = "") =>
-        ["section=p25s", "p25s.on=1", "p25s.phase=1", "p25s.at=433512500", "p25s.n=1", p25,
-         "section=dmrs", "dmrs.on=1", "dmrs.phase=1", "dmrs.at=438000000", "dmrs.n=1", dmr];
+    private static string[] Poll(int pseq, string p25 = "", int dseq = 0, string dmr = "", long uptime = 100000) =>
+        ["--- view p25s (28) status 0", $"uptime_ms={uptime}", "p25s.on=1", "p25s.phase=1", "p25s.at=433512500", "p25s.n=1",
+         $"p25s.seq={pseq}", p25,
+         "--- view dmrs (29) status 0", $"uptime_ms={uptime + 1}", "dmrs.on=1", "dmrs.phase=1", "dmrs.at=438000000", "dmrs.n=1",
+         $"dmrs.seq={dseq}", dmr];
+
+    private static SearchGroup Line(SearchLogBook b, long group) => b.Groups.Single(g => g.Group == group);
 
     [Fact]
     public void FieldsAreParsed()
     {
-        var p = SearchLogBook.ParseP25("433500000,456,655,1234567,3,10", T0)!.Value.Call;
-        Assert.Equal(("P25", 433500000L, "$1C8/456", 655L, 1234567L, 3), (p.Mode, p.Hz, p.Code, p.Group, p.Source, p.Calls));
+        var p = SearchLogBook.ParseP25("433500000,456,655,1234567,3,10,7", T0)!.Value.Call;
+        Assert.Equal(("P25", 433500000L, "$1C8/456", 655L, 1234567L, 3, 7L), (p.Mode, p.Hz, p.Code, p.Group, p.Source, p.Calls, p.Id));
         Assert.Equal(T0.AddSeconds(-10), p.Time);
-        var d = SearchLogBook.ParseDmr("438612500,1,2,1,1,0,2620,2620123,4,0", T0)!.Value.Call;
-        Assert.Equal(("DMR", "CC1", "TS2 RPT", 2620L, 2620123L, false), (d.Mode, d.Code, d.Slot, d.Group, d.Source, d.Encrypted));
-        Assert.Equal("CC?", SearchLogBook.ParseDmr("438612500,255,0,2,1,1,0,0,0,0", T0)!.Value.Call.Code);
+        var d = SearchLogBook.ParseDmr("438612500,1,2,1,1,0,2620,2620123,4,0,63", T0)!.Value.Call;
+        Assert.Equal(("DMR", "CC1", "TS2 RPT", 2620L, 2620123L, false, 63L), (d.Mode, d.Code, d.Slot, d.Group, d.Source, d.Encrypted, d.Id));
+        Assert.Equal("CC?", SearchLogBook.ParseDmr("438612500,255,0,2,1,1,0,0,0,0,1", T0)!.Value.Call.Code);
         Assert.Null(SearchLogBook.ParseP25("garbage", T0));
         Assert.Null(SearchLogBook.ParseDmr("1,2,3", T0));
+        // the format before the entry serial (an internal build): not read
+        Assert.Null(SearchLogBook.ParseP25("433500000,456,655,1234567,3,10", T0));
+        Assert.Null(SearchLogBook.ParseDmr("438612500,1,2,1,1,0,2620,2620123,4,0", T0));
     }
 
     [Fact]
@@ -39,49 +48,200 @@ public sealed class SearchLogTests : IDisposable
     {
         var b = new SearchLogBook();
         // first poll: what the radio already found
-        Assert.True(b.Add(Poll("p25s.f0=433500000,456,655,1234567,1,30", "dmrs.f0=438612500,1,1,1,1,0,2620,2620123,2,5"), T0));
+        Assert.True(b.Add(Poll(1, "p25s.f0=433500000,456,655,1234567,1,30,1", 2, "dmrs.f0=438612500,1,1,1,1,0,2620,2620123,2,5,1"), T0));
         Assert.Equal(2, b.Groups.Count);
         Assert.Equal("DMR", b.Groups[0].Mode);	// heard last comes first
         Assert.Equal((1, 2), (b.Groups[1].Calls, b.Groups[0].Calls));
         Assert.True(b.P25On);
         Assert.Equal(433512500L, b.P25AtHz);
         // the same counters again: nothing changes
-        Assert.False(b.Add(Poll("p25s.f0=433500000,456,655,1234567,1,31", "dmrs.f0=438612500,1,1,1,1,0,2620,2620123,2,6"), T0.AddSeconds(1)));
+        Assert.False(b.Add(Poll(1, "p25s.f0=433500000,456,655,1234567,1,31,1", 2, "dmrs.f0=438612500,1,1,1,1,0,2620,2620123,2,6,1"), T0.AddSeconds(1)));
         // a new call on the same frequency, NAC and group: the same line, counted, the last source kept
-        Assert.True(b.Add(Poll("p25s.f0=433500000,456,655,7654321,2,0"), T0.AddSeconds(2)));
+        Assert.True(b.Add(Poll(2, "p25s.f0=433500000,456,655,7654321,2,0,1", 2), T0.AddSeconds(2)));
         var p = b.Groups.Single(g => g.Mode == "P25");
         Assert.Equal((2, 7654321L, T0.AddSeconds(-30), T0.AddSeconds(2)), (p.Calls, p.Source, p.First, p.Last));
-        // another talkgroup on that frequency: its own line
-        Assert.True(b.Add(Poll("p25s.f0=433500000,456,101,1111,3,0"), T0.AddSeconds(3)));
+        // another talkgroup on that frequency: its own line (another entry)
+        Assert.True(b.Add(Poll(5, "p25s.f0=433500000,456,101,1111,3,0,2", 2), T0.AddSeconds(3)));
         Assert.Equal(3, b.Groups.Count);
         Assert.Equal(2, b.Frequencies);
-        // the radio lists the frequency twice (the owner's screen: a new line every second before): counted once
-        for (var i = 0; i < 5; i++)
-            Assert.False(b.Add(["p25s.f0=433500000,456,101,1111,3,0", "p25s.f1=433500000,456,101,1111,2,4"], T0.AddSeconds(4 + i)));
-        Assert.Equal(3, b.Groups.Single(g => g.Group == 101).Calls);
-        // the radio restarted (counter back to 1): what was counted stays, the new call adds one
-        Assert.True(b.Add(["p25s.f0=433500000,456,101,2222,1,0"], T0.AddSeconds(10)));
-        Assert.Equal(4, b.Groups.Single(g => g.Group == 101).Calls);
-        Assert.Equal(2 + 2 + 4, b.TotalCalls);	// DMR 2 + P25/655 2 + P25/101 4
+        Assert.Equal(3, Line(b, 101).Calls);
+        Assert.Equal(2 + 2 + 3, b.TotalCalls);
+        Assert.Equal(0, b.Missed);
         // no answer: the searches are unknown, nothing changes
         Assert.False(b.Add([], T0.AddSeconds(11)));
         Assert.Null(b.DmrOn);
     }
 
     [Fact]
-    public void TheDaysCsvIsTheLogItself()
+    public void ACallTheRadioMovesIsOneCall()
+    {
+        // A2: the radio counts a call on TG 2 (link control late), then moves it to TG 1: 6 then 5 is 5, not 11
+        var b = new SearchLogBook();
+        b.Add(Poll(9, "p25s.f0=433500000,456,2,5,5,0,3"), T0);
+        Assert.Equal(5, Line(b, 2).Calls);
+        b.Add(Poll(10, "p25s.f0=433500000,456,2,5,6,0,3"), T0.AddSeconds(1));
+        Assert.Equal(6, Line(b, 2).Calls);
+        Assert.True(b.Add([.. Poll(10, "p25s.f0=433500000,456,1,9,1,0,4"), "p25s.f1=433500000,456,2,5,5,1,3"], T0.AddSeconds(2)));
+        Assert.Equal((5, 1), (Line(b, 2).Calls, Line(b, 1).Calls));
+        Assert.Equal(6, b.TotalCalls);
+        Assert.Equal(0, b.Missed);
+    }
+
+    [Fact]
+    public void AnEntryWhoseGroupIsFilledInMovesItsLine()
+    {
+        // A2: the radio makes the entry before the talkgroup is known and fills it in: no bogus "-" line, no double count
+        var b = new SearchLogBook();
+        Assert.True(b.Add(Poll(1, "p25s.f0=433500000,456,0,0,1,0,8"), T0));
+        Assert.Equal(0L, b.Groups.Single().Group);
+        Assert.True(b.Add(Poll(1, "p25s.f0=433500000,456,655,1234,1,0,8"), T0.AddSeconds(1)));
+        var g = b.Groups.Single();
+        Assert.Equal((655L, 1, 1234L), (g.Group, g.Calls, g.Source));
+        Assert.Equal(T0, g.First);
+        // the same for a DMR entry with its color code still unknown
+        Assert.True(b.Add(Poll(1, "", 1, "dmrs.f0=438612500,255,0,1,1,0,0,0,1,0,5"), T0.AddSeconds(2)));
+        Assert.True(b.Add(Poll(1, "", 1, "dmrs.f0=438612500,3,2,1,1,0,91,2860001,1,0,5"), T0.AddSeconds(3)));
+        var d = b.Groups.Single(x => x.Mode == "DMR");
+        Assert.Equal(("CC3", 91L, 1), (d.Code, d.Group, d.Calls));
+        Assert.Equal(2, b.Groups.Count);
+    }
+
+    [Fact]
+    public void ARadioRestartLosesNothingAndCountsNothingTwice()
     {
         var b = new SearchLogBook();
-        b.Add(Poll("p25s.f0=433500000,456,655,1234567,1,0"), T0);
-        var path = SearchLogBook.Write(dir, b.Groups, T0);
-        b.Add(Poll("p25s.f0=433500000,456,655,7654321,2,0"), T0.AddSeconds(5));
-        Assert.Equal(path, SearchLogBook.Write(dir, b.Groups, T0));
-        var lines = File.ReadAllLines(path);
-        Assert.Equal(Path.Combine(dir, "search-20261121.csv"), path);
-        Assert.Equal(SearchLogBook.CsvHeader, lines[0]);
+        b.Add(Poll(4, "p25s.f0=433500000,456,101,1111,4,0,12", uptime: 500000), T0);
+        Assert.Equal(4, Line(b, 101).Calls);
+        // the radio restarted: uptime and seq back, serials anew (the new entry 12 is not the old entry 12)
+        Assert.True(b.Add(Poll(1, "p25s.f0=433500000,456,101,2222,1,0,12", uptime: 3000), T0.AddSeconds(10)));
+        Assert.Equal(5, Line(b, 101).Calls);
+        Assert.Equal(1, b.Restarts);
+        Assert.False(b.Add(Poll(1, "p25s.f0=433500000,456,101,2222,1,1,12", uptime: 4000), T0.AddSeconds(11)));
+        Assert.Equal(5, Line(b, 101).Calls);
+        // uptime wrapping after 49.7 days is not a restart; seq wrapping at 65536 is not either
+        Assert.False(b.Add(Poll(1, "p25s.f0=433500000,456,101,2222,1,2,12", uptime: 0xFFFFF000L), T0.AddSeconds(12)));
+        Assert.False(b.Add(Poll(1, "p25s.f0=433500000,456,101,2222,1,3,12", uptime: 1000), T0.AddSeconds(13)));
+        Assert.Equal((1, 5), (b.Restarts, Line(b, 101).Calls));
+        var w = new SearchLogBook();
+        w.Add(Poll(65535, "p25s.f0=433500000,456,101,1,7,0,9"), T0);
+        w.Add(Poll(1, "p25s.f0=433500000,456,101,1,9,0,9"), T0.AddSeconds(1));
+        Assert.Equal((0, 9, 0), (w.Restarts, Line(w, 101).Calls, w.Missed));
+    }
+
+    [Fact]
+    public void BothListsAndASecondSearchAreNotCountedTwice()
+    {
+        // the all digital search shares the DMR search's engine: its entries are the same serials, a new search of the
+        // other kind lists new entries; the P25 search's list stays (its own engine)
+        var b = new SearchLogBook();
+        Assert.True(b.Add(["p25s.on=0", "p25s.seq=2", "p25s.f0=433500000,456,655,1234567,2,30,1",
+                           "alls.on=1", "alls.mode=P25", "alls.at=433512500", "alls.n=2", "alls.seq=2",
+                           "alls.f0=433500000,P25,456,0,0,1,0,655,1234567,1,0,1,",
+                           "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,4,2,TA2DOU"], T0));
+        Assert.Equal(2, b.Groups.Count);
+        Assert.True(b.AllOn);
+        Assert.False(b.P25On);
+        Assert.Equal(433512500L, b.AllAtHz);
+        // two searches found the same key: two different sets of calls, added
+        Assert.Equal(3, b.Groups.Single(g => g.Mode == "P25").Calls);
+        Assert.Equal("TA2DOU", b.Groups.Single(g => g.Mode == "YSF").Caller);
+        // the same again: nothing; another YSF caller on the YSF entry: the same line, the caller updated
+        Assert.False(b.Add(["p25s.seq=2", "p25s.f0=433500000,456,655,1234567,2,31,1", "alls.on=1", "alls.seq=2",
+                            "alls.f0=433500000,P25,456,0,0,1,0,655,1234567,1,1,1,", "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,5,2,TA2DOU"],
+            T0.AddSeconds(1)));
+        Assert.True(b.Add(["alls.on=1", "alls.seq=3", "alls.f0=439100000,YSF,0,0,0,0,0,0,0,2,0,2,YM2KDZ"], T0.AddSeconds(2)));
+        var y = b.Groups.Single(g => g.Mode == "YSF");
+        Assert.Equal(("YM2KDZ", 2), (y.Caller, y.Calls));
+        // the DMR search starts: the all digital list is gone, the DMR list is new entries (no counter read as a drop)
+        Assert.True(b.Add(["alls.on=0", "alls.seq=4", "dmrs.on=1", "dmrs.seq=4", "dmrs.f0=438612500,1,2,1,1,0,2620,2620123,1,0,3"],
+            T0.AddSeconds(3)));
+        Assert.Equal((3, 2, 1), (b.Groups.Single(g => g.Mode == "P25").Calls, y.Calls, b.Groups.Single(g => g.Mode == "DMR").Calls));
+        Assert.Equal(T0.AddSeconds(3), b.AllStoppedAt);
+        Assert.Null(b.DmrStoppedAt);
+        Assert.Equal(0, b.Missed);
+    }
+
+    [Fact]
+    public void CallsNoEntryShowedAreToldAsMissed()
+    {
+        var b = new SearchLogBook();
+        b.Add(Poll(3, "p25s.f0=433500000,456,655,1,3,0,1"), T0);
+        // 4 calls counted, one shown: 3 were on entries that came and went between the polls
+        b.Add(Poll(7, "p25s.f0=433500000,456,655,1,4,0,1"), T0.AddSeconds(1));
+        Assert.Equal((4, 3), (b.TotalCalls, b.Missed));
+    }
+
+    [Fact]
+    public void AClearedLogCountsOnlyNewCalls()
+    {
+        var b = new SearchLogBook();
+        b.Add(Poll(3, "p25s.f0=433500000,456,655,1,3,0,1"), T0);
+        b.Clear();
+        Assert.Empty(b.Groups);
+        Assert.False(b.Add(Poll(3, "p25s.f0=433500000,456,655,1,3,1,1"), T0.AddSeconds(1)));
+        Assert.Empty(b.Groups);
+        Assert.True(b.Add(Poll(4, "p25s.f0=433500000,456,655,1,4,0,1"), T0.AddSeconds(2)));
+        Assert.Equal(1, b.TotalCalls);
+    }
+
+    [Fact]
+    public void TheSessionsCsvIsTheLogItself()
+    {
+        var b = new SearchLogBook();
+        b.Add(Poll(1, "p25s.f0=433500000,456,655,1234567,1,0,1"), T0);
+        var path = SearchLogBook.SessionPath(dir, T0);
+        Assert.Equal(Path.Combine(dir, "search-20261121-220000.csv"), path);
+        Assert.Equal(new SearchCsvResult(path, false), SearchLogBook.Write(path, b.Groups));
+        b.Add(Poll(2, "p25s.f0=433500000,456,655,7654321,2,0,1"), T0.AddSeconds(5));
+        Assert.Equal(new SearchCsvResult(path, false), SearchLogBook.Write(path, b.Groups));
+        var bytes = File.ReadAllBytes(path);
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes[..3]);	// a BOM: Excel reads the Turkish letters
+        var lines = File.ReadAllLines(path, Encoding.UTF8);
+        Assert.Equal(SearchLogBook.CsvHeader(), lines[0]);
         Assert.Equal(2, lines.Length);	// one line, not one per call
         Assert.Equal("2026-11-21 22:00:00,2026-11-21 22:00:05,P25,433.5000,$1C8/456,,655,7654321,,0,2", lines[1]);
         Assert.False(File.Exists(path + ".tmp"));
+        // a program restart: a new session never takes an earlier session's file, even in the same second
+        Assert.Equal(Path.Combine(dir, "search-20261121-220000-2.csv"), SearchLogBook.SessionPath(dir, T0));
+    }
+
+    [Fact]
+    public void CsvCellsFitExcel()
+    {
+        Assert.Equal(';', SearchLogBook.ListSeparator(CultureInfo.GetCultureInfo("tr-TR")));
+        Assert.Equal(',', SearchLogBook.ListSeparator(CultureInfo.InvariantCulture));
+        Assert.Equal("'-TA1ABC", SearchLogBook.CsvCell("-TA1ABC", ','));
+        Assert.Equal("'=HYPERLINK(1)", SearchLogBook.CsvCell("=HYPERLINK(1)", ';'));
+        Assert.Equal("'+1", SearchLogBook.CsvCell("+1", ','));
+        Assert.Equal("'@x", SearchLogBook.CsvCell("@x", ','));
+        Assert.Equal("\"a;b\"", SearchLogBook.CsvCell("a;b", ';'));
+        Assert.Equal("a,b", SearchLogBook.CsvCell("a,b", ';'));
+        Assert.Equal("\"say \"\"hi\"\"\"", SearchLogBook.CsvCell("say \"hi\"", ','));
+        Assert.Equal("$1C8/456", SearchLogBook.CsvCell("$1C8/456", ','));
+        var g = new SearchGroup { Mode = "YSF", Hz = 439100000, Code = "DG0", Group = 0, First = T0, Last = T0, Caller = "=CMD|x", Calls = 2 };
+        Assert.Equal("2026-11-21 22:00:00;2026-11-21 22:00:00;YSF;439.1000;DG0;;0;0;'=CMD|x;0;2", SearchLogBook.CsvRow(g, ';'));
+    }
+
+    [Fact]
+    public void AnOpenCsvGoesToASideFileUntilItIsFree()
+    {
+        var b = new SearchLogBook();
+        b.Add(Poll(1, "p25s.f0=433500000,456,655,1,1,0,1"), T0);
+        var path = SearchLogBook.SessionPath(dir, T0);
+        SearchLogBook.Write(path, b.Groups);
+        SearchCsvResult held;
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))	// Excel holds it
+        {
+            b.Add(Poll(2, "p25s.f0=433500000,456,655,1,2,0,1"), T0.AddSeconds(1));
+            held = SearchLogBook.Write(path, b.Groups);
+        }
+        Assert.Equal(new SearchCsvResult(SearchLogBook.SidePath(path), true), held);
+        Assert.EndsWith("-open.csv", held.Path, StringComparison.Ordinal);
+        Assert.Contains(File.ReadAllLines(held.Path), l => l.EndsWith(",2", StringComparison.Ordinal));
+        // closed again: the log's own file is written whole and the side file goes
+        Assert.Equal(new SearchCsvResult(path, false), SearchLogBook.Write(path, b.Groups));
+        Assert.False(File.Exists(held.Path));
+        Assert.Contains(File.ReadAllLines(path), l => l.EndsWith(",2", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -97,45 +257,198 @@ public sealed class SearchLogTests : IDisposable
     [Fact]
     public void AllDigitalFieldsAreParsed()
     {
-        var p = SearchLogBook.ParseAll("433500000,P25,456,0,0,1,0,655,1234567,3,10,", T0)!.Value.Call;
-        Assert.Equal(("P25", 433500000L, "$1C8/456", "", 655L, 1234567L, 3, ""), (p.Mode, p.Hz, p.Code, p.Slot, p.Group, p.Source, p.Calls, p.Caller));
+        var p = SearchLogBook.ParseAll("433500000,P25,456,0,0,1,0,655,1234567,3,10,4,", T0)!.Value.Call;
+        Assert.Equal(("P25", 433500000L, "$1C8/456", "", 655L, 1234567L, 3, "", 4L), (p.Mode, p.Hz, p.Code, p.Slot, p.Group, p.Source, p.Calls, p.Caller, p.Id));
         Assert.Equal(T0.AddSeconds(-10), p.Time);
-        var d = SearchLogBook.ParseAll("438612500,DMR,1,2,1,1,0,2620,2620123,4,0,", T0)!.Value.Call;
+        var d = SearchLogBook.ParseAll("438612500,DMR,1,2,1,1,0,2620,2620123,4,0,5,", T0)!.Value.Call;
         Assert.Equal(("DMR", "CC1", "TS2 RPT", 2620L, 2620123L), (d.Mode, d.Code, d.Slot, d.Group, d.Source));
-        var y = SearchLogBook.ParseAll("439100000,YSF,0,0,0,0,0,0,0,2,5,TA2DOU/P", T0)!.Value.Call;
+        var y = SearchLogBook.ParseAll("439100000,YSF,0,0,0,0,0,0,0,2,5,6,TA2DOU/P", T0)!.Value.Call;
         Assert.Equal(("YSF", "DG0", "", 0L, 0L, 2, "TA2DOU/P"), (y.Mode, y.Code, y.Slot, y.Group, y.Source, y.Calls, y.Caller));
-        var n = SearchLogBook.ParseAll("438800000,NXDN,5,0,0,1,1,101,1234,1,0,", T0)!.Value.Call;
+        var n = SearchLogBook.ParseAll("438800000,NXDN,5,0,0,1,1,101,1234,1,0,7,", T0)!.Value.Call;
         Assert.Equal(("NXDN", "RAN5", 101L, 1234L, true), (n.Mode, n.Code, n.Group, n.Source, n.Encrypted));
-        Assert.Equal("RAN?", SearchLogBook.ParseAll("438800000,NXDN,65535,0,0,0,0,0,0,0,0,", T0)!.Value.Call.Code);
-        Assert.Equal("$?", SearchLogBook.ParseAll("438800000,P25,65535,0,0,0,0,0,0,0,0,", T0)!.Value.Call.Code);
-        Assert.Equal("", SearchLogBook.ParseAll("438800000,YSF,0,0,0,0,0,0,0,0,0", T0)!.Value.Call.Caller);	// no CALL field
-        Assert.Null(SearchLogBook.ParseAll("438800000,FM,0,0,0,0,0,0,0,0,0,", T0));
+        Assert.Equal("RAN?", SearchLogBook.ParseAll("438800000,NXDN,65535,0,0,0,0,0,0,0,0,1,", T0)!.Value.Call.Code);
+        Assert.Equal("$?", SearchLogBook.ParseAll("438800000,P25,65535,0,0,0,0,0,0,0,0,1,", T0)!.Value.Call.Code);
+        Assert.Equal("", SearchLogBook.ParseAll("438800000,YSF,0,0,0,0,0,0,0,0,0,1", T0)!.Value.Call.Caller);	// no CALL field
+        Assert.Null(SearchLogBook.ParseAll("438800000,FM,0,0,0,0,0,0,0,0,0,1,", T0));
         Assert.Null(SearchLogBook.ParseAll("438800000,P25,1,2", T0));
-        Assert.Null(SearchLogBook.ParseAll("0,P25,0,0,0,0,0,0,0,0,0,", T0));
+        Assert.Null(SearchLogBook.ParseAll("0,P25,0,0,0,0,0,0,0,0,0,1,", T0));
     }
 
     [Fact]
-    public void AllDigitalFindsJoinTheSameLines()
+    public void FirmwareWithoutTheSearchLogIsTold()
     {
-        var b = new SearchLogBook();
-        // the P25 search's list and the all digital search's P25 find of the same frequency, NAC and group: one line
-        Assert.True(b.Add(["p25s.on=0", "p25s.f0=433500000,456,655,1234567,2,30",
-                           "alls.on=1", "alls.mode=P25", "alls.at=433512500", "alls.n=2",
-                           "alls.f0=433500000,P25,456,0,0,1,0,655,1234567,1,0,",
-                           "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,4,TA2DOU"], T0));
-        Assert.Equal(2, b.Groups.Count);
-        Assert.True(b.AllOn);
-        Assert.False(b.P25On);
-        Assert.Equal(433512500L, b.AllAtHz);
-        Assert.Equal(2, b.Groups.Single(g => g.Mode == "P25").Calls);
-        Assert.Equal("TA2DOU", b.Groups.Single(g => g.Mode == "YSF").Caller);
-        // the same again: nothing; another YSF caller: the same line, the caller updated
-        Assert.False(b.Add(["alls.f0=433500000,P25,456,0,0,1,0,655,1234567,1,1,", "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,5,TA2DOU",
-                            "p25s.f0=433500000,456,655,1234567,2,31"], T0.AddSeconds(1)));
-        Assert.True(b.Add(["alls.f0=439100000,YSF,0,0,0,0,0,0,0,2,0,YM2KDZ"], T0.AddSeconds(2)));
-        var y = b.Groups.Single(g => g.Mode == "YSF");
-        Assert.Equal(("YM2KDZ", 2), (y.Caller, y.Calls));
-        var path = SearchLogBook.Write(dir, b.Groups, T0);
-        Assert.Contains(File.ReadAllLines(path), l => l.EndsWith(",YSF,439.1000,DG0,,0,0,YM2KDZ,0,2", StringComparison.Ordinal));
+        Assert.True(SearchLogBook.HasSearchLog(["uptime_ms=5", "p25s.on=0", "p25s.seq=0"]));
+        Assert.False(SearchLogBook.HasSearchLog(["uptime_ms=5", "p25s.on=0", "p25s.n=0"]));	// before the serials
+        Assert.False(SearchLogBook.HasSearchLog(["p25s.built=0", "dmrs.built=0", "alls.built=0"]));
+        Assert.False(SearchLogBook.HasSearchLog([]));
+    }
+}
+
+/// <summary>The search log reader (DebugReaders.SearchLog) on a fake radio: an older firmware is told, a silent radio
+/// or a port that went away is waited for with --reconnect.</summary>
+public sealed class SearchLogReaderTests
+{
+    /// <summary>A fake radio answering GET_VIEW with a fixed text (per section), or going away / silent on cue.</summary>
+    private sealed class FakeSearchRadio(Func<byte, string?> view) : IRawSerial
+    {
+        private readonly Queue<byte> pending = new();
+        public int Opens { get; private set; }
+        public int Closes { get; private set; }
+        public bool Gone { get; set; }
+        public bool Silent { get; set; }
+        public int Requests { get; private set; }
+        public double Timeout { get; set; }
+        public int BaudRate { get; set; }
+
+        public void Open()
+        {
+            if (Gone)
+                throw new FileNotFoundException("Could not find file 'COM14'");
+            Opens++;
+        }
+
+        public void Close() => Closes++;
+        public void ResetInputBuffer() => pending.Clear();
+        public void Flush() { }
+
+        public int? Write(byte[] data)
+        {
+            if (Gone)
+                throw new IOException("The port is closed");
+            Requests++;
+            if (Silent)
+                return data.Length;
+            if (view(data[6]) is not { } text)
+            {
+                // a firmware without the section: "bad argument"
+                foreach (var b in DebugFrame.Build(DebugFrame.CmdError, data[3], [2]))
+                    pending.Enqueue(b);
+                return data.Length;
+            }
+            var body = new List<byte> { 0, 0x50, 0x40, 0x01, 0x00, 0xFF };
+            body.AddRange(Encoding.ASCII.GetBytes(text));
+            foreach (var b in DebugFrame.Build((byte)(data[2] | 0x80), data[3], body.ToArray()))
+                pending.Enqueue(b);
+            return data.Length;
+        }
+
+        public byte[] Read(int n)
+        {
+            var out_ = new List<byte>();
+            while (out_.Count < n && pending.Count > 0)
+                out_.Add(pending.Dequeue());
+            return [.. out_];
+        }
+    }
+
+    private static string Beta7(byte section) => section switch
+    {
+        0x1C => "p25s.on=1\np25s.seq=3\np25s.f0=433500000,456,655,1,3,0,1\n",
+        0x1D => "dmrs.on=0\ndmrs.seq=0\n",
+        _ => "alls.on=0\nalls.seq=0\n",
+    };
+
+    [Fact]
+    public void AnOlderFirmwareIsToldAndTheRunEnds()
+    {
+        foreach (var old in new Func<byte, string?>[] { _ => "", s => s == 0x1C ? "p25s.on=0\np25s.n=0\n" : "", _ => "p25s.built=0\n" })
+        {
+            var radio = new FakeSearchRadio(old);
+            var lines = new List<string>();
+            var ctx = new ToolContext { Print = s => lines.AddRange(s.Split('\n')), Clock = new VirtualClock(), Serial = _ => radio };
+            var e = Assert.Throws<ToolExit>(() => DebugReaders.SearchLog(["--port", "COM14", "--reconnect"], ctx));
+            Assert.Equal("4", e.Message);
+            Assert.Contains(DebugReaders.SearchLogMissingLine, lines);
+            Assert.Equal(DebugReaders.SearchLogMissingPolls, lines.Count(l => l.StartsWith("=== end ", StringComparison.Ordinal)));
+            Assert.Equal((1, 1), (radio.Opens, radio.Closes));
+        }
+        // the unknown section's "bad argument" of a firmware before the search log: the same
+        var bad = new FakeSearchRadio(_ => null);
+        var c = new ToolContext { Clock = new VirtualClock(), Serial = _ => bad };
+        Assert.Throws<ToolExit>(() => DebugReaders.SearchLog(["--port", "COM14", "--count", "5"], c));
+    }
+
+    [Fact]
+    public void AGoneRadioIsWaitedForWithTheTableKept()
+    {
+        var radio = new FakeSearchRadio(Beta7);
+        var lines = new List<string>();
+        var ends = 0;
+        var ctx = new ToolContext
+        {
+            Print = s =>
+            {
+                lines.AddRange(s.Split('\n'));
+                if (s.StartsWith("=== end ", StringComparison.Ordinal) && ++ends == 2)
+                    radio.Gone = true;  // the cable is pulled after the second poll
+                if (s.StartsWith(DebugReaders.SearchLogWaiting, StringComparison.Ordinal) &&
+                    lines.Count(l => l.StartsWith(DebugReaders.SearchLogWaiting, StringComparison.Ordinal)) == 3)
+                    radio.Gone = false; // and back after three tries
+            },
+            Clock = new VirtualClock(), Serial = _ => radio,
+        };
+        DebugReaders.SearchLog(["--port", "COM14", "--count", "4", "--reconnect"], ctx);
+        Assert.Equal(3, ends);  // poll 3 met the pulled cable (no end), poll 4 the radio again
+        Assert.Equal(4, lines.Count(l => l.StartsWith("=== poll ", StringComparison.Ordinal)));
+        Assert.Equal(2, radio.Opens);
+        Assert.Contains("SEARCHLOG: COM14 open again", lines);
+        Assert.True(lines.Count(l => l.StartsWith(DebugReaders.SearchLogWaiting, StringComparison.Ordinal)) >= 3);
+        // without --reconnect a pulled cable ends the run with its error
+        var r2 = new FakeSearchRadio(Beta7) { Gone = true };
+        Assert.Throws<FileNotFoundException>(() => DebugReaders.SearchLog(["--port", "COM14"],
+            new ToolContext { Clock = new VirtualClock(), Serial = _ => r2 }));
+    }
+
+    [Fact]
+    public void ASilentRadioIsWaitedForAfterAMinute()
+    {
+        var radio = new FakeSearchRadio(Beta7) { Silent = true };
+        var clock = new VirtualClock();
+        var lines = new List<string>();
+        double? waited = null;
+        var t0 = clock.T;
+        var ctx = new ToolContext
+        {
+            Print = s =>
+            {
+                lines.AddRange(s.Split('\n'));
+                if (s.StartsWith(DebugReaders.SearchLogWaiting, StringComparison.Ordinal) && waited is null)
+                {
+                    waited = clock.T - t0;
+                    radio.Silent = false;
+                }
+            },
+            Clock = clock, Serial = _ => radio,
+        };
+        DebugReaders.SearchLog(["--port", "COM14", "--count", "30", "--reconnect"], ctx);
+        Assert.NotNull(waited);
+        Assert.InRange(waited!.Value, DebugReaders.SearchLogSilentSeconds, DebugReaders.SearchLogSilentSeconds + 5);
+        Assert.Equal(2, radio.Opens);
+        // without --reconnect: exit 3 after the same minute
+        var r2 = new FakeSearchRadio(Beta7) { Silent = true };
+        var e = Assert.Throws<ToolExit>(() => DebugReaders.SearchLog(["--port", "COM14"],
+            new ToolContext { Clock = new VirtualClock(), Serial = _ => r2 }));
+        Assert.Equal("3", e.Message);
+    }
+
+    [Fact]
+    public void ReconnectStopsOnCancelWhileWaiting()
+    {
+        var radio = new FakeSearchRadio(Beta7) { Gone = true };
+        using var cts = new CancellationTokenSource();
+        var ctx = new ToolContext
+        {
+            Print = s =>
+            {
+                if (s.StartsWith(DebugReaders.SearchLogWaiting, StringComparison.Ordinal))
+                    cts.Cancel();
+            },
+            Clock = new VirtualClock(), Serial = _ => radio, Cancel = cts.Token,
+        };
+        DebugReaders.SearchLog(["--port", "COM14", "--reconnect"], ctx);
+        Assert.Equal(0, radio.Opens);
+        Assert.False(DebugReaders.PortTrouble(new ToolContext.NoPortGivenException()));
+        Assert.False(DebugReaders.PortTrouble(new ValueError("Refused")));
+        Assert.True(DebugReaders.PortTrouble(new UnauthorizedAccessException()));
     }
 }

@@ -33,6 +33,10 @@ static int16_t peak;			/* the step's strongest reading so far */
 static uint8_t nreads;			/* ... and how many were taken */
 static struct { uint32_t hz, until_ms; } skip[DMRS_SKIP_MAX];
 static volatile uint32_t seq;		/* odd while written (snapshot retries) */
+/* The PC's search log (searchlog_view.c): entry serials and the calls counted since power on */
+static uint8_t ids;
+static uint16_t calls_seq;
+_Static_assert(sizeof(dmrs_found_t) == 24u, "the found entry's serial fits in its last byte");
 static volatile uint32_t reads;		/* snapshots taken: the screen still looks */
 static uint32_t reads_seen, read_ms;
 /* The probe of the frequency held now: since when, DMR heard there yet, a call playing at the last look, the end of
@@ -582,6 +586,7 @@ static bool pick(uint16_t cc, uint32_t grp)
 		f.hz = s.at_hz;
 		f.cc = DMRS_CC_NONE;
 		f.mode = s.mode;
+		f.id = (uint8_t)(++ids & 63u);
 		if (s.found_n < DMRS_FOUND_MAX)
 			s.found_n++;
 		i = s.found_n - 1u;	/* the oldest drops when full */
@@ -599,8 +604,9 @@ static bool pick(uint16_t cc, uint32_t grp)
 static void note(const dmrs_heard_t *h, bool new_call, uint32_t now_ms)
 {
 	uint32_t grp = group_of(s.mode, h->dst);
+	bool moved = false;
 	if (!held || !fits(&s.found[0], h->cc, grp)) {
-		bool moved = held && credited && now_ms - credit_ms < DMRS_MOVE_MS;
+		moved = held && credited && now_ms - credit_ms < DMRS_MOVE_MS;
 		bool fresh = pick(h->cc, grp);
 		if (moved && s.found[1].calls)
 			s.found[1].calls--;	/* the held entry, one down now */
@@ -633,6 +639,8 @@ static void note(const dmrs_heard_t *h, bool new_call, uint32_t now_ms)
 	}
 	if (new_call) {
 		f->calls++;
+		if (!moved)
+			calls_seq++;	/* a moved call was counted when it began */
 		credited = true;
 		credit_ms = now_ms;
 	}
@@ -789,6 +797,7 @@ static bool peek(uint8_t kind, unsigned i, dmrs_peek_t *out)
 		out->lo_hz = s.lo_hz;
 		out->hi_hz = s.hi_hz;
 		out->found_n = mine ? s.found_n : 0u;
+		out->seq = calls_seq;
 		bool have = i < out->found_n && i < DMRS_FOUND_MAX;
 		if (have)
 			memcpy(&out->f, &s.found[i], sizeof out->f);

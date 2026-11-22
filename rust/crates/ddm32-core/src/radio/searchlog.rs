@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The search log (SearchLog.cs; firmware tools/plus_searchlog.py, docs/plus.md "Search log on the PC"): the radio's
 //! P25, DMR and all digital searches keep 8 finds each; read every second over the debug link (GET_VIEW sections p25s =
-//! 28, dmrs = 29, alls = 30, read only, not counted as a look), every new call becomes a row here and in the day's CSV
-//! file. A call is new
-//! when an entry appears, its call counter grows, or its talkgroup / source changes. A radio restart (counters back
-//! down) is a new start, not a call.
+//! 28, dmrs = 29, alls = 30, read only, not counted as a look). ONE line per mode + frequency + code + group with a
+//! call counter, counted by the radio's own entries (searchlog_view.c): each entry has a serial (ID) and a call
+//! counter; the log follows an entry by engine (the P25 search, or the DMR search's engine that the all digital search
+//! shares) + ID + frequency + mode and adds the change of its counter to the entry's line. A call the radio moves to
+//! its right talkgroup (one entry down, another up) is one call; an entry whose code / group is filled in later moves
+//! its calls to the right line. X.seq (the engine's calls since power on) or the radio's uptime going back is a
+//! restart: the entries start anew, nothing counted is lost. Calls counted on entries the log never saw are `missed`.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -13,15 +16,30 @@ use std::path::{Path, PathBuf};
 pub const SECTION_P25: u8 = 0x1C;
 pub const SECTION_DMR: u8 = 0x1D;
 pub const SECTION_ALL: u8 = 0x1E;
-pub const CSV_HEADER: &str = "first_heard,last_heard,mode,mhz,code,slot,group,last_source,caller,encrypted,calls";
+pub const CSV_COLUMNS: [&str; 11] = [
+    "first_heard",
+    "last_heard",
+    "mode",
+    "mhz",
+    "code",
+    "slot",
+    "group",
+    "last_source",
+    "caller",
+    "encrypted",
+    "calls",
+];
+/// An entry not seen for this many polls is forgotten (it left the radio's list).
+pub const FORGET_POLLS: u64 = 10;
 
 /// A local time as seconds since the Unix epoch plus the offset the program shows (the GUI passes the local clock).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Stamp(pub i64);
 
-/// One call a search found (no audio). mode: "P25", "DMR", "YSF" or "NXDN"; code: P25 NAC ("$1C8/456"), DMR colour code
-/// ("CC1"), YSF DG-ID ("DG0") or NXDN RAN ("RAN1"); slot: DMR slots seen and RPT / DIR; group: P25 / NXDN talkgroup or
-/// DMR talkgroup / called ID; caller: the YSF source callsign (empty otherwise).
+/// One entry of a radio search's found list as one poll shows it (no audio). mode: "P25", "DMR", "YSF" or "NXDN";
+/// code: P25 NAC ("$1C8/456"), DMR colour code ("CC1"), YSF DG-ID ("DG0") or NXDN RAN ("RAN1"); slot: DMR slots seen
+/// and RPT / DIR; group: P25 / NXDN talkgroup or DMR talkgroup / called ID; caller: the YSF source callsign (empty
+/// otherwise); calls: the radio's call counter of the entry; id: its serial (stays while code / group are filled in).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchCall {
     pub time: Stamp,
@@ -34,9 +52,9 @@ pub struct SearchCall {
     pub encrypted: bool,
     pub calls: i64,
     pub caller: String,
+    pub id: i64,
 }
 
-/// What an entry looked like at the last poll: calls, group, source, caller.
 /// One line of the log: every call heard on one mode + frequency + code (NAC / CC / DG-ID / RAN) + group, counted
 /// (owner 2026-11-21). first / last: when it was first and last heard; source / caller / slot: the last call's.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,33 +69,49 @@ pub struct SearchGroup {
     pub source: i64,
     pub caller: String,
     pub encrypted: bool,
-    /// Calls counted before the radio's counter last went down (a restart, an entry dropped and found again).
-    base: i64,
-    /// The radio's own counter for this group now (the highest of its entries).
-    current: i64,
+    pub calls: i64,
 }
 
 impl SearchGroup {
     pub fn calls(&self) -> i64 {
-        self.base + self.current
+        self.calls
     }
 }
 
 type GroupKey = (&'static str, i64, String, i64);
 
-/// The search log (SearchLog.cs): ONE line per mode + frequency + code + group with a call counter. The radio's entries
-/// for the same group (its list may hold a frequency twice; the all digital search may list what the P25 search found)
-/// count once, by their highest call counter; a counter that goes down starts a new base, so no call is lost and none
-/// is counted twice. The day's CSV holds the same lines, rewritten on a change.
+#[derive(Debug)]
+struct Entry {
+    mode: &'static str,
+    hz: i64,
+    row: Option<GroupKey>,
+    calls: i64,   // the radio's counter at the last poll
+    counted: i64, // what this log has counted of it (on row)
+    seen: u64,
+}
+
+/// The search log (SearchLog.cs): ONE line per mode + frequency + code + group with a call counter, counted by the
+/// radio's entries and its call sequence (module comment).
 #[derive(Debug, Default)]
 pub struct SearchLogBook {
     groups: HashMap<GroupKey, SearchGroup>,
+    entries: HashMap<(char, i64), Entry>,
+    seqs: HashMap<char, i64>,
+    balance: HashMap<char, i64>,
+    uptime: Option<i64>,
+    poll: u64,
     pub p25_on: Option<bool>,
     pub dmr_on: Option<bool>,
     pub all_on: Option<bool>,
     pub p25_at_hz: Option<i64>,
     pub dmr_at_hz: Option<i64>,
     pub all_at_hz: Option<i64>,
+    /// When each search was seen to stop (it ran at the poll before; None while it runs or never ran).
+    pub p25_stopped: Option<Stamp>,
+    pub dmr_stopped: Option<Stamp>,
+    pub all_stopped: Option<Stamp>,
+    /// Radio restarts seen (uptime or a search's call sequence went back).
+    pub restarts: u32,
 }
 
 fn fields(text: &str, n: usize) -> Option<Vec<i64>> {
@@ -88,9 +122,9 @@ fn fields(text: &str, n: usize) -> Option<Vec<i64>> {
     parts[..n].iter().map(|p| p.trim().parse::<i64>().ok()).collect()
 }
 
-/// p25s.fI=HZ,NAC,TG,SRC,CALLS,AGE_S
+/// p25s.fI=HZ,NAC,TG,SRC,CALLS,AGE_S,ID
 pub fn parse_p25(text: &str, now: Stamp) -> Option<SearchCall> {
-    let v = fields(text, 6)?;
+    let v = fields(text, 7)?;
     if v[0] <= 0 {
         return None;
     }
@@ -106,12 +140,13 @@ pub fn parse_p25(text: &str, now: Stamp) -> Option<SearchCall> {
         encrypted: false,
         calls: v[4],
         caller: String::new(),
+        id: v[6],
     })
 }
 
-/// dmrs.fI=HZ,CC,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S
+/// dmrs.fI=HZ,CC,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,ID
 pub fn parse_dmr(text: &str, now: Stamp) -> Option<SearchCall> {
-    let v = fields(text, 10)?;
+    let v = fields(text, 11)?;
     if v[0] <= 0 {
         return None;
     }
@@ -128,6 +163,7 @@ pub fn parse_dmr(text: &str, now: Stamp) -> Option<SearchCall> {
         encrypted: v[5] != 0,
         calls: v[8],
         caller: String::new(),
+        id: v[10],
     })
 }
 
@@ -149,11 +185,11 @@ fn slots(ts_mask: i64, sync_mask: i64) -> String {
     format!("{slot} {tag}").trim().to_string()
 }
 
-/// alls.fI=HZ,MODE,CODE,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,CALL (MODE P25 / DMR / YSF / NXDN; CODE the NAC,
-/// colour code, DG-ID or RAN, 65535 not known; CALL the YSF callsign, the last field).
+/// alls.fI=HZ,MODE,CODE,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,ID,CALL (MODE P25 / DMR / YSF / NXDN; CODE the
+/// NAC, colour code, DG-ID or RAN, 65535 not known; CALL the YSF callsign, the last field).
 pub fn parse_all(text: &str, now: Stamp) -> Option<SearchCall> {
-    let parts: Vec<&str> = text.splitn(12, ',').collect();
-    if parts.len() < 11 {
+    let parts: Vec<&str> = text.splitn(13, ',').collect();
+    if parts.len() < 12 {
         return None;
     }
     let mode: &'static str = match parts[1].trim() {
@@ -163,8 +199,8 @@ pub fn parse_all(text: &str, now: Stamp) -> Option<SearchCall> {
         "NXDN" => "NXDN",
         _ => return None,
     };
-    let nums: Vec<&str> = std::iter::once(parts[0]).chain(parts[2..11].iter().copied()).collect();
-    let v = fields(&nums.join(","), 10)?;
+    let nums: Vec<&str> = std::iter::once(parts[0]).chain(parts[2..12].iter().copied()).collect();
+    let v = fields(&nums.join(","), 11)?;
     if v[0] <= 0 {
         return None;
     }
@@ -190,8 +226,25 @@ pub fn parse_all(text: &str, now: Stamp) -> Option<SearchCall> {
         source: v[7],
         encrypted: v[5] != 0,
         calls: v[8],
-        caller: parts.get(11).map(|c| c.trim().to_string()).unwrap_or_default(),
+        caller: parts.get(12).map(|c| c.trim().to_string()).unwrap_or_default(),
+        id: v[10],
     })
+}
+
+/// Whether one poll's lines come from a firmware with the search log (beta.7 and later: an X.seq line).
+pub fn has_search_log<S: AsRef<str>>(lines: &[S]) -> bool {
+    lines.iter().any(|l| {
+        let s = l.as_ref().trim_start();
+        s.starts_with("p25s.seq=") || s.starts_with("dmrs.seq=") || s.starts_with("alls.seq=")
+    })
+}
+
+fn stopped(before: Option<bool>, now: Option<bool>, at: Option<Stamp>, t: Stamp) -> Option<Stamp> {
+    match now {
+        Some(true) => None,
+        Some(false) if before == Some(true) => Some(t),
+        _ => at,
+    }
 }
 
 impl SearchLogBook {
@@ -219,7 +272,23 @@ impl SearchLogBook {
         self.groups.values().map(SearchGroup::calls).sum()
     }
 
-    /// One poll's key=value lines (all three sections); true when a line was added or changed.
+    /// Calls the radio counted that no entry showed (it found more than 8 between two polls).
+    pub fn missed(&self) -> i64 {
+        self.balance.values().filter(|b| **b > 0).sum()
+    }
+
+    /// "Kayıtları temizle": the lines go; the radio's entries stay known, so only calls heard from now on count.
+    pub fn clear(&mut self) {
+        self.groups.clear();
+        for e in self.entries.values_mut() {
+            e.row = None;
+            e.counted = 0;
+        }
+        self.balance.clear();
+    }
+
+    /// One poll's lines (all three sections, with the reader's uptime_ms lines); true when a line was added, changed
+    /// or removed.
     pub fn add<S: AsRef<str>>(&mut self, lines: &[S], now: Stamp) -> bool {
         let mut kv: HashMap<&str, &str> = HashMap::new();
         for l in lines {
@@ -232,81 +301,149 @@ impl SearchLogBook {
         }
         let flag = |k: &str| kv.get(k).map(|v| *v == "1");
         let num = |k: &str| kv.get(k).and_then(|v| v.parse::<i64>().ok());
-        self.p25_on = flag("p25s.on");
-        self.dmr_on = flag("dmrs.on");
-        self.all_on = flag("alls.on");
+        let (p, d, a) = (flag("p25s.on"), flag("dmrs.on"), flag("alls.on"));
+        self.p25_stopped = stopped(self.p25_on, p, self.p25_stopped, now);
+        self.dmr_stopped = stopped(self.dmr_on, d, self.dmr_stopped, now);
+        self.all_stopped = stopped(self.all_on, a, self.all_stopped, now);
+        (self.p25_on, self.dmr_on, self.all_on) = (p, d, a);
         self.p25_at_hz = num("p25s.at");
         self.dmr_at_hz = num("dmrs.at");
         self.all_at_hz = num("alls.at");
-        // every entry of the three lists, grouped; a group's counter is its entries' highest
-        let mut heard: HashMap<GroupKey, (i64, SearchCall)> = HashMap::new();
-        for i in 0..8 {
-            let found = [
-                kv.get(format!("p25s.f{i}").as_str()).and_then(|t| parse_p25(t, now)),
-                kv.get(format!("dmrs.f{i}").as_str()).and_then(|t| parse_dmr(t, now)),
-                kv.get(format!("alls.f{i}").as_str()).and_then(|t| parse_all(t, now)),
-            ];
-            for c in found.into_iter().flatten() {
-                if c.calls == 0 && c.group == 0 && c.source == 0 && c.caller.is_empty() {
-                    continue;
-                }
-                let key = (c.mode, c.hz, c.code.clone(), c.group);
-                let calls = c.calls.max(1);
-                match heard.get_mut(&key) {
-                    None => {
-                        heard.insert(key, (calls, c));
-                    }
-                    Some(h) => {
-                        h.0 = h.0.max(calls);
-                        if c.time >= h.1.time {
-                            h.1 = c;
-                        }
-                    }
+        self.poll += 1;
+
+        let mut seq_now: Vec<(char, i64)> = vec![];
+        if let Some(s) = num("p25s.seq") {
+            seq_now.push(('P', s & 0xFFFF));
+        }
+        if let Some(s) = num("dmrs.seq").or_else(|| num("alls.seq")) {
+            seq_now.push(('D', s & 0xFFFF));
+        }
+        let up = num("uptime_ms");
+        // a restart: the radio's uptime went back (not its 49.7 day wrap), or a search's call sequence went back
+        let mut restart =
+            matches!((up, self.uptime), (Some(u), Some(u0)) if u < u0 && !(u0 > 0xF000_0000 && u < 0x1000_0000));
+        for (eng, s) in &seq_now {
+            if let Some(s0) = self.seqs.get(eng) {
+                if s != s0 && ((s - s0) & 0xFFFF) >= 0x8000 {
+                    restart = true;
                 }
             }
         }
+        if restart {
+            self.entries.clear();
+            self.seqs.clear();
+            self.restarts += 1;
+        }
+        if up.is_some() {
+            self.uptime = up;
+        }
+
         let mut changed = false;
-        for (key, (calls, c)) in heard {
-            match self.groups.get_mut(&key) {
-                None => {
-                    self.groups.insert(
-                        key,
-                        SearchGroup {
-                            mode: c.mode,
-                            hz: c.hz,
-                            code: c.code.clone(),
-                            group: c.group,
-                            first: c.time,
-                            last: c.time,
-                            slot: c.slot.clone(),
-                            source: c.source,
-                            caller: c.caller.clone(),
-                            encrypted: c.encrypted,
-                            base: 0,
-                            current: calls,
-                        },
-                    );
-                    changed = true;
+        let mut delta: HashMap<char, i64> = HashMap::new();
+        for i in 0..8 {
+            let found = [
+                ('P', kv.get(format!("p25s.f{i}").as_str()).and_then(|t| parse_p25(t, now))),
+                ('D', kv.get(format!("dmrs.f{i}").as_str()).and_then(|t| parse_dmr(t, now))),
+                ('D', kv.get(format!("alls.f{i}").as_str()).and_then(|t| parse_all(t, now))),
+            ];
+            for (eng, c) in found {
+                if let Some(c) = c.filter(|c| c.id >= 0) {
+                    changed |= self.take(eng, &c, &mut delta);
                 }
-                Some(g) => {
-                    if calls < g.current {
-                        g.base += g.current; // the radio's counter went down: what it counted stays
-                        g.current = calls;
-                        g.last = g.last.max(c.time);
-                        changed = true;
-                    } else if calls > g.current || c.source != g.source || c.caller != g.caller {
-                        g.current = calls;
-                        g.last = g.last.max(c.time);
-                        g.source = c.source;
-                        g.caller = c.caller.clone();
-                        if !c.slot.is_empty() {
-                            g.slot = c.slot.clone();
-                        }
-                        g.encrypted |= c.encrypted;
-                        changed = true;
+            }
+        }
+        let poll = self.poll;
+        self.entries.retain(|_, e| poll - e.seen <= FORGET_POLLS);
+        for (eng, s) in seq_now {
+            if let Some(s0) = self.seqs.get(&eng) {
+                *self.balance.entry(eng).or_default() += ((s - s0) & 0xFFFF) - delta.get(&eng).copied().unwrap_or(0);
+            }
+            self.seqs.insert(eng, s);
+        }
+        changed
+    }
+
+    /// One entry of a poll into its line; true when a line changed.
+    fn take(&mut self, eng: char, c: &SearchCall, delta: &mut HashMap<char, i64>) -> bool {
+        let id = (eng, c.id);
+        let known = self.entries.get(&id).is_some_and(|e| e.mode == c.mode && e.hz == c.hz);
+        if !known {
+            // new (or a serial used again for another frequency): nothing of it seen before
+            if c.calls == 0 && c.group == 0 && c.source == 0 && c.caller.is_empty() {
+                return false; // nothing known yet: taken when it has something
+            }
+            self.entries.insert(id, Entry { mode: c.mode, hz: c.hz, row: None, calls: 0, counted: 0, seen: 0 });
+        }
+        let poll = self.poll;
+        let (row, prev_calls, prev_counted) = {
+            let e = self.entries.get_mut(&id).unwrap();
+            e.seen = poll;
+            (e.row.clone(), e.calls, e.counted)
+        };
+        let d = c.calls - prev_calls;
+        *delta.entry(eng).or_default() += d;
+        let counted = (prev_counted + d).max(0);
+        if row.is_none() && known && counted == 0 {
+            self.entries.get_mut(&id).unwrap().calls = c.calls;
+            return false; // the log was cleared: back on a line with its next call
+        }
+        let key: GroupKey = (c.mode, c.hz, c.code.clone(), c.group);
+        let mut changed = false;
+        if row.as_ref() != Some(&key) {
+            // the radio filled in the code / group (or the entry is new): its calls go to the right line
+            let mut first = c.time;
+            if let Some(old) = row {
+                let others = self.entries.iter().any(|(k, o)| *k != id && o.row.as_ref() == Some(&old));
+                if let Some(og) = self.groups.get_mut(&old) {
+                    og.calls -= prev_counted;
+                    first = first.min(og.first); // heard first under the half known key
+                    if og.calls <= 0 && !others {
+                        self.groups.remove(&old);
                     }
                 }
             }
+            let ng = self.groups.entry(key.clone()).or_insert_with(|| SearchGroup {
+                mode: c.mode,
+                hz: c.hz,
+                code: c.code.clone(),
+                group: c.group,
+                first,
+                last: c.time,
+                slot: c.slot.clone(),
+                source: c.source,
+                caller: c.caller.clone(),
+                encrypted: c.encrypted,
+                calls: 0,
+            });
+            ng.first = ng.first.min(first);
+            ng.calls += counted;
+            changed = true;
+        } else if counted != prev_counted {
+            self.groups.get_mut(&key).unwrap().calls += counted - prev_counted;
+            changed = true;
+        }
+        {
+            let e = self.entries.get_mut(&id).unwrap();
+            e.calls = c.calls;
+            e.counted = counted;
+            e.row = Some(key.clone());
+        }
+        let g = self.groups.get_mut(&key).unwrap();
+        if c.time > g.last
+            || c.source != g.source
+            || c.caller != g.caller
+            || (c.encrypted && !g.encrypted)
+            || (!c.slot.is_empty() && c.slot != g.slot)
+        {
+            g.last = g.last.max(c.time);
+            g.first = g.first.min(c.time);
+            g.source = c.source;
+            g.caller = c.caller.clone();
+            if !c.slot.is_empty() {
+                g.slot = c.slot.clone();
+            }
+            g.encrypted |= c.encrypted;
+            changed = true;
         }
         changed
     }
@@ -348,34 +485,87 @@ fn civil(z: i64) -> (i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-pub fn csv_row(g: &SearchGroup) -> String {
-    format!(
-        "{},{},{},{},{},{},{},{},{},{},{}",
-        format_time(g.first),
-        format_time(g.last),
-        g.mode,
-        mhz(g.hz),
-        g.code,
-        g.slot,
-        g.group,
-        g.source,
-        g.caller.replace(',', " "),
-        if g.encrypted { 1 } else { 0 },
-        g.calls()
-    )
+/// One CSV cell: text Excel would run as a formula (starting with = + - @, a tab or CR) gets a leading apostrophe; a
+/// cell holding the separator, a quote or a line break is quoted.
+pub fn csv_cell(value: &str, sep: char) -> String {
+    let mut v = value.to_string();
+    if v.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        v.insert(0, '\'');
+    }
+    if v.contains([sep, '"', '\n', '\r']) {
+        format!("\"{}\"", v.replace('"', "\"\""))
+    } else {
+        v
+    }
 }
 
-/// Writes folder/search-YYYYMMDD.csv with every line of the log (rewritten whole through a temporary file, so a crash
-/// never leaves half a file). The day is the day the log started.
-pub fn write(folder: &Path, lines: &[SearchGroup], day: Stamp) -> std::io::Result<PathBuf> {
-    std::fs::create_dir_all(folder)?;
-    let date = format_time(day);
-    let path = folder.join(format!("search-{}.csv", date[..10].replace('-', "")));
-    let mut text = String::from(CSV_HEADER);
-    text.push('\n');
+pub fn csv_header(sep: char) -> String {
+    CSV_COLUMNS.join(&sep.to_string())
+}
+
+pub fn csv_row(g: &SearchGroup, sep: char) -> String {
+    [
+        format_time(g.first),
+        format_time(g.last),
+        g.mode.to_string(),
+        mhz(g.hz),
+        g.code.clone(),
+        g.slot.clone(),
+        g.group.to_string(),
+        g.source.to_string(),
+        g.caller.clone(),
+        if g.encrypted { "1" } else { "0" }.to_string(),
+        g.calls().to_string(),
+    ]
+    .iter()
+    .map(|c| csv_cell(c, sep))
+    .collect::<Vec<_>>()
+    .join(&sep.to_string())
+}
+
+/// The log's file for a session started at `started`: folder/search-YYYYMMDD-HHMMSS.csv, never one that exists (a
+/// "-2", "-3" ... after the name then). One file per session: a program restart never overwrites an earlier session's
+/// file, and a run past midnight stays in the file it began in.
+pub fn session_path(folder: &Path, started: Stamp) -> PathBuf {
+    let t = format_time(started);
+    let name = format!("search-{}-{}", t[..10].replace('-', ""), t[11..].replace(':', ""));
+    let mut path = folder.join(format!("{name}.csv"));
+    let mut n = 2;
+    while path.exists() || side_path(&path).exists() {
+        path = folder.join(format!("{name}-{n}.csv"));
+        n += 1;
+    }
+    path
+}
+
+/// Where the rows go while another program (Excel) holds the log's file: name-open.csv beside it.
+pub fn side_path(path: &Path) -> PathBuf {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    path.with_file_name(format!("{stem}-open.csv"))
+}
+
+/// What `write` did: the file written, and whether the log's own file was held by another program (Excel) so the rows
+/// went to `side_path` instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CsvWritten {
+    pub path: PathBuf,
+    pub locked: bool,
+}
+
+/// Writes every line of the log to `path` (UTF-8 with a BOM, so Excel reads the Turkish letters; `sep` between the
+/// cells), whole, through a temporary file, so a crash never leaves half a file. While another program holds the file
+/// (Excel locks an open CSV on Windows) the rows go to `side_path`; once the file is free again it is written and the
+/// side file goes.
+pub fn write(path: &Path, lines: &[SearchGroup], sep: char) -> std::io::Result<CsvWritten> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut text = String::from("\u{feff}");
+    text.push_str(&csv_header(sep));
+    text.push_str("\r\n");
     for g in lines {
-        text.push_str(&csv_row(g));
-        text.push('\n');
+        text.push_str(&csv_row(g, sep));
+        text.push_str("\r\n");
     }
     let tmp = path.with_extension("csv.tmp");
     {
@@ -383,6 +573,18 @@ pub fn write(folder: &Path, lines: &[SearchGroup], day: Stamp) -> std::io::Resul
         f.write_all(text.as_bytes())?;
         f.sync_all()?;
     }
-    std::fs::rename(&tmp, &path)?;
-    Ok(path)
+    let side = side_path(path);
+    if std::fs::rename(&tmp, path).is_err() {
+        std::fs::rename(&tmp, &side)?; // held too: the error goes to the caller
+        return Ok(CsvWritten { path: side, locked: true });
+    }
+    if side.exists() {
+        let _ = std::fs::remove_file(&side); // still open in Excel: it stays, the log's own file is whole
+    }
+    Ok(CsvWritten { path: path.to_path_buf(), locked: false })
+}
+
+/// The CSV separator Excel expects here: Windows' list separator (";" in Turkish, "," in English), else ",".
+pub fn list_separator() -> char {
+    crate::sys::list_separator().filter(|c| matches!(c, ',' | ';' | '\t')).unwrap_or(',')
 }

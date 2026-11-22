@@ -679,6 +679,7 @@ __pycache__/
 !/integration/radiofoundry/spectrum/radio_alls.inc
 !/tests/plus/test_allsearch.c
 !/tests/plus/test_allsearch_sm.inc
+!/tests/plus/test_allsearch_ysf_radio.inc
 # SSTV send: the test picture (tools/plus_sstvtx.py, integration/radiofoundry/sstv/ is allowed above)
 !/tools/plus_sstvtx.py
 !/tools/test_sstvtx.py

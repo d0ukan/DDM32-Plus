@@ -55,8 +55,12 @@ pub struct State {
     pub slog_poll: Vec<String>,
     pub slog_in_poll: bool,
     pub slog_book: ddm32_core::radio::searchlog::SearchLogBook,
+    /// This session's CSV file (searchlog::session_path), the file last written (it or its side file while Excel holds
+    /// it), when the session began, and whether the radio's firmware has no search log
     pub slog_file: Option<std::path::PathBuf>,
-    pub slog_day: Option<ddm32_core::radio::searchlog::Stamp>,
+    pub slog_written: Option<std::path::PathBuf>,
+    pub slog_started: Option<ddm32_core::radio::searchlog::Stamp>,
+    pub slog_nofw: bool,
 }
 
 thread_local! {
@@ -171,7 +175,9 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             slog_in_poll: false,
             slog_book: Default::default(),
             slog_file: None,
-            slog_day: None,
+            slog_written: None,
+            slog_started: None,
+            slog_nofw: false,
         })
     });
     wire(ui);
@@ -776,7 +782,20 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// A read-only reader (the search log or the live view) holds the radio's port: the radio steps wait (said on screen).
+/// On Linux / macOS a second open of the same tty would succeed and the two streams would mix.
+fn reader_holds_port(ui: &AppWindow) -> bool {
+    let held = with(|st| st.slog_cancel.is_some() || st.live_cancel.is_some());
+    if held {
+        set_message(ui, &tr("slog_busy"), "warning");
+    }
+    held
+}
+
 fn start_backup(ui: &AppWindow) {
+    if reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = port() else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -805,6 +824,9 @@ fn start_backup(ui: &AppWindow) {
 }
 
 fn start_install(ui: &AppWindow) {
+    if reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = port() else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -879,6 +901,9 @@ fn restore_plan(ui: &AppWindow) {
 }
 
 fn start_restore(ui: &AppWindow) {
+    if reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = port() else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -967,6 +992,9 @@ fn pack_air(ui: &AppWindow) {
 }
 
 fn pack_write(ui: &AppWindow) {
+    if reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = port() else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;

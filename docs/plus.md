@@ -417,9 +417,11 @@ channel's own NXDN) keep off while it runs.
 PC search log: a third debug link section `alls` (30), read like `p25s` / `dmrs` (read only, not counted as a look):
 
 ```
-alls.on=0|1 alls.phase=N alls.mode=P25|DMR|YSF|NXDN alls.at=HZ alls.lo=HZ alls.hi=HZ alls.n=N
-alls.fI=HZ,MODE,CODE,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,CALL
+alls.on=0|1 alls.phase=N alls.mode=P25|DMR|YSF|NXDN alls.at=HZ alls.lo=HZ alls.hi=HZ alls.n=N alls.seq=N
+alls.fI=HZ,MODE,CODE,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,ID,CALL
 ```
+
+(`seq` and `ID` since branch `slog2`: "Search log on the PC" below.)
 
 CODE is the P25 NAC, DMR color code, YSF DG-ID or NXDN RAN (65535 = not known); TSMASK / SYNCMASK as `dmrs` (DMR only);
 DST / SRC the talkgroup and source (YSF: 0); CALL the YSF callsign (the last field, empty otherwise). The PC programmers
@@ -442,6 +444,66 @@ What only the radio can confirm: the sweep's readings on the FM path catch a DMR
 search's readings in DMR mode; the FM / DMR board mode switch inside a probe (the DMR stack's start and its first
 bursts within 600 ms); the native receiver's lock within 700 ms for P25 and YSF; the NXDN modem's acquisition within
 900 ms (NXDN receive itself is still unverified on the radio, docs/nxdn.md).
+
+### Search log on the PC (`p25s` / `dmrs` / `alls`; branch `slog2`, beta.7 hole hunt A2, B5, B9-B12)
+
+The PC programmers' Search log page (C# `SearchLogBook` / `DebugReaders.SearchLog`, Rust `searchlog.rs` /
+`debug::searchlog_tool`) reads the three debug link sections every second (GET_VIEW 28 / 29 / 30, read only, not
+counted as a look) and keeps ONE line per mode + frequency + code + group with a call counter, also all night.
+
+Firmware side (`searchlog_view.c`): every section has `X.seq=N`, the engine's calls counted since power on (16 bits,
+wraps; `dmrs` and `alls` show the same engine's); every entry line ends with the entry's serial `ID` (before the YSF
+`CALL` on `alls`), given when the entry is made and kept while the radio fills in its NAC / color code / talkgroup:
+
+```
+p25s.fI=HZ,NAC,TG,SRC,CALLS,AGE_S,ID
+dmrs.fI=HZ,CC,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,ID
+alls.fI=HZ,MODE,CODE,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,ID,CALL
+```
+
+A call that the engine moves to its right talkgroup (late link control: `calls--` on the held entry, `calls++` on the
+right one) bumps `seq` once. Cost: the P25 serial fills the found entry's padding (16 bits), the DMR serial is 6 bits
+in the last byte beside the flags (the entry stays 24 bytes, checked by a `_Static_assert`); 7 bytes of statics. Plus
+build: flash 867,624 B (96.28 %), static RAM 208,584 B (2,872 B free).
+
+How the PC counts (the old count read a corrected counter as a restart: 5 then 4 showed 9; a half known entry left a
+bogus "-" / "CC?" line and a second line; the P25 and all digital lists were merged by the highest counter): each
+entry is followed by engine (P25, or the DMR engine shared with the all digital search) + ID + frequency + mode; the
+change of its CALLS goes on its line (a moved call is one call: one line down, the other up); when its code / group is
+filled in, its calls move to the right line (the half known line goes, its first-heard time is kept). The radio's
+uptime going back (not its 49.7 day wrap) or a `seq` going back is a restart: the entries start anew, nothing counted
+is lost or counted twice. `seq` growing more than the entries' calls is calls on entries the PC never saw (more than 8
+new between two polls): shown as "N calls may be missed". An entry not seen for 10 polls is forgotten. The DMR ID wraps
+at 64: an ID is matched only with its frequency and mode, so a reused one is a new entry. "Clear the log" keeps the
+entries known: only calls heard after it count.
+
+The CSV (decided 2026-11-22): one file per logging session, `logs\search-YYYYMMDD-HHMMSS.csv`, named after the moment
+the log was first started; never overwritten (a program restart starts a new file; a name taken gets "-2", ...); a run
+past midnight stays in its file; Stop and Start again in the same program run go on in the same file. Each session
+file counts what the radio still lists at its first poll (the radio's own 8), so two session files may share those
+calls. UTF-8 with a BOM, the cells separated by Windows' list separator (";" with Turkish regional settings, "," with
+English; Rust: `GetLocaleInfoEx(LOCALE_SLIST)`, "," off Windows), CRLF lines; a cell starting with `= + - @` (a YSF
+callsign may start with "-") gets a leading `'`, a cell with the separator, a quote or a line break is quoted. While
+Excel holds the file (the rename fails) the rows go to `search-...-open.csv` beside it with a message; once the file
+is free it is written whole again and the side file goes.
+
+All night: Windows is kept awake while the log runs (`SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`, C#
+on the UI thread, Rust on the log's worker thread; a no-op elsewhere; the screen may still go off). The reader runs
+with `--reconnect`: a port that fails (cable pulled, PC slept, port gone) or a radio silent for 60 s (time, not polls)
+closes the port and tries it again every 5 s ("WAITING:" lines, the page shows "waiting for the radio", the table
+stays). A radio that answers 3 polls in a row without any `X.seq` line (Classic, a firmware before v1.0.0-beta.7, or
+one built without the searches: empty sections, "bad argument", `X.built=0`) ends the run with exit 4 and the page
+says "this radio's firmware has no search log (needs v1.0.0-beta.7)". A search that stopped on the radio (5 s after
+its screen was left, or a restart) shows "stopped (hh:mm)". The Rust page holds the port like the C# `AnyBusy`: Health,
+Live, the install wizard's radio steps, restore and the data pack write wait while the search log (or the live view)
+runs.
+
+B5 (`native_lab.c` `all_heard`): a YSF probe's find now takes the worker's callsign only when its caller sequence moved
+since the take (as P25's), so a callsign of an earlier call on another frequency no longer lands in the find or the CSV.
+Test: `tests/plus/test_allsearch_ysf_radio.inc` (the all digital search with YSF built in, in the real radio state
+machine; `tools/test_classic.py` `test_radio_allsearch_ysf`). Engine tests: the moved call counts once in `seq`, an
+entry keeps its ID while its talkgroup is filled in (`tests/plus/test_p25search.c`, `test_dmrsearch.c`). PC tests:
+C# `SearchLogTests` / `SearchLogReaderTests`, Rust `crates/ddm32-core/tests/searchlog.rs` (fakes only).
 
 ### Search reliability (`CONFIG_SEARCH_SURE`, branch `searchfix`; needs SEARCH_FAST)
 

@@ -322,8 +322,18 @@ pub const SEARCHLOG_ALLOWED: [(u8, u8); 3] = [
     (0x09, crate::radio::searchlog::SECTION_DMR),
     (0x09, crate::radio::searchlog::SECTION_ALL),
 ];
-/// The search log runs all night: a radio busy for a while is waited for this many polls (about a minute).
-pub const SEARCHLOG_SILENT_POLLS: u32 = 60;
+/// The search log runs all night: a radio that does not answer at all for this long (seconds: a menu, a restart, the
+/// cable out) ends the run, or with --reconnect closes the port and waits for the radio (SearchLogSilentSeconds).
+pub const SEARCHLOG_SILENT_SECONDS: f64 = 60.0;
+/// With --reconnect: the port is tried again this often (seconds) while the radio is away.
+pub const SEARCHLOG_RETRY_SECONDS: f64 = 5.0;
+/// Polls in a row that the radio answered without any search log section (a firmware before v1.0.0-beta.7, Classic,
+/// or one built without the searches) before the run ends with exit 4.
+pub const SEARCHLOG_MISSING_POLLS: u32 = 3;
+/// The line the reader prints before it ends with exit 4.
+pub const SEARCHLOG_MISSING_LINE: &str = "NO_SEARCHLOG: this radio's firmware has no search log (needs v1.0.0-beta.7)";
+/// The line printed while the radio is away (--reconnect): "WAITING: COM14 ...".
+pub const SEARCHLOG_WAITING: &str = "WAITING:";
 
 /// bytes.decode('ascii', 'replace')
 pub fn ascii(b: &[u8]) -> String {
@@ -400,62 +410,124 @@ pub fn live_tool(argv: &[String], ctx: &ToolContext<'_>, cancel: &AtomicBool) ->
     Ok(())
 }
 
-/// search log: --port P [--count N]. Every second the p25s and dmrs sections, printed as the live reader prints a
-/// poll, until `cancel` or N polls (SearchLog.cs).
+/// search log: --port P [--count N] [--reconnect]. Every second the p25s, dmrs and alls sections, printed as the live
+/// reader prints a poll, until `cancel` or N polls (SearchLog.cs). A radio silent for SEARCHLOG_SILENT_SECONDS ends the
+/// run with exit 3; with --reconnect (the page's all night run) the port is closed instead and opened again every
+/// SEARCHLOG_RETRY_SECONDS ("WAITING:" lines) until the radio answers again (a cable pull, a sleep of the PC, a radio
+/// restart). A radio that answers without the search log ends it with exit 4 (SEARCHLOG_MISSING_LINE).
 pub fn searchlog_tool(argv: &[String], ctx: &ToolContext<'_>, cancel: &AtomicBool) -> ToolResult<()> {
-    let a = Args::new(argv, &["--port", "--count"], &[], &["--port"])?;
+    let a = Args::new(argv, &["--port", "--count"], &["--reconnect"], &["--port"])?;
     let port_name = a.get("--port").unwrap().to_string();
     let count: i64 = a.get("--count").unwrap_or("0").trim().parse().map_err(|_| ToolError::exit("2"))?;
     if count < 0 {
         return Err(ToolError::exit("2"));
     }
-    let raw = open(ctx, &port_name)?;
-    let mut guard = DebugLinkPort::new(raw, &SEARCHLOG_ALLOWED, "searchlog");
-    (ctx.print)(&format!("SEARCHLOG: {port_name} open, read only, every 1 s"));
-    let code = {
-        let mut link = DebugLinkClient::new(&mut guard, ctx.clock, &port_name);
-        poll_search(&mut link, count, ctx, cancel)
-    };
-    let _ = guard.raw.close();
-    let code = code?;
-    if code != 0 {
-        return Err(ToolError::exit(code.to_string()));
+    let reconnect = a.has("--reconnect");
+    let (mut polls, mut first) = (0i64, true);
+    loop {
+        let code = match open(ctx, &port_name) {
+            Err(e) if reconnect && port_trouble(&e) => {
+                (ctx.print)(&format!("error={}", e.record()));
+                3
+            }
+            Err(e) => return Err(e),
+            Ok(raw) => {
+                let mut guard = DebugLinkPort::new(raw, &SEARCHLOG_ALLOWED, "searchlog");
+                (ctx.print)(&if first {
+                    format!("SEARCHLOG: {port_name} open, read only, every 1 s")
+                } else {
+                    format!("SEARCHLOG: {port_name} open again")
+                });
+                first = false;
+                let r = {
+                    let mut link = DebugLinkClient::new(&mut guard, ctx.clock, &port_name);
+                    poll_search(&mut link, count, &mut polls, ctx, cancel)
+                };
+                let _ = guard.raw.close(); // a port that went away closes with an error: closed all the same
+                match r {
+                    Ok(c) => c,
+                    Err(e) if reconnect && port_trouble(&e) => {
+                        (ctx.print)(&format!("error={}", e.record()));
+                        3
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        };
+        if code == 4 {
+            (ctx.print)(SEARCHLOG_MISSING_LINE);
+        }
+        if code != 3 || !reconnect || cancel.load(Ordering::SeqCst) || (count != 0 && polls >= count) {
+            if code != 0 && !(code == 3 && reconnect) {
+                return Err(ToolError::exit(code.to_string()));
+            }
+            return Ok(());
+        }
+        (ctx.print)(&format!(
+            "{SEARCHLOG_WAITING} {port_name}: no radio; trying again in {SEARCHLOG_RETRY_SECONDS:.0} s"
+        ));
+        wait(ctx, cancel, SEARCHLOG_RETRY_SECONDS);
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(());
+        }
     }
-    Ok(())
 }
 
+/// A serial port that went away (a cable pull, a sleep of the PC, a new COM number): worth trying again. A refused
+/// frame, a missing port factory or radio access switched off are not.
+pub fn port_trouble(e: &ToolError) -> bool {
+    e.py_type == "OSError"
+}
+
+fn wait(ctx: &ToolContext<'_>, cancel: &AtomicBool, seconds: f64) {
+    let end = ctx.clock.monotonic() + seconds;
+    while !cancel.load(Ordering::SeqCst) {
+        let left = end - ctx.clock.monotonic();
+        if left <= 0.0 {
+            break;
+        }
+        ctx.clock.sleep(left.min(0.05));
+    }
+}
+
+/// The polls of one open port: 0 after `count` polls (all of the run, counted in `polls`) or a stop, 3 when the radio
+/// was silent for SEARCHLOG_SILENT_SECONDS, 4 when it answered SEARCHLOG_MISSING_POLLS times in a row without the
+/// search log.
 pub fn poll_search(
     link: &mut DebugLinkClient<'_>,
     count: i64,
+    polls: &mut i64,
     ctx: &ToolContext<'_>,
     cancel: &AtomicBool,
 ) -> ToolResult<i32> {
-    use crate::radio::searchlog::{SECTION_ALL, SECTION_DMR, SECTION_P25};
-    let (mut n, mut silent) = (0i64, 0u32);
-    while (count == 0 || n < count) && !cancel.load(Ordering::SeqCst) {
-        n += 1;
+    use crate::radio::searchlog::{has_search_log, SECTION_ALL, SECTION_DMR, SECTION_P25};
+    let mut heard = ctx.clock.monotonic();
+    let mut missing = 0u32;
+    while (count == 0 || *polls < count) && !cancel.load(Ordering::SeqCst) {
+        *polls += 1;
+        let n = *polls;
         let started = ctx.clock.monotonic();
         (ctx.print)(&format!("=== poll {n}"));
+        let mut text = vec![];
         let codes = [
-            print_view(link, "view p25s", SECTION_P25, ctx)?,
-            print_view(link, "view dmrs", SECTION_DMR, ctx)?,
-            print_view(link, "view alls", SECTION_ALL, ctx)?,
+            print_view_into(link, "view p25s", SECTION_P25, ctx, Some(&mut text))?,
+            print_view_into(link, "view dmrs", SECTION_DMR, ctx, Some(&mut text))?,
+            print_view_into(link, "view alls", SECTION_ALL, ctx, Some(&mut text))?,
         ];
         (ctx.print)(&format!("=== end {n}"));
-        silent = if codes.iter().all(|&c| c == -1) { silent + 1 } else { 0 };
-        if silent >= SEARCHLOG_SILENT_POLLS {
-            (ctx.print)(&format!("No answer from the radio for {silent} polls; stopping."));
+        if codes.iter().any(|&c| c != -1) {
+            heard = ctx.clock.monotonic();
+        } else if ctx.clock.monotonic() - heard >= SEARCHLOG_SILENT_SECONDS {
+            (ctx.print)(&format!("No answer from the radio for {SEARCHLOG_SILENT_SECONDS:.0} s; stopping."));
             return Ok(3);
         }
-        if count == 0 || n < count {
-            let end = ctx.clock.monotonic() + (1.0 - (ctx.clock.monotonic() - started)).max(0.0);
-            while !cancel.load(Ordering::SeqCst) {
-                let left = end - ctx.clock.monotonic();
-                if left <= 0.0 {
-                    break;
-                }
-                ctx.clock.sleep(left.min(0.05));
-            }
+        // answered (ok, unknown command, bad argument: not busy) and no search log in it: an older firmware
+        missing = if codes.iter().all(|c| matches!(c, 0..=2)) && !has_search_log(&text) { missing + 1 } else { 0 };
+        if missing >= SEARCHLOG_MISSING_POLLS {
+            return Ok(4);
+        }
+        if count == 0 || *polls < count {
+            wait(ctx, cancel, (1.0 - (ctx.clock.monotonic() - started)).max(0.0));
         }
     }
     Ok(0)
@@ -527,6 +599,17 @@ fn query(
 }
 
 fn print_view(link: &mut DebugLinkClient<'_>, name: &str, section: u8, ctx: &ToolContext<'_>) -> ToolResult<i32> {
+    print_view_into(link, name, section, ctx, None)
+}
+
+/// print_view, the view's text lines also kept in `sink` (the search log's check for its sections).
+fn print_view_into(
+    link: &mut DebugLinkClient<'_>,
+    name: &str,
+    section: u8,
+    ctx: &ToolContext<'_>,
+    sink: Option<&mut Vec<String>>,
+) -> ToolResult<i32> {
     let (code, data) = query(link, name, 0x09, section, ctx)?;
     if let Some(d) = data.filter(|d| code == 0 && d.len() >= 5) {
         (ctx.print)(&format!("uptime_ms={}", u32le(&d, 0)));
@@ -534,6 +617,9 @@ fn print_view(link: &mut DebugLinkClient<'_>, name: &str, section: u8, ctx: &Too
         let text = rstrip(&text);
         if !text.is_empty() {
             (ctx.print)(text);
+            if let Some(sink) = sink {
+                sink.extend(text.split('\n').map(str::to_string));
+            }
         }
     }
     Ok(code)

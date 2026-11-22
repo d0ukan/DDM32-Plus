@@ -59,6 +59,14 @@ static const p25s_found_t *entry(const p25s_view_t *v, uint32_t hz, uint16_t nac
 	return NULL;
 }
 
+/* The PC's search log: the calls counted since power on (p25s_peek's seq) */
+static uint16_t calls_seq(void)
+{
+	p25s_peek_t pk;
+	(void)p25s_peek(0u, &pk);
+	return pk.seq;
+}
+
 /* The found list keyed by frequency + NAC + talkgroup (owner 2026-11-21, beta.7 candidate: 159.125 NAC $178 TG 1 was
  * listed twice, one entry with 1 call and one with 2) */
 static void test_found_key(void)
@@ -96,11 +104,15 @@ static void test_found_key(void)
 	 * TG 1's when its talkgroup is heard */
 	now += 10000u;
 	probe_at(F);
+	uint16_t seq0 = calls_seq();
 	p25s_probe_found(0x178, 0, 0, now);
 	CHECK(p25s_snapshot(&v) && v.found[0].tg == 2 && v.found[0].calls == 2);
+	CHECK(calls_seq() == (uint16_t)(seq0 + 1u));
 	p25s_probe_found(0x178, 1, 9, now += 360);
 	CHECK(p25s_snapshot(&v) && entries_at(&v, F) == 2 && v.found[0].tg == 1 && v.found[0].calls == 3 &&
 	      v.found[0].src == 9 && (e = entry(&v, F, 0x178, 2)) && e->calls == 1);
+	/* the PC's search log: the moved call is still ONE call (seq), the two entries keep their own serials */
+	CHECK(calls_seq() == (uint16_t)(seq0 + 1u) && v.found[0].id != e->id && v.found[0].id != 0 && e->id != 0);
 	/* ... and a talkgroup change later in the same hold is a call of that talkgroup (not moved) */
 	p25s_probe_found(0x178, 2, 5, now += 4000);
 	CHECK(p25s_snapshot(&v) && entries_at(&v, F) == 2 && v.found[0].tg == 2 && v.found[0].calls == 2 &&
@@ -119,8 +131,10 @@ static void test_found_key(void)
 	p25s_probe_found(0x111, 0, 0, now += 180);
 	CHECK(p25s_snapshot(&v) && entries_at(&v, 159500000u) == 1 && v.found[0].nac == 0x111 && v.found[0].tg == 0 &&
 	      v.found[0].calls == 1);
+	uint16_t id0 = v.found[0].id;
 	p25s_probe_found(0x111, 77, 3, now += 180);	/* its talkgroup: the same entry */
 	CHECK(p25s_snapshot(&v) && entries_at(&v, 159500000u) == 1 && v.found[0].tg == 77 && v.found[0].calls == 1);
+	CHECK(v.found[0].id == id0);	/* the same serial: the PC moves its row to the talkgroup, no second row */
 	p25s_probe_done(true, now += 1500);
 	/* Full: a new key on top, the oldest drops; never two entries of one key */
 	for (unsigned k = 0; k < P25S_FOUND_MAX; k++) {

@@ -6,7 +6,7 @@
 use crate::{i18n, port, tr, trf, with, App, AppWindow, Fact, Radio, TableRow};
 use ddm32_core::codeplug::{self, Codeplug, Table};
 use ddm32_core::radio::codec::Codec;
-use ddm32_core::radio::debug::{health_tool, live_tool, searchlog_tool};
+use ddm32_core::radio::debug::{health_tool, live_tool, searchlog_tool, SEARCHLOG_WAITING};
 use ddm32_core::radio::live::{self, HealthSummary, LiveSummary, Verdict};
 use ddm32_core::radio::port::{RadioAccess, RawSerial, SystemClock};
 use ddm32_core::radio::searchlog::{self, SearchGroup, SearchLogBook};
@@ -61,17 +61,20 @@ pub fn wire(ui: &AppWindow) {
     });
     let w = ui.as_weak();
     r.on_slog_clear(move || {
-        // "Kayıtları temizle" after its confirmation: the table and the day's CSV file are emptied; a running log goes
-        // on from nothing
+        // "Kayıtları temizle" after its confirmation: the table and this session's CSV file are emptied; a running log
+        // goes on in a new session file, counting only calls heard from now on
+        let ui = w.unwrap();
+        let running = ui.global::<Radio>().get_slog_running();
         let file = with(|s| {
-            s.slog_book = SearchLogBook::new();
-            s.slog_day = None;
+            s.slog_book.clear();
+            s.slog_started = if running { Some(searchlog::local_stamp()) } else { None };
+            s.slog_written = None;
             s.slog_file.take()
         });
         if let Some(f) = file {
+            let _ = std::fs::remove_file(searchlog::side_path(&f));
             let _ = std::fs::remove_file(f);
         }
-        let ui = w.unwrap();
         ui.global::<Radio>().set_slog_confirm(false);
         show_slog(&ui, None);
     });
@@ -170,6 +173,8 @@ fn run_debug(
         let serial = |p: &str| -> ToolResult<Box<dyn RawSerial>> { RadioAccess::factory(p) };
         let ctx =
             ToolContext { print: &print, clock: &clock, serial: &serial, release_key_hex: None, codec: Codec::dm32() };
+        // the search log runs all night: the PC stays awake while this thread runs it (dropped at its end)
+        let _awake = (tool == "searchlog").then(ddm32_core::sys::KeepAwake::new);
         let r = match tool {
             "health" => health_tool(&argv, &ctx),
             "searchlog" => searchlog_tool(&argv, &ctx, &cancel),
@@ -183,7 +188,16 @@ fn run_debug(
     });
 }
 
+/// Whether the search log holds the port now (Live, Health and the radio steps wait for it; the C# ToolRunner.AnyBusy).
+pub fn slog_holds_port() -> bool {
+    with(|s| s.slog_cancel.is_some())
+}
+
 fn read_health(ui: &AppWindow) {
+    if slog_holds_port() {
+        message(ui, &tr("slog_busy"), "warning");
+        return;
+    }
     let Some(p) = port() else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -282,6 +296,10 @@ fn live_line(ui: &AppWindow, line: String) {
 }
 
 fn live_start(ui: &AppWindow) {
+    if slog_holds_port() {
+        message(ui, &tr("slog_busy"), "warning");
+        return;
+    }
     let Some(p) = port() else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -528,21 +546,28 @@ pub fn slog_cells(c: &SearchGroup) -> Vec<String> {
     ]
 }
 
-/// The searches' line: running (and where) / off / no answer, then the counts.
+/// The searches' line: running (and where) / stopped at / off / no answer, then the counts (and calls maybe missed).
 pub fn slog_searches(lang: &str, book: &SearchLogBook) -> String {
     let f2 = |key: &str, a: &str, b: &str| i18n::t(lang, key).replacen("{}", a, 1).replacen("{}", b, 1);
-    let one = |name: &str, on: Option<bool>, at: Option<i64>| match on {
+    let one = |name: &str, on: Option<bool>, at: Option<i64>, stopped: Option<searchlog::Stamp>| match on {
         Some(true) => f2("slog_on", name, &at.map(searchlog::mhz).unwrap_or_else(|| "-".into())),
-        Some(false) => i18n::tf(lang, "slog_off", name),
+        Some(false) => match stopped {
+            Some(t) => f2("slog_stopped", name, &searchlog::format_time(t)[11..16]),
+            None => i18n::tf(lang, "slog_off", name),
+        },
         None => i18n::tf(lang, "slog_noanswer", name),
     };
-    format!(
+    let mut text = format!(
         "{}   {}   {}   {}",
-        one("P25", book.p25_on, book.p25_at_hz),
-        one("DMR", book.dmr_on, book.dmr_at_hz),
-        one(&i18n::t(lang, "slog_all"), book.all_on, book.all_at_hz),
+        one("P25", book.p25_on, book.p25_at_hz, book.p25_stopped),
+        one("DMR", book.dmr_on, book.dmr_at_hz, book.dmr_stopped),
+        one(&i18n::t(lang, "slog_all"), book.all_on, book.all_at_hz, book.all_stopped),
         f2("slog_count", &book.total_calls().to_string(), &book.frequencies().to_string())
-    )
+    );
+    if book.missed() > 0 {
+        text = format!("{text} {}", i18n::tf(lang, "slog_missed", &book.missed().to_string()));
+    }
+    text
 }
 
 fn show_slog(ui: &AppWindow, status: Option<String>) {
@@ -581,24 +606,40 @@ fn slog_line(ui: &AppWindow, line: String) {
         _ => {
             if s.slog_in_poll {
                 s.slog_poll.push(line.trim().to_string());
+            } else if line.starts_with("NO_SEARCHLOG") {
+                s.slog_nofw = true;
             }
             None
         }
     });
+    if done.is_none() && line.starts_with(SEARCHLOG_WAITING) {
+        let p = port().unwrap_or_default();
+        show_slog(ui, Some(trf("slog_waiting", &p)));
+        return;
+    }
     let Some(poll) = done else { return };
     let now = searchlog::local_stamp();
-    let (changed, logs, lines, day) = with(|s| {
+    let (changed, path, lines) = with(|s| {
         let changed = s.slog_book.add(&poll, now);
-        let day = *s.slog_day.get_or_insert(now);
-        (changed, s.paths.logs(), s.slog_book.groups(), day)
+        let started = *s.slog_started.get_or_insert(now);
+        let logs = s.paths.logs();
+        let path = s.slog_file.get_or_insert_with(|| searchlog::session_path(&logs, started)).clone();
+        (changed, path, s.slog_book.groups())
     });
     if changed {
-        match searchlog::write(&logs, &lines, day) {
-            Ok(p) => with(|s| s.slog_file = Some(p)),
+        match searchlog::write(&path, &lines, searchlog::list_separator()) {
+            Ok(w) => {
+                if w.locked {
+                    message(ui, &trf("slog_locked", &w.path.display().to_string()), "warning");
+                } else if with(|s| s.slog_written.as_ref().is_some_and(|p| *p != w.path)) {
+                    message(ui, "", "info"); // the file is free again
+                }
+                with(|s| s.slog_written = Some(w.path));
+            }
             Err(e) => message(ui, &trf("msg_failed", &e.to_string()), "danger"),
         }
     }
-    let file = with(|s| s.slog_file.clone());
+    let file = with(|s| s.slog_written.clone());
     let t = searchlog::format_time(now);
     let mut status = trf("slog_running", &t[11..]);
     if let Some(f) = file {
@@ -612,22 +653,34 @@ fn slog_start(ui: &AppWindow) {
         message(ui, &tr("radio_nocable"), "warning");
         return;
     };
+    if with(|s| s.slog_cancel.is_some() || s.live_cancel.is_some()) {
+        return;
+    }
     let cancel = Arc::new(AtomicBool::new(false));
     with(|s| {
         s.slog_cancel = Some(cancel.clone());
         s.slog_poll.clear();
         s.slog_in_poll = false;
+        s.slog_nofw = false;
+        // the session (its CSV file) begins with its first start; a stop and a start again go on in the same file
+        s.slog_started.get_or_insert_with(searchlog::local_stamp);
     });
     let r = ui.global::<Radio>();
     r.set_slog_running(true);
     r.set_slog_status(tr("slog_connecting").into());
     message(ui, "", "info");
-    run_debug(ui, "searchlog", vec!["--port".into(), p], cancel, slog_line, |ui, err| {
+    // --reconnect: a cable pulled, a sleep of the PC or a radio restart is waited for, the table kept
+    run_debug(ui, "searchlog", vec!["--port".into(), p, "--reconnect".into()], cancel, slog_line, |ui, err| {
         ui.global::<Radio>().set_slog_running(false);
-        with(|s| s.slog_cancel = None);
+        let nofw = with(|s| {
+            s.slog_cancel = None;
+            s.slog_nofw
+        });
         show_slog(ui, Some(tr("live_stopped")));
         match err {
+            _ if nofw => message(ui, &tr("slog_nofw"), "warning"),
             None => {}
+            Some(e) if e.py_type == "SystemExit" && e.message == "4" => message(ui, &tr("slog_nofw"), "warning"),
             Some(e) if e.py_type == "SystemExit" && e.message == "3" => message(ui, &tr("live_silent"), "warning"),
             Some(e) => message(ui, &trf("msg_failed", &e.record()), "danger"),
         }

@@ -750,6 +750,11 @@ keyed in any row. The other radio sends on 433.500 (or a free authorised frequen
 | AD-12 | Tools > DMR search after AD-3..AD-5; then back to All digital search, OK | DMR search starts with an empty list; the all digital search's list was cleared by it (the two share one list) |
 | AD-13 | The PC programmer's search log during AD-3..AD-6 | a row per call with the mode P25 / DMR / YSF / NXDN, its code ($659, CC1, DG0, RAN1), the YSF callsign in the caller column |
 | AD-14 | Turkish: Settings > Language Türkçe, open the screen | title "Tüm dijital arama", "Durdu: OK başlatır" / "Tarama ..." / "Deneme P25 ..." texts fit the screen |
+| SL-1 | PC search log during a P25 search, a call whose talkgroup comes late (start the other radio on TG 101 right after a call on TG 102 at the same frequency) | the PC total equals the calls made; TG 101 and TG 102 lines each with their own calls; no line with group "-" left over |
+| SL-2 | PC search log running; pull the cable 30 s, plug it back (same COM port); then leave the PC idle for an hour (longer than its sleep time) | "waiting for the radio" while out, the table kept, logging goes on by itself; Windows did not sleep |
+| SL-3 | Open the session CSV in Excel while logging; close it after a few calls | Excel shows columns (Turkish letters right); a "-open.csv" message while open; after closing, the session file has every call and the -open file is gone |
+| SL-4 | Restart the radio while the PC logs; restart the PC program and start again | counts go on without a jump; the new program run writes a new session file, the old one stays |
+| SL-5 | All digital search: a YSF call on one frequency, then a YSF carrier with no callsign yet on another | the second find has no callsign until its own call is decoded (not the first call's) |
 
 ### Found list: one entry per frequency + code + group (branch `finds`)
 

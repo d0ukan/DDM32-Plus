@@ -267,7 +267,7 @@ component Wizard inherits Page {
                     alignment: start;
                     Button {
                         text: Tr.t(Tr.lang, "b_start_backup"); kind: "primary"; big: true;
-                        enabled: !App.busy && !App.step-done && App.radio-access;
+                        enabled: !App.busy && !App.step-done && App.radio-access && !Radio.slog-running;
                         clicked => { App.start-backup(); }
                     }
                 }
@@ -287,7 +287,7 @@ component Wizard inherits Page {
                     alignment: start;
                     Button {
                         text: Tr.t(Tr.lang, "b_start_install"); kind: App.backup-choice == 2 ? "danger" : "primary"; big: true;
-                        enabled: !App.busy && !App.step-done && App.radio-access;
+                        enabled: !App.busy && !App.step-done && App.radio-access && !Radio.slog-running;
                         clicked => { App.start-install(); }
                     }
                 }
@@ -375,7 +375,7 @@ component Backups inherits Page {
         Button { text: Tr.t(Tr.lang, "b_open_folder"); clicked => { App.open-backups-folder(); } }
         Button {
             text: Tr.t(Tr.lang, "b_restore"); kind: "primary";
-            enabled: App.restore-ready && !App.busy && App.radio-access;
+            enabled: App.restore-ready && !App.busy && App.radio-access && !Radio.slog-running;
             clicked => { App.restore(); }
         }
     }
@@ -396,7 +396,7 @@ component Packs inherits Page {
         alignment: start;
         Button {
             text: Tr.t(Tr.lang, "b_pack_write"); kind: "primary";
-            enabled: App.pack-ready && !App.busy && App.radio-access;
+            enabled: App.pack-ready && !App.busy && App.radio-access && !Radio.slog-running;
             clicked => { App.pack-write(); }
         }
     }

@@ -41,6 +41,14 @@ port (`RadioAccess::factory` refuses, and the serial code is not compiled in); t
 step starts from its own button or command, the guards sit between every tool and the port, and a failed write is never
 retried. See AGENTS.md rules 1-4.
 
+## Search log
+
+The Search log page reads the radio's search finds every second (`radio::debug::searchlog_tool --reconnect`) and counts
+each call once (`radio::searchlog`, the C# `SearchLogBook`): one CSV per session (`logs/search-YYYYMMDD-HHMMSS.csv`,
+BOM, the Windows list separator or ",", formula-safe cells, a `-open.csv` side file while another program holds it);
+the PC kept awake on Windows (`sys::KeepAwake`, a no-op elsewhere); a lost radio waited for; Health, Live and the radio
+steps wait while it holds the port. Details: docs/plus.md "Search log on the PC".
+
 ## Where the program keeps things
 
 | OS | data folder |

@@ -1446,7 +1446,7 @@ The pack the radio had is still in force.</value>
     <value>Search log</value>
   </data>
   <data name="SLog_Text" xml:space="preserve">
-    <value>Start **P25 search**, **DMR search** or **All digital search** on the radio (Tools), connect the cable and press **Start log**. Every second the program reads what the search found (read only; nothing is sent to the radio) and keeps every call here and in a CSV file per day, all night if you leave it on. No audio is recorded.</value>
+    <value>Start **P25 search**, **DMR search** or **All digital search** on the radio (Tools), connect the cable and press **Start log**. Every second the program reads what the search found (read only; nothing is sent to the radio) and keeps every call here and in a CSV file of its own for each logging session (never overwritten), all night if you leave it on: the PC stays awake while it logs, and a cable pulled or a radio restarted is waited for. No audio is recorded.</value>
   </data>
   <data name="SLog_Start" xml:space="preserve">
     <value>Start log</value>
@@ -1512,6 +1512,21 @@ The pack the radio had is still in force.</value>
     <value>First heard</value>
   </data>
   <data name="SLog_ClearAsk" xml:space="preserve">
-    <value>Clear the log? The table and today's CSV file are emptied; this cannot be undone.</value>
+    <value>Clear the log? The table and this session's CSV file are emptied (from now on only new calls count); this cannot be undone.</value>
+  </data>
+  <data name="SLog_Waiting" xml:space="preserve">
+    <value>{0}: waiting for the radio (the port is tried again every 5 s; the table is kept).</value>
+  </data>
+  <data name="SLog_NoFirmware" xml:space="preserve">
+    <value>This radio's firmware has no search log (it needs DDM32 Plus v1.0.0-beta.7 or later).</value>
+  </data>
+  <data name="SLog_Locked" xml:space="preserve">
+    <value>The CSV file is open in another program (Excel?): until it is closed the log is written to {0}.</value>
+  </data>
+  <data name="SLog_SearchStopped" xml:space="preserve">
+    <value>{0} search: stopped at {1}</value>
+  </data>
+  <data name="SLog_Missed" xml:space="preserve">
+    <value>({0} calls may be missed: the radio found more than 8 between two reads)</value>
   </data>
 </root>

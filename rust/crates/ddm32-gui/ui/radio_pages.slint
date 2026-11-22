@@ -118,7 +118,8 @@ export component HealthPage inherits Screen {
             kind: "primary";
             big: true;
             default-focus: true;
-            enabled: !Radio.busy;
+            // the search log holds the port while it runs (radio_pages.rs slog_holds_port)
+            enabled: !Radio.busy && !Radio.slog-running;
             clicked => { Radio.read-health(); }
         }
     }
@@ -153,7 +154,7 @@ export component LivePage inherits Screen {
             kind: Radio.live-running ? "secondary" : "primary";
             big: true;
             horizontal-stretch: 0;
-            enabled: !Radio.busy;
+            enabled: !Radio.busy && (Radio.live-running || !Radio.slog-running);
             clicked => {
                 if Radio.live-running {
                     Radio.live-stop();

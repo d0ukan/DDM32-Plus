@@ -85,6 +85,20 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 - P25 NAC in both forms everywhere: hex marked with "$" and the decimal, e.g. "NAC $659/1625", on Home's caller line
   (the tight form too), dual / multi-watch panes, Home's VFO row (with the TX NAC), Recent, Heard list, All digital
   search and P25 trunk (the "$" was missing there); P25 search and the NAC editor rows already showed both.
+- Search log on the PC, exact counts and all night: the radio now gives each found entry a serial and counts its calls
+  (`X.seq`), and the programmers count each call once by them. Before, a call the radio moved to its right talkgroup
+  was counted again (5 then 4 showed 9), an entry whose talkgroup or colour code came later left a "-" / "CC?" line
+  beside a second one, and P25 search and All digital search finds of one talkgroup were not added up. A radio restart
+  loses nothing and counts nothing twice; calls the PC could not see are shown as "may be missed". One CSV per logging
+  session (`logs\search-YYYYMMDD-HHMMSS.csv`, never overwritten after a program restart, a run past midnight stays in
+  its file), with a BOM and Windows' list separator so Excel opens it in columns with the Turkish letters right; a
+  callsign starting with "-" or "=" is not run as a formula; while Excel holds the file the log goes to a
+  `...-open.csv` beside it. Windows does not sleep while it logs; a pulled cable, a PC sleep or a radio restart is
+  waited for with the table kept ("waiting for the radio"); a radio without the search log says it needs
+  v1.0.0-beta.7; a search that stopped on the radio shows when. Programmer 3.0.0: Health, Live and the radio steps
+  wait while the search log has the port (as on Windows).
+- Fixed: All digital search could store the callsign of an earlier YSF call on another frequency in a YSF find (and
+  in the PC's CSV); only a callsign heard in the probe is the find's now.
 - Search log on the PC: the Windows programmer 2.0.0-beta.4 and the programmer 3.0.0-alpha.3 have a Search log page.
   With P25 search, DMR search or All digital search running on the radio and the cable in, it reads the search's
   finds every second (read only: two / three debug link views, not counted as a look, so the search still stops once

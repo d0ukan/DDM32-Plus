@@ -112,6 +112,8 @@ typedef struct {
 	uint8_t mode;		/* DMRS_MODE_* (the DMR search: always DMR) */
 	bool group : 1;
 	bool enc : 1;		/* a call there was encrypted (not played) */
+	uint8_t id : 6;		/* the entry's serial (mod 64), given when it was made: the PC's search log follows an entry
+				 * by it with its frequency and mode (searchlog_view.c) */
 } dmrs_found_t;
 
 typedef struct {
@@ -146,6 +148,7 @@ bool dmrs_snapshot(dmrs_view_t *out);
 /* The PC's search log: the state and found entry i, not counted as a look (dmrsearch.c) */
 typedef struct {
 	uint8_t phase, found_n, mode;
+	uint16_t seq;		/* calls counted since power on by either kind (a call moved to another entry counts once) */
 	uint32_t at_hz, lo_hz, hi_hz;
 	dmrs_found_t f;
 } dmrs_peek_t;

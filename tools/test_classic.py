@@ -693,6 +693,20 @@ def main():
          str(APP/'core/radio/fox.c'),str(APP/'core/radio/cw_beacon.c'),str(APP/'core/radio/p25search.c'),
          str(APP/'core/radio/dmrsearch.c')],cwd=host)
     run([OUT/'test_radio_allsearch'],cwd=host)
+    # DDM32 Plus: the all digital search with YSF built in: a YSF find's callsign is the probe's call's only
+    # (tests/plus/test_allsearch_ysf_radio.inc; test_radio.inc's main is not run in this build)
+    allysf=OUT/'radioCoreAllYsf.c'
+    allysf.write_text('#include "native_modem/native_lab.h"\nextern const nt_ops classic_ops;\n'+fixture+
+                      '\n#define main classic_radio_main\n#include "'+str(ROOT/'tests/classic/test_radio.inc')+'"\n'
+                      '#undef main\n#include "'+str(ROOT/'tests/plus/test_allsearch_ysf_radio.inc')+'"\n')
+    argv_ay=[str(allysf) if a==str(wrapper) else a for a in argv]
+    argv_ay[argv_ay.index('-o')+1]=str(OUT/'test_radio_allsearch_ysf')
+    run([*argv_ay,'-DCONFIG_P25_SCAN=1','-DCONFIG_SPECTRUM=1','-DCONFIG_FOX=1','-DCONFIG_CW_BEACON=1',
+         '-DCONFIG_P25_SEARCH=1','-DCONFIG_P25_CALLER=1','-DCONFIG_P25_ANY=1','-DCONFIG_DMR_ANY=1','-DCONFIG_DMR_SEARCH=1',
+         '-DCONFIG_ALL_SEARCH=1','-DCONFIG_YSF=1','-I'+str(ROOT/'tests/classic'),'-I'+str(ROOT/'tests/plus'),
+         str(APP/'core/radio/spectrum.c'),str(APP/'core/radio/fox.c'),str(APP/'core/radio/cw_beacon.c'),
+         str(APP/'core/radio/p25search.c'),str(APP/'core/radio/dmrsearch.c')],cwd=host)
+    run([OUT/'test_radio_allsearch_ysf'],cwd=host)
     # DM32 Plus: P25 trunk following in the same suite (its own build; the worker's TSBK queue is a fixture)
     argv[argv.index('-o')+1]=str(OUT/'test_radio_trunk')
     run([*argv,'-DCONFIG_P25_TRUNK=1','-I'+str(ROOT/'tests/plus'),str(APP/'core/radio/p25trunk.c')],cwd=host)

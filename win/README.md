@@ -177,6 +177,12 @@ port in [docs/porting-plan.md](docs/porting-plan.md) "Health, live panel and cha
   command and one-byte payload in the reader's allowlist pass (health: `09/14 09/15 09/17`; live: those and `09/00
   21/00 21/0C`). Anything else, a damaged frame or a baud change is refused before transmission, so no TX, key,
   radio operation, flash, storage or register command can be sent. 115200 baud, DTR/RTS low, as the Python tool.
+- **Arama kaydı / Search log** (`SearchLogPage`, `DebugReaders.SearchLog --reconnect`, `SearchLogBook`): GET_VIEW
+  p25s / dmrs / alls every second; counts each call once by the radio's entry serials and call sequence; one CSV per
+  session (`logs\search-YYYYMMDD-HHMMSS.csv`, BOM, Windows' list separator, formula-safe cells, a `-open.csv` side
+  file while Excel holds it); Windows kept awake while it logs; a lost radio is waited for (port tried every 5 s,
+  the table kept); a firmware without the search log is told (needs v1.0.0-beta.7). Details: docs/plus.md
+  "Search log on the PC".
 - **One radio step at a time:** a run on any page (backup, install, restore, data packs, health, live) holds the
   cable; another page's radio button waits (`ToolRunner.AnyBusy`). Closing the window stops the live panel.
 - **Kanallarım / My channels:** the codeplug of a backup's data flash image (`q128-pass1.bin`; the newest verified
