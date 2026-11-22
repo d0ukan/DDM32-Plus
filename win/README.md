@@ -113,8 +113,8 @@ radio tool in `pc/radiotools` changes; the replay tests then show where the C# p
 A classic menu bar sits above the toolbar (the toolbar and the page tabs stay): **Dosya / File** (Home, backups folder,
 logs folder, Exit; Alt+D), **Telsiz / Radio** (health, live panel, search log, update, restore; Alt+T), **Araçlar /
 Tools** (my channels, data packs, versions; the local release folder in developer builds only; Alt+A), **Yardım /
-Help** (user guide, disclaimer, GitHub page, About; Alt+Y). In English the keys are Alt+F, R, T, H. The radio pages
-are off while any radio step holds the port (`ToolRunner.AnyBusy`), as the pages' own buttons are
+Help** (user guide, disclaimer, GitHub page, About; Alt+Y). In English the keys are Alt+F, R, T, H. The radio pages and the data packs
+(they write to the radio) are off while any radio step holds the port (`ToolRunner.AnyBusy`), as the pages' own buttons are
 (`MenuRules`, tested in `MenuRulesTests`).
 
 ## Faster update paths (over an installed DDM32 Plus only)

@@ -11,6 +11,7 @@ pub const TEXTS: &[(&str, &str, &str)] = &[
     ("m_open_backups", "Yedekler klasörü", "Backups folder"),
     ("m_open_logs", "Kayıt klasörü", "Logs folder"),
     ("m_exit", "Çıkış", "Exit"),
+    ("m_exit_busy", "Telsiz bir işte (yedek, kurulum, canlı izleme veya arama kaydı): önce onu bitirin, sonra çıkın.", "The radio is busy (backup, install, live view or search log): finish or stop that first, then exit."),
     ("m_guide", "Kullanım kılavuzu", "User guide"),
     ("m_github", "GitHub sayfası", "GitHub page"),
     ("home_update", "Telsizi güncelle", "Update the radio"),

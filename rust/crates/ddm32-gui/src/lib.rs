@@ -338,10 +338,7 @@ fn menu_action(ui: &AppWindow, a: &str) {
     let app = ui.global::<App>();
     match action {
         MenuAction::Page(p) => {
-            // the same gates as the buttons: a radio page is not entered while a job holds the port
-            if (p == 1 || p == 2 || p == 3 || (7..=8).contains(&p) || p == 10) && app.get_menu_radio_locked() {
-                return;
-            }
+            // navigate() itself refuses while a job, the live panel or the search log holds the port
             navigate(ui, p);
         }
         MenuAction::BackupsFolder => {
@@ -357,7 +354,11 @@ fn menu_action(ui: &AppWindow, a: &str) {
         MenuAction::Guide => open_folder(Path::new(&format!("{GITHUB_URL}#readme"))),
         MenuAction::GitHub => open_folder(Path::new(GITHUB_URL)),
         MenuAction::Exit => {
-            if !app.get_busy() {
+            if app.get_menu_radio_locked() {
+                set_message(ui, &tr("m_exit_busy"), "warning");
+                ui.global::<Radio>().set_message(tr("m_exit_busy").into());
+                ui.global::<Radio>().set_message_kind("warning".into());
+            } else {
                 let _ = slint::quit_event_loop();
             }
         }
@@ -383,7 +384,8 @@ fn set_message(ui: &AppWindow, text: &str, kind: &str) {
 
 fn navigate(ui: &AppWindow, page: i32) {
     let app = ui.global::<App>();
-    if app.get_busy() {
+    // a radio step, the live panel or the search log holds the port: leaving its page would hide its Stop button
+    if app.get_menu_radio_locked() {
         return;
     }
     set_message(ui, "", "info");

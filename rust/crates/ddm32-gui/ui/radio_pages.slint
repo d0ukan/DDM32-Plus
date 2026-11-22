@@ -63,7 +63,7 @@ component Screen inherits VerticalLayout {
     PageHeader {
         heading: root.heading;
         back-text: Tr.t(Tr.lang, "back_home");
-        back-enabled: !Radio.busy && !Radio.live-running;
+        back-enabled: !Radio.busy && !Radio.live-running && !Radio.slog-running;
         back-clicked => { Radio.navigate-home(); }
     }
     VerticalLayout {

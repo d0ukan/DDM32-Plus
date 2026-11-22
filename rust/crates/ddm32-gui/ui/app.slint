@@ -526,7 +526,6 @@ export component AppWindow inherits Window {
         padding: 0;
         spacing: 0;
         if App.page != 6 : MenuBar {
-            busy: App.busy || App.confirm-open;
             radio-locked: App.menu-radio-locked || App.confirm-open;
             action(a) => { App.menu-action(a); }
         }

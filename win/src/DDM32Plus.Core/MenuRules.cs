@@ -5,11 +5,11 @@ namespace DDM32Plus.Core;
 /// no radio step runs (as their own buttons are); file-only pages, folders and Help always are.</summary>
 public static class MenuRules
 {
-    /// <summary>Page keys under the Radio menu: they read or write the radio through the cable.</summary>
-    public static readonly IReadOnlyList<string> RadioPages = ["update", "restore", "health", "live", "searchlog"];
+    /// <summary>Page keys under the Radio menu: they read or write the radio through the cable (data packs write to it).</summary>
+    public static readonly IReadOnlyList<string> RadioPages = ["update", "restore", "packs", "health", "live", "searchlog"];
 
-    /// <summary>Page keys that never touch the port (backups on disk, release list, data packs, home).</summary>
-    public static readonly IReadOnlyList<string> FilePages = ["home", "versions", "packs", "channels"];
+    /// <summary>Page keys that never touch the port (home, the release list, backups on disk).</summary>
+    public static readonly IReadOnlyList<string> FilePages = ["home", "versions", "channels"];
 
     public static bool PageEnabled(string key, bool anyRadioJobBusy) =>
         !anyRadioJobBusy || !RadioPages.Contains(key);

@@ -39,8 +39,8 @@ rust/
 A plain menu bar across the top of the window (every colour from the theme, light and dark): **Dosya / File** (Home,
 backups folder, logs folder, Settings, Exit), **Telsiz / Radio** (health, live, search log, update, backups and going
 back), **Araçlar / Tools** (my channels, data packs), **Yardım / Help** (user guide, GitHub page, About). It only
-navigates or opens folders and links, never starts a radio step; the radio entries are off while a radio step, the live
-panel or the search log holds the port (`App.menu-radio-locked`, `tests/menu.rs`). It is hidden on the first-start
+navigates or opens folders and links, never starts a radio step; no page is left (and the window is not closed) while a radio step, the live
+panel or the search log holds the port; the same gate sits in `navigate()` (`App.menu-radio-locked`, `tests/menu.rs`). It is hidden on the first-start
 language screen. Menu bar: ui/menubar.slint.
 
 ## Radio access

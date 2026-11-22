@@ -16,8 +16,7 @@ component MenuHead inherits Rectangle {
     accessible-role: button;
     accessible-label: root.text;
     accessible-action-default => { pop.show(); }
-    background: ta.has-hover || pop-open ? Theme.button-hover : transparent;
-    property <bool> pop-open;
+    background: ta.has-hover ? Theme.button-hover : transparent;
     lbl := Text {
         text: root.text;
         color: Theme.text;
@@ -26,7 +25,7 @@ component MenuHead inherits Rectangle {
         horizontal-alignment: center;
     }
     ta := TouchArea {
-        clicked => { root.pop-open = true; pop.show(); }
+        clicked => { pop.show(); }
     }
     pop := PopupWindow {
         x: 0px;
@@ -51,7 +50,7 @@ component MenuHead inherits Rectangle {
                         accessible-role: button;
                         accessible-label: e.text;
                         accessible-enabled: e.enabled;
-                        accessible-action-default => { if e.enabled { root.pop-open = false; pop.close(); root.chosen(e.action); } }
+                        accessible-action-default => { if e.enabled { pop.close(); root.chosen(e.action); } }
                         Text {
                             x: 10px;
                             width: parent.width - 20px;
@@ -62,7 +61,7 @@ component MenuHead inherits Rectangle {
                         }
                         row := TouchArea {
                             enabled: e.enabled;
-                            clicked => { root.pop-open = false; pop.close(); root.chosen(e.action); }
+                            clicked => { pop.close(); root.chosen(e.action); }
                         }
                     }
                 }
@@ -72,9 +71,9 @@ component MenuHead inherits Rectangle {
 }
 
 export component MenuBar inherits Rectangle {
-    // locked: a radio step (or the search log / live panel) holds the port; busy: an install, backup or program update
+    // locked: a radio step, the live panel or the search log holds the port (or an install / backup / update runs):
+    // no page is left and the window is not closed until it has stopped
     in property <bool> radio-locked;
-    in property <bool> busy;
     callback action(string);
     background: Theme.surface;
     min-height: 33px;
@@ -87,12 +86,12 @@ export component MenuBar inherits Rectangle {
         MenuHead {
             text: Tr.t(Tr.lang, "m_file");
             entries: [
-                { text: Tr.t(Tr.lang, "back_home"), action: "page:0", enabled: !root.busy },
+                { text: Tr.t(Tr.lang, "back_home"), action: "page:0", enabled: !root.radio-locked },
                 { text: Tr.t(Tr.lang, "m_open_backups"), action: "backups-folder", enabled: true },
                 { text: Tr.t(Tr.lang, "m_open_logs"), action: "logs-folder", enabled: true },
-                { text: Tr.t(Tr.lang, "home_settings"), action: "page:4", enabled: !root.busy },
+                { text: Tr.t(Tr.lang, "home_settings"), action: "page:4", enabled: !root.radio-locked },
                 { separator: true },
-                { text: Tr.t(Tr.lang, "m_exit"), action: "exit", enabled: !root.busy },
+                { text: Tr.t(Tr.lang, "m_exit"), action: "exit", enabled: !root.radio-locked },
             ];
             chosen(a) => { root.action(a); }
         }
@@ -111,7 +110,7 @@ export component MenuBar inherits Rectangle {
         MenuHead {
             text: Tr.t(Tr.lang, "m_tools");
             entries: [
-                { text: Tr.t(Tr.lang, "home_channels"), action: "page:9", enabled: !root.busy },
+                { text: Tr.t(Tr.lang, "home_channels"), action: "page:9", enabled: !root.radio-locked },
                 { text: Tr.t(Tr.lang, "home_packs"), action: "page:3", enabled: !root.radio-locked },
             ];
             chosen(a) => { root.action(a); }
@@ -122,7 +121,7 @@ export component MenuBar inherits Rectangle {
                 { text: Tr.t(Tr.lang, "m_guide"), action: "guide", enabled: true },
                 { text: Tr.t(Tr.lang, "m_github"), action: "github", enabled: true },
                 { separator: true },
-                { text: Tr.t(Tr.lang, "home_about"), action: "page:5", enabled: !root.busy },
+                { text: Tr.t(Tr.lang, "home_about"), action: "page:5", enabled: !root.radio-locked },
             ];
             chosen(a) => { root.action(a); }
         }

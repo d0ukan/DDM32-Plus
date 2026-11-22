@@ -7,6 +7,7 @@ public class MenuRulesTests
 {
     [Theory]
     [InlineData("update")]
+    [InlineData("packs")]
     [InlineData("restore")]
     [InlineData("health")]
     [InlineData("live")]
@@ -20,7 +21,6 @@ public class MenuRulesTests
     [Theory]
     [InlineData("home")]
     [InlineData("versions")]
-    [InlineData("packs")]
     [InlineData("channels")]
     public void FilePagesStayOn(string key)
     {
