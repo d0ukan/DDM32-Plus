@@ -3,7 +3,7 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased
+## v1.0.0-beta.7 (candidate, not released yet)
 
 - Transmit safety (pre-release hole hunt; docs/plus.md "Pre-release hole hunt: transmit safety"): SSTV send is
   refused while a scan, a dual / multi-watch, the air watch, a search, the spectrum or trunk following runs ("Stop the
@@ -44,8 +44,6 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   so ("All channels full, in no zone: ch N"). A renamed "All channels" counts as an ordinary zone. New Zone options
   row "Add unzoned channels" (TR "Bölgesiz kanalları ekle") puts every channel in no zone into that zone and says how
   many: use it once for a channel made before this fix.
-- Dual / multi-watch: the emergency key ends the watch on the selected DMR letter (refused with a toast on another
-  mode); the PTT pill follows the radio when it keeps another letter, without cutting a P25 call; a TX indicator
 - Dual / multi-watch emergency: the key, the lone worker and SOS use the selected letter when it is DMR, else the
   first DMR letter of the ring (the watch ends there and says which; it isn't restored after); refused only with no
   DMR letter. An emergency never waits for a P25 call being received (on a single P25 channel it now fails at once,
@@ -94,14 +92,15 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   radio name) and colour bars, in Robot 36 (37 s, default), Martin M1 or PD120, on the FM simplex channel in use after
   an explicit OK, only on amateur frequencies (no repeater, satellite, APRS or PMR446 frequency) and with every TX
   check PTT has. Back or PTT stops it at once. Receive it with a phone app such as Robot36 or another DM-32 with SSTV.
-- P25, DMR and All digital search catch a real signal surely (the owner's beta.7 report: a DMR radio in the same room
-  on 436.275 was not found and the stepping was slow). A strong carrier is now probed on its strongest step (or the
+- P25, DMR and All digital search: faster stepping and a better probe of strong carriers (the owner's beta.7 report:
+  a DMR radio in the same room on 436.275 was not found and the stepping was slow). Measured only on the host model;
+  DMR search on a strong radio nearby is still under investigation and not yet confirmed on the radio. A strong carrier is now probed on its strongest step (or the
   middle of an overloaded plateau, or the half step of a 6.25 kHz channel) instead of one neighbour after the other;
   the noise floor is learned from the first step (a receiver reading high made every step a probe); the steps stay on
   the channel grid whatever start was typed; a direct mode DMR carrier gets 1.1 s, P25 1.2 s; a carrier that went off
   the air during its probe, or brought a burst, is never skipped; the All digital search probes a direct mode carrier
-  as DMR first. The search screen shows the steps a second. Host model of the owner's case: found in a median 2.5 s
-  instead of 21.5 s.
+  as DMR first. The search screen shows the steps a second. Host model of the owner's case (not a radio
+  measurement): found in a median 2.5 s instead of 21.5 s.
 - Search found lists (P25 search, DMR search, All digital search): one entry per frequency + mode + NAC / colour code
   / DG-ID / RAN + talkgroup, with a call counter, the most recently heard on top; another talkgroup or NAC on the same
   frequency is an entry of its own. The beta.7 candidate listed 159.125 twice (calls 1 and 2): the native receiver's

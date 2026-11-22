@@ -80,7 +80,7 @@ static void channel_view(radio_sm_t *sm)
     }
 }
 static void restore_channel(radio_sm_t *sm);
-static inline void give_back(radio_sm_t *sm, bool on, uint8_t stop_type);
+static inline void __attribute__((unused)) give_back(radio_sm_t *sm, bool on, uint8_t stop_type);
 static int channel_let_go(radio_sm_t *sm);
 #if CONFIG_P25_SCAN
 /* P25 scan (docs/plus.md): the scan finds a P25 channel's carrier on the FM path and holds there; the native
@@ -791,7 +791,7 @@ static void restore_channel(radio_sm_t *sm)
 /* DDM32 Plus: a search's or trunk following's receiver handed back. With an emergency asked for and the search /
  * following still on (on), it ends through its own stop request (stop_type, arg 0), which tunes the channel at once,
  * before the radio tick takes the start (it holds it back while they run: emergency_tick); otherwise as before */
-static inline void give_back(radio_sm_t *sm, bool on, uint8_t stop_type)
+static inline void __attribute__((unused)) give_back(radio_sm_t *sm, bool on, uint8_t stop_type)
 {
 #if CONFIG_DMR_EMERGENCY
     if(on && dmr_emergency_start_pending()) {
