@@ -17,7 +17,7 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   simplex on a repeater output; a repeater split works), whatever made it and after a restart ("VFO: outside the
   amateur bands"); codeplug channels are unchanged. The CW beacon is refused during a scan or watch and outside the
   band plan. A search find on a repeater says "Repeater: set the TX offset"; setting the offset ends a find's receive
-  only. Special-event callsigns (TC100A, TC1453, YM100TC) are accepted; an SFR repeater with its CW ID on and no
+  only. Special-event callsigns (YM100TC, TC18MRT, TC2023X) are accepted; an SFR repeater with its CW ID on and no
   callsign does not start.
 - An emergency (the key, the lone worker, SOS) also ends P25 and DMR trunk following, the P25 search and the DMR /
   all digital search instead of waiting for them: within about 0.3 s the channel is tuned again and the emergency goes
@@ -31,6 +31,10 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   No track takes the radio while an emergency runs (and no AOS pop-up then); an Emergency or SOS key (also as SK1's
   hold function) always reaches the emergency during a track. A rise during the radio's own APRS frame no longer
   skips the auto track for the pass. The AOS pop-up stays 30 s instead of 60 s. Host-tested; radio rows IS-12 to IS-15.
+- Transmit safety, third round: the VFO never transmits on a repeater output (also with a reverse split) nor simplex
+  on a repeater input; radio model names (IC7300, FT991A, DM1701 ...) are refused as callsigns, special-event calls
+  keep working with a round 3-digit or a 4-digit number (YM100TC, TC2023X; TC100A and TC1453 are no longer taken; a few model names shaped like callsigns, e.g. UV5R or FT8900R, still pass);
+  switching the SFR CW ID off lets a repeater role without a callsign start.
 - Fixed: Home stopped at channel 26 of a 27-channel radio (owner's beta.7 report). The zone really held 26: when the
   radio stores its first zone (Create New Zone, Find & save), "All channels" is stored as a copy of the channels of
   that moment, and a channel made later (Channels > New from current, Save as new channel, the VFO's copy) was saved

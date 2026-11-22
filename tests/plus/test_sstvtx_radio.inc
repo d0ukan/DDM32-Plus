@@ -306,12 +306,16 @@ static void test_sstvtx_callsign(void)
 {
 	static const char *const good[] = { "TA2DOU", "TA2DOU/P", "YM2KDZ", "ta2dou-7", "W1AW", "N4ABC", "VE3ABC",
 					    "KD2ABCD", "2E0ABC", "9A1A", "4X6TT", "A61AB", "3DA0XY", "M0ABC",
-					    /* special-event calls: 2-4 digits */
-					    "TC100A", "TC1453", "YM100TC", "W100AW", "TC18MRT" };
+					    /* special-event calls: 2 digits and 3+ letters, a round 3-digit number and 2+ letters,
+					     * 4 digits and a letter or more */
+					    "YM100TC", "W100AW", "TC18MRT", "TC2023X", "TC150TR" };
 	static const char *const bad[] = { "DM32UV", "BAOFENG", "12345", "RADIO1", "Dogan", "DM-32UV", "1A2BC3", "W1",
 					   "TA2DOU1", "ABCD1EF", "1234A",
 					   /* radio model names */
-					   "AT878", "MD380", "UV82", "BF888" };
+					   "AT878", "MD380", "UV82", "BF888", "IC7300", "TS2000", "TH9800", "DM1701", "DR1801",
+					   "HT1000", "FT991A", "FT857D", "AT588UV",
+					   /* special-event shapes no longer taken (too close to the model names) */
+					   "TC100A", "TC1453" };
 	char cs[RADIO_CWID_CALL_MAX + 1];
 	for (unsigned i = 0; i < sizeof good / sizeof good[0]; i++) {
 		if (radio_cwid_callsign(good[i], cs, sizeof cs) == 0) {
@@ -385,6 +389,12 @@ static void test_txsafe2(void)
 	radio_sm_set_settings(&sm, &set, now);
 	reload_channel();
 	CHECK(!sm.sfr_rpt && sm.view.dmr.sfr_nocall && !sm.dmr_keyed);
+	/* the CW ID switched off: the check runs again, the role starts (no ID wanted) */
+	set.sfr_cwid = 0;
+	radio_sm_set_settings(&sm, &set, now);
+	CHECK(sm.sfr_rpt && !sm.view.dmr.sfr_nocall);
+	set.sfr_cwid = 1;
+	radio_sm_set_settings(&sm, &set, now);
 	strcpy(sm.radio_name, "TA2DOU");
 	reload_channel();
 	CHECK(sm.sfr_rpt && !sm.view.dmr.sfr_nocall);

@@ -71,6 +71,7 @@ static void vx_apply(uint32_t hz, uint8_t m, uint16_t nac, uint16_t tg, uint32_t
     c.rx_hz = c.tx_hz = hz;
     vfox_set_mode(&c, m, 0);
     if (vfox_native(m)) { c.p25_nac = nac; c.p25_tg = tg; c.p25_id = id; }
+    vfox_fix(&c);   /* as the VFO settings screen does before it asks (its receive only is vfox_fix's own) */
     radio_req_vfo_apply(&c);
 }
 
@@ -447,6 +448,22 @@ static void test_vfox_find_rx_only(void)
     vx_request(RREQ_VFO_SET, 145500000);
     vx_pump(5);
     CHECK(sm.view.ch.mode == RADIO_MODE_P25 && radio_sm_tx_check(&sm) != TXDENY_NONE);
+    /* third round: Heard -> VFO of a P25 station that could talk (NAC, talkgroup, ID) outside the plan's rule keeps
+     * receive only in the native mode too; the same VFO without it talks */
+    for (int ro = 0; ro < 2; ro++) {
+        vx_request(RREQ_VFO_SET, 145825000);
+        c = sm.view.ch;
+        c.rx_hz = c.tx_hz = 145825000;
+        vfox_set_mode(&c, RADIO_MODE_P25, 0);
+        c.p25_nac = 0x293;
+        c.p25_tg = 99;
+        c.p25_id = 3101234;
+        vfox_fix(&c);
+        c.rx_only = ro != 0;
+        radio_req_vfo_apply(&c);
+        vx_pump(5);
+        CHECK(sm.view.ch.mode == RADIO_MODE_P25 && radio_sm_tx_check(&sm) == (ro ? TXDENY_RX_ONLY : TXDENY_NONE));
+    }
     vx_request(RREQ_VFO, 0);
     vx_pump(20);
     printf("Plus every mode in the VFO: a search find outside the band plan is receive only until the frequency changes\n");
@@ -491,6 +508,11 @@ static void test_vfox_plan(void)
     vx_pump(20);
     vx_request(RREQ_VFO_TX, 431050000);
     CHECK(sm.view.ch.tx_hz == 431050000 && radio_sm_tx_check(&sm) == TXDENY_NONE);
+    /* third round: simplex on a repeater input, and a reverse split (TX on the output), are refused */
+    vx_plan(145100000, RADIO_MODE_FM, TXDENY_VFO_PLAN);
+    vx_plan(431050000, RADIO_MODE_FM, TXDENY_VFO_PLAN);
+    vx_request(RREQ_VFO_TX, 438650000);
+    CHECK(sm.view.ch.rx_hz == 431050000 && sm.view.ch.tx_hz == 438650000 && radio_sm_tx_check(&sm) == TXDENY_VFO_PLAN);
     /* restart: the VFO comes back on 159.125 from the settings, still refused */
     vx_plan(159125000, RADIO_MODE_FM, TXDENY_VFO_PLAN);
     boot();

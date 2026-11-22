@@ -4164,3 +4164,14 @@ Host tests: CW beacon refused during a zone scan (`tests/classic/test_scan.inc`)
 both callsign lists; the VFO plan (`test_vfox_radio.inc` with `CONFIG_VFO_PLAN`): 159.125 FM / DMR / P25 and PMR446
 refused, 145.500 allowed, 438.650 simplex refused and with TX 431.050 allowed, 159.125 still refused after a restart,
 a find's receive only cleared by the split, a codeplug channel on 146.520 unaffected.
+
+**Third round** (branch `txsafe3`): callsigns: two digits take three letters or more (TC18MRT), three digits a round
+number and two letters or more (YM100TC, W100AW, TC150TR), four digits a letter or more (TC2023X); no longer accepted:
+**TC100A, TC1453** (shaped like FT991A / DM1701). Refused now too: IC7300, TS2000, TH9800, DM1701, DR1801, HT1000,
+FT991A, FT857D, AT588UV. VFO plan: TX on a repeater output segment is refused whatever RX is (a reverse split), and
+simplex on a repeater input segment (145.000-145.1875, 431.050-431.825 MHz) too; listening on the output and
+transmitting on the input stays allowed. A receive-only VFO copy (a find, Heard) is honoured in a native mode (P25) as
+well (`vfox_apply_request`); the VFO settings screen's copy is `vfox_fix`'s own. The SFR "no callsign" refusal is
+checked again when the CW ID setting is switched off (`use_settings`): the role starts. Host tests: both callsign
+lists, 431.050 / 145.100 simplex and the 431.050 -> 438.650 reverse split refused, a P25 VFO copy with receive only
+keys nothing and without it talks, the SFR role started after the CW ID is switched off.

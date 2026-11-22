@@ -64,15 +64,18 @@ def prepare_txsafe(transform, install):
         # The VFO's band plan, then its place in the TX checks (after receive only)
         ('uint8_t radio_sm_tx_check(const radio_sm_t *sm)\n{\n',
          ON_PLAN + '// DDM32 Plus (hole hunt): the VFO transmits in the amateur bands only (IARU Region 1, Turkey): 144-146 and\n'
-         '// 430-440 MHz, never PMR446, never simplex on a repeater output segment (145.600-145.7875, 438.650-439.425 MHz,\n'
-         '// half a channel either side); a repeater input with the VFO\'s split is fine. Satellites and APRS are allowed\n'
+         '// 430-440 MHz, never PMR446, never on a repeater output segment (145.600-145.7875, 438.650-439.425 MHz, half a\n'
+         '// channel either side; a reverse split too), never simplex on a repeater input segment (145.000-145.1875,\n'
+         '// 431.050-431.825 MHz); a repeater input with the VFO\'s split is fine. Satellites and APRS are allowed\n'
          '#ifdef VFO_PLAN_TEST\nextern bool vfo_plan_test_on;\t// host tests: upstream\'s suites keep their VFO anywhere\n'
          '#define VFO_PLAN_ON vfo_plan_test_on\n#else\n#define VFO_PLAN_ON true\n#endif\n'
          'static bool vfo_plan_refused(uint32_t rx, uint32_t tx)\n{\n'
          '\tif (!VFO_PLAN_ON)\n\t\treturn false;\n'
          '\tif (tx >= 446000000u && tx <= 446200000u)\n\t\treturn true;\n'
          '\tif (!((tx >= 144000000u && tx <= 146000000u) || (tx >= 430000000u && tx <= 440000000u)))\n\t\treturn true;\n'
-         '\treturn rx == tx && ((tx >= 145593750u && tx <= 145793750u) || (tx >= 438643750u && tx <= 439431250u));\n'
+         '\tif ((tx >= 145593750u && tx <= 145794250u) || (tx >= 438643750u && tx <= 439431250u))\n'
+         '\t\treturn true;\t// a repeater output\n'
+         '\treturn rx == tx && ((tx >= 144993750u && tx <= 145194250u) || (tx >= 431043750u && tx <= 431831250u));\n'
          '}\n#endif\n\n'
          'uint8_t radio_sm_tx_check(const radio_sm_t *sm)\n{\n'),
         ('\tif (ch->rx_only) {\n\t\treturn TXDENY_RX_ONLY;\n\t}\n',
@@ -112,6 +115,13 @@ def prepare_txsafe(transform, install):
          '\t\tif (tx != sm->vfo_ch.rx_hz && !vfox_native(sm->vfo_ch.mode)) {\n'
          '\t\t\tsm->vfo_ch.rx_only = false;\t// DDM32 Plus: a find\'s receive only ends with a split set\n'
          '\t\t\tsm->view.ch.rx_only = false;\n\t\t}\n#endif\n'),
+        # SFR: the CW ID switched off after a refused start: the check runs again (the role may start now)
+        ('\tactivity(sm, now_ms);\n#if CONFIG_DMR\n\tif (reply_changed && sm->dmr_running) {\n',
+         '#if CONFIG_SFR_CWID\n'
+         '\tif (sm->view.dmr.sfr_nocall && sm->set.sfr_cwid == 0) {\n'
+         '\t\tsm->view.dmr.sfr_nocall = false;\t// DDM32 Plus: no ID wanted any more: the channel tuned again\n'
+         '\t\ttune(sm, now_ms);\n\t}\n#endif\n'
+         '\tactivity(sm, now_ms);\n#if CONFIG_DMR\n\tif (reply_changed && sm->dmr_running) {\n'),
         # SFR: no unidentified repeating
         ('\tif (sfr_rpt_wait(sm)) {\n\t\tsm->sfr_denied = true;\t// radio_sm_tick starts the role once it may\n',
          '#if CONFIG_SFR_CWID\n'
