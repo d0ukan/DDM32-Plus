@@ -3417,14 +3417,16 @@ zone: ch N", ...). The toast right after posting is "Added: ch N NAME in zone ZO
 `noinline` zone reader, `zone_at`, so the 180 B zone copy never sits beside a channel copy on the UI task's stack; the
 UI task keeps 184 B free, unchanged). A failing write raises the core's own "save failed" toast.
 
+Home on a Find & save zone ("Bulunanlar N") behaves as the VFO: the join never puts a channel there, so the add goes to All channels only, the toast names no zone, and the duplicate check looks at zone 0 (All channels, its first 80). The toast is shown when the write is queued (as the channel editor's "Saved as channel N"); a failing job raises the core's own save-failed toast. A foreign codeplug (`codeplug_foreign`) is refused first ("Other firmware's codeplug: ignored"), so no add is queued that the "use the old codeplug" answer would drop. `*` with nothing picked is not taken (quick settings opens).
+
 Refusals, before anything is written: not FM / DMR ("Info only: not a mode of this radio"); transmitting (`RS_TX`:
 "Can't add while transmitting"); a zone job queued or running, or a Find & save run ("Saving: wait"); RX outside the radio's
 bands ("Not in the radio's bands"); the zone unreadable; the repeater **already in the zone** (the zone's channels are
 compared: same RX, TX, mode, and TX tone or colour code and slot): "Already in ZONE: ch N", no write; the zone full (80,
 `codeplug_zone_capacity`): "Zone full: max 80 channels"; no free channel number: "No free channel".
 
-Cost (measured, `--plus --stack-check --verify-rebuild`): FLASH 870,784 B (96.63 %), RAM 208,672 B (2,784 B free; +56 B:
-the toast's 52 B text buffer, `add_msg`), 0 warnings, forced rebuild identical. Tests: `tests/plus/test_ui_rptadd.c`
+Cost (measured, `--plus --stack-check --verify-rebuild`): FLASH 871,640 B (96.73 %, on ddm25 4e0348e), RAM 208,768 B (2,688 B free; the toast's 56 B text buffer,
+`add_msg`, fits the longest Turkish toast), 0 warnings, forced rebuild identical. Tests: `tests/plus/test_ui_rptadd.c`
 (`tools/test_rptprov.py`, with `CONFIG_CHAN_EXTRAS`; English and Turkish): FM channel fields and the zone positions, the
 duplicate, narrow and simplex, the details, DMR (CC1 both slots: Any; CC2 TS2), C4FM refused, zone full, transmitting, the
 VFO, the province level's quick settings. Not host-tested: a full codeplug (the simulator's codeplug has a fixed number of

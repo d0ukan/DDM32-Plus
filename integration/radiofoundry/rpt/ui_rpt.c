@@ -396,7 +396,8 @@ static void __attribute__((noinline)) tune(const rpt_entry_t *e)
 }
 
 #if RPT_ADD
-static char add_msg[52];	/* the toast's text (ui_toast keeps the pointer) */
+static char add_msg[56];	/* the toast's text (ui_toast keeps the pointer): the longest, Turkish with a 4 digit channel,
+				 * a 10 character name and a 16 character zone, is 53 + NUL */
 
 /* The channel's DMR slot for e: 1 / 2 as known, else Any (CONFIG_DMR_ANY) or 1 */
 static uint8_t chan_slot(const rpt_entry_t *e)
@@ -519,7 +520,18 @@ static void __attribute__((noinline)) add_toast(const char *a, uint16_t num, con
 	ui_toast(add_msg);
 }
 
-/* * : the picked repeater as a new channel in Home's zone */
+/* Zone zi is a Find & save zone ("Bulunanlar N"): zone_join.inc never joins it (it holds the finds only) */
+static bool __attribute__((noinline)) zone_is_find(uint16_t zi)
+{
+	char nm[CODEPLUG_NAME_LEN + 1];
+	uint16_t n, c;
+	return zone_at(zi, 0, &n, &c, nm) && strncmp(nm, "Bulunanlar ", 11) == 0;
+}
+
+/* * : the picked repeater as a new channel in Home's zone (on the VFO or on a Find & save zone: All channels only,
+ * and the duplicate check looks at zone 0, "All channels", as the join does). The toast comes when the write is
+ * queued, as the channel editor's "Saved as channel N" does; a failing job raises the core's own save-failed toast */
+
 static void __attribute__((noinline)) add_channel(const rpt_entry_t *e)
 {
 	rpt_tune_t t;
@@ -540,11 +552,15 @@ static void __attribute__((noinline)) add_channel(const rpt_entry_t *e)
 		ui_toast(TR("Saving: wait"));
 		return;
 	}
+	if (codeplug_foreign()) {	/* another firmware's codeplug: a write would only raise the question and be dropped */
+		ui_toast(TR("Other firmware's codeplug: ignored"));
+		return;
+	}
 	if (!board_in_band(t.rx_hz, false)) {
 		ui_toast(TR("Not in the radio's bands"));
 		return;
 	}
-	uint16_t zone = v->vfo ? ZONE_NONE : v->zone_index, look = zone == ZONE_NONE ? 0u : zone, has, count;
+	uint16_t zone = v->vfo || zone_is_find(v->zone_index) ? ZONE_NONE : v->zone_index, look = zone == ZONE_NONE ? 0u : zone, has, count;
 	if (!zone_has(look, e, &t, &has, &count)) {
 		ui_toast(TR("Couldn't read the zone"));
 		return;
@@ -639,8 +655,9 @@ static bool rpt_key(const input_event_t *ev)
 	}
 #if RPT_ADD
 	if (ev->action == ACT_QUICK && ev->gesture == GESTURE_PRESS) {	/* * (ui_app.c leaves it to this screen) */
-		if (sel < rpt_info.count)
-			add_channel(&rpt_table[sel]);
+		if (sel >= rpt_info.count)
+			return false;	/* nothing picked: quick settings, as everywhere */
+		add_channel(&rpt_table[sel]);
 		return true;
 	}
 #endif
