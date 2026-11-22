@@ -72,6 +72,26 @@ and dark themes.
 | Source in this repository | ✅ | ❌ Private |
 
 
+### Unreleased source update
+
+Current `main` includes a P25 transmit guard adapted from
+[RadioFoundry PR #745](https://github.com/RadioFoundry/RadioFoundry/pull/745).
+Either WACN `BEE00`–`BEEFF` or System ID `00A` blocks P25 transmission when
+that system identity is known. Trunking-enabled builds also refuse registration
+and affiliation and wait for verified serving-system identity before access.
+Reception remains available, and the guard has no override.
+
+Ordinary conventional P25 uses NAC, unit and talkgroup IDs. The conventional
+receive path applies this guard only if validated system-status link control
+reveals a blocked trunked identity; it never treats a NAC as a System ID.
+Observed carrier blocks last until reboot. This source does not add trunking
+to the default Classic feature set.
+
+This is source-only development version `open25-classic-0.1.0-rc1-r15-dev`.
+Host regressions and firmware build/stack/reproducibility checks pass; new RF
+qualification is pending. The downloadable release remains r14. To reproduce
+released r14, use the `classic-0.1.0-rc1-r14` tag.
+
 ## Get started
 
 **Classic r14 is available now.** Next is still in development and has no public

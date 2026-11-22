@@ -12,12 +12,12 @@
     "tree": "c39d1c935bead88a31ea8badf9f33747c82ade26"
   },
   "release": {
-    "version": "open25-classic-0.1.0-rc1-r14",
-    "epoch": 1795197378,
+    "version": "open25-classic-0.1.0-rc1-r15-dev",
+    "epoch": 1795307532,
     "board": "dm32",
-    "application_bytes": 351492,
-    "application_sha256": "de5cdfdb768f203f1c7a9cfe2f0dd921550885b9eedcc4138f2e17f75343a907",
-    "package_sha256": "3e2bdce9486beab83ab3d35ccedfb3ca577439143a0584fb6dfe5d923f56c2f6"
+    "application_bytes": 352120,
+    "application_sha256": "f5f3ee1f4ee062d0b8b9bc3fa71cc99dae9a9b612ac2f0ff3a38300f30be0179",
+    "package_sha256": "99f15e75621c738194d3b65a1a37aa9db030e455ad4323eb283e2f31a1c1011a"
   },
   "toolchain": {
     "gcc": "14.3.0",
@@ -120,7 +120,7 @@
       "mode": "100644"
     },
     "core/p25/p25.h": {
-      "sha256": "946148c7dca584d36e9106500acbf585efb746e5d5d982df7c89fca9a30f3632",
+      "sha256": "ad7991e642faf06769411b180f618109d2e3dd3a818c4b1fd837af65107d0c48",
       "mode": "100644"
     },
     "core/p25/p25Voice.c": {
@@ -132,7 +132,7 @@
       "mode": "100644"
     },
     "core/p25/p25_call.c": {
-      "sha256": "497331520fc3115646be73cb98cd9d5dd2289aa5641f3846441e2b8cb2f87b9a",
+      "sha256": "2f33c95ef87fb71d9cceeb20583cde53f5ce2d6ae0db477b3bbb195c59221f60",
       "mode": "100644"
     },
     "core/p25/p25_codeplug.c": {
@@ -147,6 +147,14 @@
       "sha256": "1618349a1d7d08dc458e3689d6379f0157cb116cdee320689963bb76e38f1da5",
       "mode": "100644"
     },
+    "core/p25/p25_follow.c": {
+      "sha256": "b3c96477bce94d1a47d5d1ed2dbb33eb1577bcad563c26fb2933fe3b7b0460dd",
+      "mode": "100644"
+    },
+    "core/p25/p25_follow.h": {
+      "sha256": "2a237948ad638f6e6d889c2688b8075e8bc85bdc7c47bf1d06698e5a33896553",
+      "mode": "100644"
+    },
     "core/p25/p25_mic_agc.h": {
       "sha256": "b2f27d2d0174cd8b5439dc3220ca45e7380eee55d462455cf850704c7d50ef4a",
       "mode": "100644"
@@ -155,8 +163,20 @@
       "sha256": "c103bc3ecbf44c6cb1ca36956632a14b648167dec813cb536e84ffc7f135bfcf",
       "mode": "100644"
     },
+    "core/p25/p25_sys_policy.h": {
+      "sha256": "9581b61ea00bf5b04b7da1bf4fa359f16f2965315ec1acacdaf0023199dc02a6",
+      "mode": "100644"
+    },
+    "core/p25/p25_tsbk.c": {
+      "sha256": "3d1011f35f2fe4ce01243cc749b8c36419d5f4c24298f80f8806cdc7154d9e2d",
+      "mode": "100644"
+    },
+    "core/p25/p25_tsbk.h": {
+      "sha256": "b2817704fc595be3af05914b0a3b6ad38fbbd9b9a5062dce51e6c28798f8ac31",
+      "mode": "100644"
+    },
     "core/p25/p25_unit.c": {
-      "sha256": "756fc5f5f095421fc3d07aa80db28f23daf185e9835bd91e6a1825e151678b0f",
+      "sha256": "0ca161b91e670deff220efbda6d22af77d5764f85630579b55f84c682bd6625c",
       "mode": "100644"
     },
     "core/radio/beep.c": {
@@ -172,7 +192,11 @@
       "mode": "100644"
     },
     "core/radio/radio_p25.c": {
-      "sha256": "0ce7908b32f8bc4f5c727d641601a450dc483b040288f4b789833d1e541448b5",
+      "sha256": "5f3e370981d4ab66199214d14db5b1de99bd55ca7d92034aa18ed7397521a833",
+      "mode": "100644"
+    },
+    "core/radio/radio_p25.h": {
+      "sha256": "8c38d190977749f0de05b2c8638a24864a6e18956411bfee34247c46d1125cde",
       "mode": "100644"
     },
     "core/radio/radio_sm.c": {
@@ -183,12 +207,28 @@
       "sha256": "12e7ca5754a8557a7da24367aa7b07ee5cb382c0b5aa67ac3215494150d7b818",
       "mode": "100644"
     },
+    "core/ui/lang/es.po": {
+      "sha256": "70ba3d31e054c7e97a3453862e4dd8fcb01ce047829abe1db8c152d72cbf20c4",
+      "mode": "100644"
+    },
+    "core/ui/lang/fr.po": {
+      "sha256": "49286c753a0e10d80d314e7d60bff86ad6ddf93b6a6d9947f595b632f9d3027d",
+      "mode": "100644"
+    },
+    "core/ui/lang/it.po": {
+      "sha256": "5ccba917104e6205236a26be045b7839e1b473a6bb054abb5a99bd073d62a740",
+      "mode": "100644"
+    },
+    "core/ui/lang/zh.po": {
+      "sha256": "5ccb781f084541d28cad193754de79eaa8202ccbd4941e3ab0bb2226beb90c54",
+      "mode": "100644"
+    },
     "core/ui/ui_menus.c": {
       "sha256": "a82bd041b1f9061e98be59fd14efdf7cae46cafe40c80e1f6ba36a4ad52e4709",
       "mode": "100644"
     },
     "core/ui/ui_screens.c": {
-      "sha256": "13a39762947252bcccb58b67ecf6de7440fd8850f82e8dcb94d6fcfc51aea505",
+      "sha256": "d9c8bb234ac0b87446990f94cac84e2a013af88c9dbf2e1a2740d46578866097",
       "mode": "100644"
     },
     "core/ui/ui_screens.h": {
@@ -276,7 +316,11 @@
       "mode": "100644"
     },
     "tests/host/p25Test.c": {
-      "sha256": "bb3d0d04904571daa11dc27f4839ce8a64497628a23ecdb96a85b22c030303b4",
+      "sha256": "ca1f0e197eb7804c59d2254c0621355fc5271fa011ce8d823cd2ea8810df76ec",
+      "mode": "100644"
+    },
+    "tests/host/p25TrunkTest.c": {
+      "sha256": "2449b4c474a5cadcad61213ecb13c63b1f7d66b237de3f1bb4b470fa501937ff",
       "mode": "100644"
     },
     "tests/host/p25TxPolicyTest.c": {
@@ -288,7 +332,7 @@
       "mode": "100644"
     },
     "tests/host/radioCoreTest.c": {
-      "sha256": "897b556428fc8158ed60a2d1f878fe9a38ea142d8e89974017753c070e7b8612",
+      "sha256": "a949accf01d4d822dfbb53ed2d948eb4655d7361e125b41b550111ee9b789b6e",
       "mode": "100644"
     },
     "tests/host/radioFeaturesTest.c": {
@@ -303,8 +347,16 @@
       "sha256": "c3ae37eb37280c22057ab54d88800494baf246210a83f3608c32ed6cd861d54f",
       "mode": "100644"
     },
+    "tools/bench/p25/p25tool.c": {
+      "sha256": "c24deaab92882c5bd7a19e4f701a39d1d7bd5c88bbec981a3cd15182d1bfc6f2",
+      "mode": "100644"
+    },
+    "tools/bench/p25tool.py": {
+      "sha256": "13fddcaf757b89070adc3d7ee3307c4f7b57bdfc8ffd0740ad62bd63fa742b2b",
+      "mode": "100644"
+    },
     "tools/build_classic.py": {
-      "sha256": "327051d765b32b477563dc6f7f30f203f7a5ca325792d5ca8d47ee97f2e717cb",
+      "sha256": "8813c1f5f96921ba9a65214d8bac681370279b236872e56d9634abf2ecd332dd",
       "mode": "100755"
     },
     "tools/test_classic_bands.py": {

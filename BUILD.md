@@ -1,7 +1,12 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (c) 2026 Open25-DM32 Contributors -->
 
-# Building Classic r14
+# Building Classic from source
+
+Current `main` builds unreleased `open25-classic-0.1.0-rc1-r15-dev`, including
+the system-identity P25 transmit guard. These source build pins describe the
+development image; they do not publish or qualify a firmware release. Check out
+`classic-0.1.0-rc1-r14` to reproduce the existing downloadable r14 release.
 
 The [project README](README.md) describes the editions, installation, programming
 and current release status. This file covers source preparation and building.
@@ -27,7 +32,7 @@ The prepared source is `build/upstream`. The application, deterministic ZIP,
 build receipt and logs are under `build/upstream/build/classic-test`. The wrapper
 uses the Classic profile from the reconstructed source and pins version,
 `RFOUNDRY_GIT_TIME`, `SOURCE_DATE_EPOCH` and `RELEASE=` independently of local Git
-dates or tags. The recorded epoch is 1795197378. It refuses compiler warnings,
+dates or tags. The recorded epoch is 1795307532. It refuses compiler warnings,
 checks the application size/hash, optionally checks stacks and an identical
 forced rebuild, then checks the ZIP against the reviewed package hash.
 

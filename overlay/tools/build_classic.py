@@ -17,7 +17,7 @@ import zipfile
 import boards
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "open25-classic-0.1.0-rc1-r14"
+VERSION = "open25-classic-0.1.0-rc1-r15-dev"
 PROFILE = {
     "PRODUCT_CLASSIC": "y", "CPS_RFKV_ONLY": "y",
     "FM": "y", "DMR": "y", "P25": "y", "NXDN": "y", "HRC7000_NATIVE_RX": "y", "P25_MIC_AGC": "y",

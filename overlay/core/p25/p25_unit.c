@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 The RadioFoundry Authors
+// Copyright (c) 2026 Open25-DM32 Authors
 // P25 data units (p25.h): where each field sits among the status symbols, and its code words. Clause numbers are
 // TIA-102.BAAA-A's.
 
@@ -441,4 +442,20 @@ void p25_lc_build(const p25_lc_t *lc, uint8_t raw[P25_LC_BYTES])
 	raw[6] = (uint8_t)(lc->src >> 16);
 	raw[7] = (uint8_t)(lc->src >> 8);
 	raw[8] = (uint8_t)lc->src;
+}
+
+bool p25_unit_sys_no_tx(const p25_rx_unit_t *u)
+{
+	uint8_t raw[P25_LC_BYTES];
+
+	if (u->duid == P25_DUID_LDU1) {
+		if (p25_ldu_lc_get(u->air, raw) < 0)
+			return false;
+	} else if (u->duid == P25_DUID_TDULC) {
+		if (p25_tdulc_get(u->air, raw) < 0)
+			return false;
+	} else {
+		return false;
+	}
+	return p25_lc_sys_no_tx(raw);
 }

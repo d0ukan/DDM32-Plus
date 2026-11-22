@@ -36,6 +36,8 @@
 #define P25_NAC_ANY		0xF7E	// a receiver set to it takes every NAC
 #define P25_NAC_REPEAT_ANY	0xF7F	// a repeater set to it takes every NAC and sends it on as received
 
+#include "p25_sys_policy.h"
+
 // Status symbols (table 8-2). A subscriber sends only P25_SS_TALKAROUND or P25_SS_UNKNOWN
 #define P25_SS_BUSY		1	// 01: the inbound channel is busy (a repeater says)
 #define P25_SS_TALKAROUND	0	// 00
@@ -122,6 +124,10 @@ typedef struct {
 	uint16_t nsyms;
 	const uint8_t *air;	// the unit as received, valid during the callback
 } p25_rx_unit_t;
+// An LDU1's or TDULC's link control names a blocked system (p25_wacn_no_tx, p25_sysid_no_tx): the network status
+// broadcast's WACN or system ID, or the RFSS status broadcast's system ID (TIA-102.AABF-D 7.3.16, 7.3.17, 7.3.28:
+// LCO 35, 36 or 41, standard format, not protected). False for another unit or link control, or one undecodable
+bool p25_unit_sys_no_tx(const p25_rx_unit_t *u);
 
 typedef struct {
 	uint16_t nac;		// units of another NAC are not ours; P25_NAC_ANY takes all
@@ -171,6 +177,7 @@ typedef struct {
 
 typedef struct {
 	uint32_t units, voice, voice_bad, voice_bits, lc_fail, es_fail, calls;
+	uint32_t sys_no_tx;	// LDU1s and TDULCs whose link control names a blocked system (p25_unit_sys_no_tx)
 	uint32_t valid_units;	// complete decoded-NID units, excluding bad-NID coasting
 } p25_call_stats_t;
 
