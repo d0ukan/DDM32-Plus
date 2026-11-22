@@ -368,7 +368,7 @@ kept off; built without the P25 search).
 
 ### All digital search (`CONFIG_ALL_SEARCH`, ours; receive only)
 
-Tools > All digital search (Turkish "Tüm dijital arama"; the last tool before Battery, so no other tool's number moves):
+Tools > All digital search (Turkish "Tüm dijital arama"; tool 39, after CW decoder; Tools > ISS (40) follows it, then Battery (41); no other tool's number moved):
 finds P25, DMR, YSF and NXDN anywhere in a range. Same ranges, step and keys as P25 / DMR search (Left / Right, `*`
 and digits open the range editor, OK start / stop, Up / Down pick a find, Back stops). On a hit it probes the modes
 in the owner's priority order **P25 > DMR > YSF > NXDN**; the first mode confirmed wins.
@@ -1141,52 +1141,79 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   `sat_auto_start` / `sat_auto_mode`; owner's request 2026-11-22; branch issmenu). Reuses the satellites' code: the
   pass search, the live look, the pass alarm page's rows and the auto track's hold and return; Tools > Satellites stays
   for all satellites.
-  - **Tools > ISS** ("ISS" in both languages) is the tool after All digital search: only Battery (last by design) and
-    the zone offer's 0 move one on, every other tool keeps its number. One page (240 x 320, small font where a line
-    is long): "AOS in 1h05  47°" ("LOS in 5:12  47°" in the rx color under way), "AOS 14:27  LOS 14:38" (local time,
-    the Satellites screen's offset; "Above now, max 47°" under way), the live "Az 123°  El 23.4°", the two downlinks
-    "> 145.800 voice / SSTV" and "145.825 APRS" (the one in use marked), "RX 145.803 +2.6 kHz" (that one with the
-    Doppler of now; the tuned frequency during a held track), a line, then the pass alarm page's rows from Before AOS
-    on (Before AOS, Min. elevation, Every pass, Auto track) in the small font, and a status line ("Tracking, back at
-    LOS", "OK: track in the VFO", the alarm "Alarm 14:27: ISS 47°", or "Track from AOS-10 min"). Keys: Up / Down a
-    row, Left / Right its value: Every pass On arms the ISS's notifications at once (For the ISS, kept across power
-    cycles as on the alarm page), Off disarms them; a change of the other rows while Every pass is on arms it again
-    with the change; Auto track is the same stored setting. **OK**: within 10 min of AOS or during a pass, the held
-    track now (below); any track running: stop it ("Auto track off: radio back" or "Tracking off: VFO stays");
-    otherwise the toast "Track from AOS-10 min". **#**: APRS via ISS as on the Satellites screen (the same gates).
-    **1**: the other downlink (145.800 / 145.825), switched under a running held track too (the next second's tune).
-    Hint "OK track  # APRS  1 freq" ("OK stop ..." while tracking). While a held track runs, keys on this page stay
-    the page's (they do not end it as on other screens); PTT and monitor still do. The page counts as idle for the
-    automatic auto track (as Home and Satellites).
-  - **The held track** (`sat_auto_start(idx, mode)`, a new UI request in the service): the auto track's machinery
-    started by the user: the radio core asked to hold the user's state (refused while busy: nothing moves), then the
-    downlink alone (ISS 145.800, or 145.825), simplex, FM wide, no tones, Doppler corrected in the same steps, TX
-    refused; "ISS tracking, max 47°" once held; 30 s after the set (or a key off Tools > ISS, PTT, a hand change) the
-    radio back exactly where it was (`radio_sathold.inc`'s end). Only for a pass under way or due within 10 min (the
-    service checks again). Asked over a pass tracked by hand from Tools > Satellites it ends that one instead.
-    `sat_auto_mode` switches a held ISS track's downlink while it runs. The Satellites screen's own OK track (437.800 /
-    145.990 split, TX allowed) is unchanged.
-  - **The AOS pop-up**: with the pass alarm armed (notifications on: one pass or Every pass) and Auto track Off, the
-    rise's banner reads "ISS overhead, max 47°" ("ISS tepede, maks 47°") with "OK: track" ("OK: takip") under it,
-    the rise's beep as before, up 60 s instead of 8 (countdown in the banner). OK while it is up starts the held track
-    on that satellite's downlink (the ISS: the one chosen on Tools > ISS, 145.800 at power on) and hides it, toast
-    "Tracking, back at LOS"; Back or any other key only hides it (the key does nothing else). Not while transmitting (as every satellite banner: it waits for the end of TX); over a zone offer it is the
-    toast as before (not actionable). With Auto track On or APRS the rise's banner is "ISS AOS now, max 47°" as before
-    and the auto track starts by itself. Home's own hint row stays under the banner.
+  - **Tools > ISS** ("ISS" in both languages) is tool 40, after All digital search: only Battery (now 41, last by
+    design) and the zone offer's 0 move one on, every other tool keeps its number. One page (240 x 320, small font
+    where a line is long): "AOS in 1h05  47°" ("LOS in 5:12  47°" in the rx color under way), "AOS 14:27  LOS 14:38"
+    (local time, the Satellites screen's offset; "Above now, max 47°" under way), the live "Az 123°  El 23.4°", the
+    two downlinks "> 145.800 voice / SSTV" and "145.825 APRS" (the one in use marked), "RX 145.803 +2.6 kHz" (that one
+    with the Doppler of now; the tuned frequency during a held track), a line, then the pass alarm page's rows from
+    Before AOS on (Before AOS, Min. elevation, Every pass, Auto track) in the small font, and a status line
+    ("Tracking, back at LOS", "Alarm AO-91 armed" for another satellite's alarm, "OK: track in the VFO", the ISS alarm
+    "Alarm 14:27: ISS 47°", or "Track from AOS-10 min"). **The rows always edit the ISS's alarm** (For is the ISS):
+    Every pass On arms the ISS's notifications at once (kept across power cycles as on the alarm page), Off disarms
+    them (only the ISS's alarm); a change of the other rows while Every pass is on arms it again with the change; Auto
+    track is the same stored setting. Another satellite's (or Any satellite's) alarm is shown on the status line and
+    left alone by the other rows; Every pass On replaces it (one alarm at a time) with the toast "Every ISS pass: other
+    alarm off" ("Her ISS geçişi: diğer alarm kapalı"). **OK**: within 10 min of AOS or during a pass, asks for the held
+    track (below; "ISS tracking, max 47°" once the radio holds, else a refusal toast); any track running: stop it
+    ("Auto track off: radio back" or "Tracking off: VFO stays"); otherwise the toast "Track from AOS-10 min". **#**:
+    APRS via ISS as on the Satellites screen (the same gates). **1**: the other downlink (145.800 / 145.825), switched
+    under a running held track too (the next second's tune). Hint "OK track  # APRS  1 freq" ("OK stop ..." while
+    tracking). While a held track runs, keys on this page stay the page's (they do not end it as on other screens);
+    PTT and monitor still do. The page counts as idle for the automatic auto track (as Home and Satellites).
+  - **The held track** (`sat_auto_start(idx, mode)`, a UI request to the service): the auto track's machinery started
+    by the user. The pass: the screens' search result when there is one, else the last alarm rise's pass (the service
+    keeps the rise's satellite, top, AOS and LOS: what the pop-up offers from Home, where no screen searched); only a
+    pass under way or due within 10 min. Then the radio core is asked to hold the user's state, and only once it does
+    does anything move: the downlink alone (ISS 145.800, or 145.825), simplex, FM wide, no tones, Doppler corrected in
+    the same steps; 30 s after the set (or a key off Tools > ISS, PTT, a hand change) the radio back exactly where it
+    was (`radio_sathold.inc`'s end). **The UI says "tracking" only on the service's word**: the existing
+    `SAT_ALARM_TRACK` event ("ISS tracking, max 47°" banner) once held; a refusal is a new event `SAT_ALARM_NOTRACK`
+    with the reason, shown as a toast: "Can't track: no pass now" (no pass within 10 min, after LOS, or no GPS clock),
+    "Can't track: a track runs" (a pass tracked by hand from Tools > Satellites goes on untouched), "Can't track: radio
+    busy" (the radio core refused the hold within 3 s: scan, search, call, DOTA, cross-band, hotspot ...; nothing
+    moved). `sat_auto_mode` switches a held ISS track's downlink while it runs. The Satellites screen's own OK track
+    (437.800 / 145.990 split, TX allowed) is unchanged.
+  - **TX during a held (or auto) track**: PTT is refused by the radio core (`TXDENY_RX_ONLY`, "RX only"), and PTT ends
+    the track once released (the radio back as before). No APRS frame of the radio's own keys meanwhile: beacons
+    (smart / timed), the SOS position, digipeats and message acks wait in the queue until the hold ends
+    (`aprs_can_start` checks `sat_held`). The one exception is the frame the user asks for with **# APRS via ISS** on
+    Tools > ISS or Satellites: `aprs_rf_next_iss` moves it to the head of the queue and it is sent alone on
+    145.825 MHz + uplink Doppler (CSMA there first), then the radio returns to the tracked downlink; the service tells
+    PTT apart from the radio's own transmissions (`sat_service`'s `SAT_TX_PTT` / `SAT_TX_OWN`), so that frame does not
+    end the track. The ISS frame's own gates (callsign, position, 30 s apart) are as before.
+  - **The AOS pop-up** (Home only): with the pass alarm armed (notifications on: one pass or Every pass), Auto track
+    Off and Home open (no menu, editor or typed frequency), the rise's banner reads "ISS overhead, max 47°" ("ISS
+    tepede, maks 47°") with "OK: track" ("OK: takip") under it, the rise's beep as before, up 60 s instead of 8
+    (countdown), and Home's hint row reads "OK track  Back" ("OK takip  Geri") meanwhile. It takes two key presses
+    only: OK asks for the held track on that satellite's downlink (the ISS: the one chosen on Tools > ISS, 145.800 at
+    power on) and hides it, the service's word following as above; Back hides it. Every other key, a long press and
+    the knob are Home's as always (the pop-up stays up). On any other screen the rise gives the plain 8 s "ISS AOS
+    now, max 47°" banner with no key taken. Not while transmitting (as every satellite banner: it waits for the end
+    of TX); over a zone offer it is the toast as before. With Auto track On or APRS the rise's banner is "ISS AOS now"
+    as before and the auto track starts by itself.
   - **Fixed: the Satellites screen's hint without a GPS fix**: in the "Waiting for the GPS time / position" state the
     hint was "Back" alone, so its left part (where every other state names OK) was empty although OK opens the pass
     alarm page there (sat_key: nothing to track). It now reads "OK alarm  Back".
-  - Host tests (in `make test`): `tests/plus/test_sat_svc.c` adds the held track (15 min early refused; 5 min before
-    the rise from a channel without the UI's idle word: the hold, 145.800 with Doppler, simplex, "tracking"; switched
-    to 145.825 under way; the VFO within the hold plus a second's drift of the true Doppler; 30 s after the set the
-    channel back) and the held track asked over a pass tracked by hand; `tests/plus/test_ui_sat.c` (now built with
-    Turkish) adds Tools > ISS in English and Turkish (the page, layout checks: plain, a held track, above now, no GPS
-    time, Every pass on; OK tracks, 1 then OK on 145.825, too early, OK stops a held track with the keys not taken by
-    the auto track, Every pass on / changed / off stored, auto track row, # below the horizon) and the pop-up (shown
-    with its line and beep, OK tracks on 145.800 or 145.825 and Home stays, Back and another key dismiss, up 60 s and
-    gone after, held back during TX and actionable after, no pop-up with Auto track On), and the fixed hint.
-  - FLASH +2,872 B (857,584 -> 860,456), RAM +0 B (209,856: the three new bytes and the alarm text, moved out of its
-    function, fit in what was padding); stacks unchanged (radio 728 B free, UI 184 B free). Radio rows IS-1-IS-11.
+  - Host tests (in `make test`): `tests/plus/test_sat_svc.c` adds the held track (15 min early refused with
+    SAT_NO_PASS; 5 min before the rise from a channel without the UI's idle word: the hold, 145.800 with Doppler,
+    simplex, "tracking"; switched to 145.825 under way; the VFO within the hold plus a second's drift of the true
+    Doppler; 30 s after the set the channel back), refused over a pass tracked by hand (that one goes on), and the
+    pop-up's path from Home with no screen looked at (the alarm's own pass, two passes back to back, the radio's own
+    frame for 3 s not ending the track, OK after LOS refused, the radio core busy refused with nothing moved);
+    `tests/plus/test_aprs_iss.c` adds the hold on the real radio core and APRS engine (a beacon held back, the ISS
+    frame past it on 145.825 + Doppler with the hold kept, the beacon after the hold); `tests/plus/test_ui_sat.c`
+    (now built with Turkish) adds Tools > ISS in English and Turkish (the page, layout checks: plain, a held track,
+    above now, no GPS time, Every pass on, another satellite's alarm; OK asks for the track with no toast and "ISS
+    tracking" only on the service's word, refusals as toasts, 1 then OK on 145.825, too early, OK stops a held track
+    with the keys not taken by the auto track, Every pass on / changed / off stored, AO-91's alarm shown and left alone
+    and then replaced with the toast, auto track row, # below the horizon) and the pop-up (shown with its line, beep
+    and Home's hint, OK on 145.800 or 145.825 with the service's word or refusal, Back hides it, another key, a long
+    OK and the knob left to Home, the plain banner and no key taken off Home, up 60 s and gone after, held back during
+    TX and actionable after, no pop-up with Auto track On), and the fixed hint.
+  - FLASH +3,688 B (857,584 -> 861,272), RAM +16 B (209,856 -> 209,872: the alarm rise's pass and the held track's
+    flag in the service, the downlink switch, the pop-up byte; the alarm text moved out of its function); stacks
+    unchanged (radio 728 B free, UI 184 B free). Radio rows IS-1-IS-11 with IS-4b, IS-6b and IS-6c.
 
 - [built] P25 Phase 1 trunk following (`CONFIG_P25_TRUNK`, `prepare_p25_trunk`; parallel job; receive only):
   Tools > P25 trunk (tool 24, before Battery) follows a trunked system from the **selected channel**: a P25 channel
@@ -2178,7 +2205,7 @@ every task's deepest stack path unchanged (UI 368 B free, radio 824, host link 6
   on another frequency / not past 60 s / a DMR call we made / the user's choice kept, the export byte for byte, a full
   list in one reply, refused while a change is under way, too small a buffer), the UI flow (* on Recent, the export
   after it, * elsewhere still the quick settings). The PC app's export is another job's. Radio rows QL1-QL4.
-- [built] Battery graph and time left (`CONFIG_BATT_GRAPH`): Tools > Battery (tool 30, "Pil") on a radio with a
+- [built] Battery graph and time left (`CONFIG_BATT_GRAPH`): Tools > Battery (tool 41 since Tools > ISS; it was 30 when added and stays the last tool, "Pil") on a radio with a
   battery opens a page with the charge level and voltage ("84%  7.90 V"), "Time left: 4 h 20 min" or "Time left: --"
   with why ("Collecting: needs 30 min", "Charging", "Not steady"), and the last 3.2 hours as a line graph (scaled to its
   own range, 0.2 V at least; labels top and bottom; "-3.2 h" ... "now"); a radio that measures its supply keeps
@@ -2225,7 +2252,7 @@ every task's deepest stack path unchanged (UI 368 B free, radio 824, host link 6
   nothing yet, too small a buffer; a PC asking every 100 ms does not stop the idle stop after 3 s, the screen's
   snapshots do; stopped stays stopped). Radio rows PL1-PL2.
 - [built] CW decoder and CW practice (`CONFIG_CW_RX`, `prepare_cw_rx`; owner's round 3 item 6; parallel job; needs
-  MSG_RX; receive and local sound only). **Tools > CW decoder** (the last tool, before Battery) decodes Morse sent as a
+  MSG_RX; receive and local sound only). **Tools > CW decoder** (tool 38; All digital search and ISS came after it later) decodes Morse sent as a
   keyed **audio tone** (MCW: a CW ID, a beacon, a practice net) on the FM or AM channel in use. **Limit**: FM and AM
   have no BFO, so a plain CW carrier (A1A, as on HF) gives no tone to decode (on FM it only quiets the noise); the tone
   must lie within 400-1000 Hz. The screen: "18 WPM  712 Hz" and a mark lamp, a status line ("Listening: MCW tone

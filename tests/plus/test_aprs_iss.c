@@ -7,7 +7,8 @@
 //   - the gates: no callsign, no position, a frequency outside the ham bands (nothing keyed); at least 30 s between
 //     sends; one at a time;
 //   - independent of the APRS frequency: it goes while the region frequency is not one we may send on, and an
-//     ordinary beacon still goes on the APRS frequency.
+//     ordinary beacon still goes on the APRS frequency;
+//   - a satellite's held track: only the ISS frame keys, the beacons wait for its end.
 // Built like aprsRadioTest (tools/test_classic.py) with -DCONFIG_SATELLITES=1.
 #define main upstream_aprs_radio_main
 #include "aprsRadioTest.c"
@@ -124,6 +125,35 @@ static void test_iss_own_frequency(void)
 	wait_idle();
 }
 
+// DDM32 Plus: a satellite's held track (RREQ_SAT_HOLD, Tools > ISS / the AOS pop-up) holds the radio: an ordinary
+// beacon waits; the user's # APRS via ISS frame goes past it on 145.825 MHz + Doppler and the hold stays; let go, the
+// beacon goes on the APRS frequency
+static void test_iss_held(void)
+{
+	reset();
+	aprs_set_test_call("N0TST");
+	configure(0, false);
+	run(1000);
+	req(RREQ_SAT_HOLD, 1);
+	run(100);
+	CHECK(radio_sat_held());
+	CHECK(aprs_send_now());
+	CHECK(!wait_start(1, 8000));
+	CHECK(hw.tx_calls == 0);
+	CHECK(aprs_iss_send(ISS_DOPPLER) == APRS_OK);
+	CHECK(wait_start(1, 6000));
+	CHECK(hw.tx_hz == ISS_DOPPLER && nframes == 1 && strstr(frames[0], ",ARISS:") != NULL);
+	wait_idle();
+	CHECK(radio_sat_held() && hw.tx_calls == 1);
+	nframes = 0;
+	CHECK(!wait_start(2, 8000));
+	req(RREQ_SAT_HOLD, 0);
+	CHECK(!radio_sat_held());
+	CHECK(wait_start(2, 30000));
+	CHECK(hw.tx_hz == APRS_HZ && nframes == 1 && strstr(frames[0], ",WIDE1-1,WIDE2-1:") != NULL);
+	wait_idle();
+}
+
 int main(void)
 {
 	int up = upstream_aprs_radio_main();
@@ -131,6 +161,7 @@ int main(void)
 	test_iss_frame();
 	test_iss_gates();
 	test_iss_own_frequency();
+	test_iss_held();
 	printf("# test_aprs_iss: %d checks, %s\n", checks, failures ? "FAILED" : "PASSED");
 	return failures ? 1 : 0;
 }

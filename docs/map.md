@@ -222,7 +222,7 @@ REPEATERS and GPS); the station part rides on `CONFIG_MAP`. Code: `integration/r
 
 ### Auto repeater
 
-- Tools > **Auto repeater** (tool 27, after Repeaters; Battery and the zone offer move one on): On / Off, OK toggles
+- Tools > **Auto repeater** (tool 27, after Repeaters; Battery, last, is tool 41 since Tools > ISS): On / Off, OK toggles
   ("Auto repeater on", "... on: waiting for GPS" without a fix, "Auto repeater off"). RAM only: off at every power on.
 - With a GPS fix (`ui_svc_position`), every UI tick at most once a second the tick runs; the check itself at most every
   30 s (`ARPT_EVERY_MS`): the nearest **suitable** repeater of the built-in table (`rpt_nearest_if`, one pass): FM on an

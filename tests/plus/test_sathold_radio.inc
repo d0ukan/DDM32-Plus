@@ -13,7 +13,7 @@
 
 void radio_req_sat_hold(bool on) { req(RREQ_SAT_HOLD, on); }
 /* The service (radio_task.c's loop, classic_dispatch.inc) is not under test here */
-void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, bool transmitting, bool light, uint32_t now_ms)
+void sat_service(bool vfo, uint32_t rx_hz, uint32_t tx_hz, uint8_t transmitting, bool light, uint32_t now_ms)
 {
 	(void)vfo; (void)rx_hz; (void)tx_hz; (void)transmitting; (void)light; (void)now_ms;
 }

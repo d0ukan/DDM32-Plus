@@ -12,13 +12,15 @@
  * or any satellite; Auto track: Off, On (the downlink; the ISS 145.800) or APRS (the ISS 145.825), receive only, from
  * the rise to the set; a change while armed arms it again), OK arms it or turns it off, Back the list. When it is due
  * (ui_sat_alarm, every UI tick on any screen): a tone and a banner; a key ends an auto track (ui_sat_auto_key). With
- * auto track Off the rise's banner is a pop-up for 60 s: "ISS overhead, max 47°", "OK: track"; OK starts the held,
- * receive-only track on its downlink (sat_auto_start: the radio back where it was 30 s after the set), any other key
- * only hides it.
+ * auto track Off the rise's banner on Home is a pop-up for 60 s: "ISS overhead, max 47°", "OK: track", Home's hint
+ * "OK track  Back"; OK asks for the held, receive-only track on its downlink (sat_auto_start: the radio back where it
+ * was 30 s after the set; "ISS tracking" once the radio holds, else a toast says why not), Back hides it, other keys
+ * are Home's. Elsewhere it is the plain 8 s banner.
  *
  * Tools > ISS (ui_iss_screen): the ISS alone on one page: its next pass (or "Above now"), AOS / LOS, the live
  * azimuth, elevation and the Doppler of the downlink in use, the two downlinks (145.800 FM voice / SSTV, 145.825
- * APRS), and the pass alarm page's rows from Before AOS on (Every pass arms the ISS's notifications at once). OK:
+ * APRS), and the pass alarm page's rows from Before AOS on (always the ISS's alarm: Every pass arms its notifications
+ * at once, replacing another satellite's alarm with a toast; another's is shown, not changed). OK:
  * the held track now (as the pop-up's; under way or due within 10 min, else it says when) or stop, #: APRS via ISS,
  * 1: the other downlink (switched under a track too). */
 #include "config.h"
@@ -587,6 +589,12 @@ const char *ui_sat_alarm(void)
 		    (scr == SCR_HOME || scr == SCR_SATELLITES || scr == SCR_ISS));
 	if (tx || !sat_alarm_take(&ev) || ev.sat >= sat_count)
 		return NULL;
+	if (ev.kind == SAT_ALARM_NOTRACK) {
+		/* the user's held track refused (the service's or the radio core's word) */
+		ui_toast(ev.max_el == SAT_NO_BUSY ? TR("Can't track: radio busy") : ev.max_el == SAT_NO_MANUAL ?
+			 TR("Can't track: a track runs") : TR("Can't track: no pass now"));
+		return NULL;
+	}
 	sbuf_t b;
 	sb_init(&b, al_text, sizeof al_text);
 	sb_str(&b, sat_table[ev.sat].name);
@@ -596,7 +604,7 @@ const char *ui_sat_alarm(void)
 		sb_str(&b, TR(" min, max "));
 	} else if (ev.kind == SAT_ALARM_TRACK) {
 		sb_str(&b, TR(" tracking, max "));	/* the rise's tone sounded a second ago */
-	} else if (a_auto == SAT_AUTO_OFF && !ui_st.banner.hold) {
+	} else if (a_auto == SAT_AUTO_OFF && !ui_st.banner.hold && scr == SCR_HOME && !ui_st.entry) {
 		sb_str(&b, TR(" overhead, max "));	/* the pop-up: OK tracks it (ui_sat_auto_key) */
 		pop = (uint8_t)(ev.sat | 0x80u);
 	} else {
@@ -613,6 +621,14 @@ const char *ui_sat_pop_text(void)
 	return pop != SAT_NONE && (pop & 0x80u) ? TR("OK: track") : NULL;
 }
 
+/* The pop-up is up on Home (nothing typed): Home's hint row; NULL otherwise (gone: forgotten) */
+const char *ui_sat_pop_hint(void)
+{
+	if (pop != SAT_NONE && !pop_up())
+		pop = SAT_NONE;
+	return pop != SAT_NONE && ui_depth() == 0 && !ui_st.entry ? TR("OK track  Back") : NULL;
+}
+
 /* From ui_app_key before anything else. The AOS pop-up up: OK starts the held track, any other key hides it; either
  * way the key is used for that. While an auto track runs, a key press (or PTT / monitor down, which go on to the
  * radio: it refuses TX meanwhile) ends it, the radio back where it was; the key is used for that (on Tools > ISS the
@@ -620,17 +636,13 @@ const char *ui_sat_pop_text(void)
 bool ui_sat_auto_key(const input_event_t *ev)
 {
 	bool pass = ev->action == ACT_PTT || ev->action == ACT_MONITOR;
-	if (pop != SAT_NONE && !pop_up())
-		pop = SAT_NONE;
-	if (pop != SAT_NONE && !pass &&
-	    (ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_LONG || ev->action == ACT_ENC_STEP)) {
+	if (ui_sat_pop_hint() != NULL && ev->gesture == GESTURE_PRESS &&
+	    (ev->action == ACT_SELECT || ev->action == ACT_BACK)) {
 		uint8_t i = pop & 0x7Fu;
 		pop = SAT_NONE;
 		ui_st.banner.kind = UI_BANNER_NONE;
-		if (ev->action == ACT_SELECT && ev->gesture == GESTURE_PRESS) {
-			sat_auto_start(i, is_iss(i) ? iss_mode() : SAT_AUTO_DOWN);
-			ui_toast(TR("Tracking, back at LOS"));
-		}
+		if (ev->action == ACT_SELECT)
+			sat_auto_start(i, is_iss(i) ? iss_mode() : SAT_AUTO_DOWN);	/* the service says (ui_sat_alarm) */
 		ui_dirty();
 		return true;
 	}
@@ -896,6 +908,11 @@ static void iss_draw(void)
 	if (v.track != SAT_NONE) {
 		sb_str(&b, v.track == i && sat_auto_on() ? TR("Tracking, back at LOS") : TR("Tracking Doppler"));
 		c = ui_col.rx;
+	} else if (armed(&v) && v.alarm.target != i) {
+		/* another satellite's alarm: shown, left alone (Every pass On here replaces it) */
+		sb_str(&b, TR("Alarm "));
+		sb_str(&b, v.alarm.target < sat_count ? sat_table[v.alarm.target].name : TR("Any satellite"));
+		sb_str(&b, TR(" armed"));
 	} else if (i != SAT_NONE && can_track(&v, i)) {
 		sb_str(&b, TR("OK: track in the VFO"));
 		c = ui_col.fg;
@@ -915,8 +932,7 @@ static void __attribute__((noinline)) iss_ok(const sat_view_t *v, uint8_t i)
 		sat_track(SAT_NONE);
 		ui_toast(held ? TR("Auto track off: radio back") : TR("Tracking off: VFO stays"));
 	} else if (i != SAT_NONE && can_track(v, i)) {
-		sat_auto_start(i, iss_mode());
-		ui_toast(TR("Tracking, back at LOS"));
+		sat_auto_start(i, iss_mode());	/* "ISS tracking" once the radio holds, else why not (ui_sat_alarm) */
 	} else {
 		ui_toast(TR("Track from AOS-10 min"));
 	}
@@ -935,12 +951,15 @@ static bool iss_key(const input_event_t *ev)
 	if ((press && (ev->action == ACT_NAV_LEFT || ev->action == ACT_NAV_RIGHT)) || ev->action == ACT_ENC_STEP) {
 		sat_view(&v);
 		alarm_change(ev->action == ACT_ENC_STEP ? ev->value > 0 : ev->action == ACT_NAV_RIGHT);
+		bool mine = v.alarm.target == i;	/* this page edits the ISS's alarm alone */
 		if (a_row == 3 && !a_every) {
-			if (armed(&v)) {
+			if (mine) {
 				sat_alarm_set(SAT_NONE, 0, 0, 0);	/* Every pass off: the notifications off */
 				note_store(false);
 			}
 		} else if (a_every) {
+			if (armed(&v) && !mine)
+				ui_toast(TR("Every ISS pass: other alarm off"));
 			alarm_arm();	/* Every pass on (the ISS), or a change while it is: armed with it */
 		}
 		ui_dirty();
@@ -969,12 +988,15 @@ static bool iss_key(const input_event_t *ev)
 static void iss_enter(void)
 {
 	sat_view_t v;
+	uint8_t i = iss_index();
 	sat_view(&v);
-	alarm_open(&v);		/* what is armed (the page's own values else) */
+	if (v.alarm.target == i)
+		alarm_open(&v);	/* the ISS's alarm: its values */
+	else
+		a_every = false;	/* another's (or none): shown, not edited (iss_draw) */
 	alarm_page = false;
 	a_row = 1;
-	if (!armed(&v))
-		a_for = iss_index();
+	a_for = i;
 	ui_dirty();
 }
 

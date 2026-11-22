@@ -4912,6 +4912,30 @@ msgstr "OK durdur  # APRS  1 frek"
 msgid "OK track  # APRS  1 freq"
 msgstr "OK takip  # APRS  1 frek"
 
+#: core/ui/ui_sat.c
+msgid "OK track  Back"
+msgstr "OK takip  Geri"
+
+#: core/ui/ui_sat.c
+msgid "Can't track: radio busy"
+msgstr "Takip olmaz: telsiz meşgul"
+
+#: core/ui/ui_sat.c
+msgid "Can't track: a track runs"
+msgstr "Takip olmaz: takip sürüyor"
+
+#: core/ui/ui_sat.c
+msgid "Can't track: no pass now"
+msgstr "Takip olmaz: şu an geçiş yok"
+
+#: core/ui/ui_sat.c
+msgid " armed"
+msgstr " kurulu"
+
+#: core/ui/ui_sat.c
+msgid "Every ISS pass: other alarm off"
+msgstr "Her ISS geçişi: diğer alarm kapalı"
+
 #: core/ui/ui_scanx.c
 msgid "Priority channel off"
 msgstr "Öncelikli kanal kapalı"

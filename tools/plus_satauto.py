@@ -154,6 +154,77 @@ def prepare_sat_auto(transform, install):
         ('\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, NULL);\n',
          '\t\t\tbanner(UI_BANNER_INFO, false, 0, sat_alarm, ui_sat_pop_text());\t// DDM32 Plus: the AOS pop-up\'s OK\n'),
     ])
+    # ... and Home's hint row names what its keys do while it is up ("OK track  Back"; Home only)
+    transform('core/ui/ui_screens.c', [
+        ('void ui_draw_bottom(const ui_state_t *s, const char *hint)\n{\n',
+         '#if CONFIG_SATELLITES\nconst char *ui_sat_pop_hint(void);\t// ui_sat.c (DDM32 Plus)\n#endif\n'
+         'void ui_draw_bottom(const ui_state_t *s, const char *hint)\n{\n'
+         '#if CONFIG_SATELLITES\n'
+         '\tconst char *pop = ui_sat_pop_hint();\n'
+         '\tif (pop != NULL)\n'
+         '\t\thint = pop;\t// DDM32 Plus: the AOS pop-up on Home (OK tracks, Back hides it)\n'
+         '#endif\n'),
+    ])
+    # The service learns PTT apart from the radio's own transmissions: an APRS frame (the user's # APRS via ISS) never
+    # ends a held track, PTT does (sat.h SAT_TX_*)
+    transform('core/radio/radio_task.c', [
+        ('\t\t\tsat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz, sm.view.state == RS_TX || sm.ptt, false,\n',
+         '\t\t\tsat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz,\n'
+         '\t\t\t\t    sm.ptt ? SAT_TX_PTT : sm.view.state == RS_TX ? SAT_TX_OWN : SAT_TX_NONE, false,\n'),
+        ('                sat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz, sm.view.state == RS_TX || sm.ptt, true,\n',
+         '                sat_service(sm.view.vfo, sm.view.ch.rx_hz, sm.view.ch.tx_hz,\n'
+         '                            sm.ptt ? SAT_TX_PTT : sm.view.state == RS_TX ? SAT_TX_OWN : SAT_TX_NONE, true,\n'),
+    ])
+    # While a held (auto) track holds the radio, no APRS frame keys (beacons, SOS, digipeats wait for its end) but the
+    # one the user asked for with # APRS via ISS, at the head of the queue
+    transform('core/aprs/aprs.h', [
+        ('bool aprs_rf_pending(void);\n',
+         'bool aprs_rf_pending(void);\n'
+         '// DDM32 Plus: an ISS frame (aprs_iss_send) waits, moved to the head of the queue: the only one sent while a\n'
+         '// satellite track holds the radio (radio_sm.c aprs_can_start)\n'
+         'bool aprs_rf_next_iss(void);\n'),
+    ])
+    transform('core/aprs/aprs.c', [
+        ('bool aprs_rf_pending(void)\n{\n',
+         '#if CONFIG_SATELLITES\n'
+         '// DDM32 Plus: frames lo .. hi of the queue in reverse order, swapped a byte at a time (no frame-sized copy on\n'
+         '// the radio task\'s stack; lock held)\n'
+         'static void queue_reverse(uint8_t lo, uint8_t hi)\n{\n'
+         '\tfor (; lo < hi; lo++, hi--) {\n'
+         '\t\tuint8_t *x = (uint8_t *)&a.q[lo], *y = (uint8_t *)&a.q[hi];\n'
+         '\t\tfor (size_t k = 0; k < sizeof(qframe_t); k++) {\n'
+         '\t\t\tuint8_t t = x[k];\n'
+         '\t\t\tx[k] = y[k];\n'
+         '\t\t\ty[k] = t;\n'
+         '\t\t}\n'
+         '\t}\n'
+         '}\n\n'
+         '// An ISS frame waits: it goes to the head of the queue (the others keep their order behind it), so a beacon\n'
+         '// held back meanwhile never stands before it\n'
+         'bool aprs_rf_next_iss(void)\n{\n'
+         '\tLOCK();\n'
+         '\tuint8_t j = 0;\n'
+         '\twhile (j < a.qn && a.q[j].kind != K_ISS)\n'
+         '\t\tj++;\n'
+         '\tbool found = j < a.qn && a.taken == 0;\n'
+         '\tif (found && j > 0) {\n'
+         '\t\tqueue_reverse(0, j);\n'
+         '\t\tqueue_reverse(1, j);\n'
+         '\t}\n'
+         '\tUNLOCK();\n'
+         '\treturn found;\n'
+         '}\n'
+         '#endif\n\n'
+         'bool aprs_rf_pending(void)\n{\n'),
+    ])
+    transform('core/radio/radio_sm.c', [
+        ('static bool aprs_can_start(const radio_sm_t *sm)\n{\n',
+         'static bool aprs_can_start(const radio_sm_t *sm)\n{\n'
+         '#if CONFIG_SATELLITES\n'
+         '\tif (sat_held && !aprs_rf_next_iss())\n'
+         '\t\treturn false;\t// DDM32 Plus: a satellite track holds the radio: only the user\'s # APRS via ISS frame\n'
+         '#endif\n'),
+    ])
     prepare_iss_tool(transform)
 
 

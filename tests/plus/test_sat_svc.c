@@ -126,7 +126,7 @@ static got_t got[32];
 static int ngot;
 static bool screen;		/* the Satellites screen draws (sat_seen each poll) */
 static uint8_t focus;
-static bool ptt;
+static uint8_t ptt;		/* SAT_TX_*: PTT, or the radio's own frame (an APRS frame) */
 
 static void poll_once(void)
 {
@@ -786,6 +786,8 @@ static void user_track(uint8_t iss, int32_t start)
 	sat_auto_start(iss, SAT_AUTO_DOWN);	/* 15 min early: nothing */
 	run_s(5);
 	CHECK(nreq == 0 && !held && !sat_auto_on() && view_now().track == SAT_NONE);
+	CHECK(ngot == 1 && got[0].ev.kind == SAT_ALARM_NOTRACK && got[0].ev.max_el == SAT_NO_PASS);	/* said */
+	ngot = 0;
 	run_s(want.aos - utc_now() - 300);
 	sat_ui_idle(false);		/* (not needed for the user's own track) */
 	sat_auto_start(iss, SAT_AUTO_DOWN);
@@ -810,7 +812,7 @@ static void user_track(uint8_t iss, int32_t start)
 	CHECK(v.track == SAT_NONE && v.track_state == SAT_TRK_LOS && count('H', 0) == 2);
 	printf("    held track: the VFO off the true Doppler at most %d Hz, back on the channel\n", (int)worst);
 
-	scenario("held track asked over a pass tracked by hand: that one ends", want.los + 600);
+	scenario("held track asked over a pass tracked by hand: refused (SAT_NO_MANUAL), that one goes on", want.los + 600);
 	want = brute_next(iss, utc_now() + 1200, 0);
 	screen = true;
 	focus = iss;
@@ -818,10 +820,75 @@ static void user_track(uint8_t iss, int32_t start)
 	sat_track(iss);
 	run_s(3);
 	CHECK(view_now().track == iss && !sat_auto_on());
+	screen = false;			/* Home (the pop-up's OK) */
 	sat_auto_start(iss, SAT_AUTO_DOWN);
 	run_s(3);
-	CHECK(view_now().track == SAT_NONE && !sat_auto_on() && !held && count('H', 0) == 0);
-	screen = false;
+	CHECK(view_now().track == iss && !sat_auto_on() && !held && count('H', 0) == 0);
+	CHECK(ngot == 1 && got[0].ev.kind == SAT_ALARM_NOTRACK && got[0].ev.max_el == SAT_NO_MANUAL);
+	sat_track(SAT_NONE);
+	run_s(2);
+	poll_ms = POLL_MS;
+}
+
+static int last_kind(void)
+{
+	return ngot ? got[ngot - 1].ev.kind : 0;
+}
+
+/* The AOS pop-up's OK from Home (no screen looked at: only the alarm knows the pass): every pass, auto track Off; at
+ * the rise OK takes the held track (the alarm's own pass), back after the set, two passes back to back; OK after the
+ * set refused (no pass); the radio core busy: refused (SAT_NO_BUSY); the radio's own APRS frame (# APRS via ISS)
+ * during the track does not end it, PTT does */
+static void popup_track(uint8_t iss, int32_t start)
+{
+	scenario("pop-up OK from Home: the alarm's pass, back after the set, twice; after LOS refused", start);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	sat_alarm_set(iss, 2, 10, SAT_OPT_EVERY);	/* notifications on, auto track Off */
+	for (int k = 0; k < 2; k++) {
+		run_until_found();
+		poll_ms = 100;
+		sat_view_t v = view_now();
+		CHECK(v.alarm.state == SAT_AL_ARMED && v.pass[iss].state != SAT_PASS_OK);	/* nothing searched */
+		int32_t aos = v.alarm.aos;
+		run_s(aos - utc_now() + 3);
+		CHECK(last_kind() == SAT_ALARM_AOS && !held && nreq == 0);
+		ngot = 0;
+		sat_auto_start(iss, SAT_AUTO_DOWN);	/* the pop-up's OK */
+		run_s(4);
+		CHECK(held && sat_auto_on() && abs((int32_t)(rx_hz - SAT_ISS_VOICE_HZ)) <= 4000 && tx_hz == rx_hz);
+		CHECK(last_kind() == SAT_ALARM_TRACK && view_now().track == iss);
+		/* the radio's own frame (the ISS APRS one) for 3 s: the track goes on */
+		ptt = SAT_TX_OWN;
+		run_s(3);
+		ptt = SAT_TX_NONE;
+		run_s(3);
+		CHECK(held && sat_auto_on() && view_now().track == iss && abs((int32_t)(rx_hz - SAT_ISS_VOICE_HZ)) <= 4000);
+		sat_pass_t want = brute_next(iss, aos - 60, 0);
+		run_s(want.los + 40 - utc_now());
+		CHECK(!held && !vfo && rx_hz == 438500000u && !sat_auto_on() && view_now().track_state == SAT_TRK_LOS);
+		ngot = 0;
+		sat_auto_start(iss, SAT_AUTO_DOWN);	/* OK after the set */
+		run_s(2);
+		CHECK(!held && last_kind() == SAT_ALARM_NOTRACK && got[ngot - 1].ev.max_el == SAT_NO_PASS);
+		ngot = 0;
+		nreq = 0;
+	}
+
+	scenario("pop-up OK with the radio core busy: refused, nothing moved", utc_now() + 60);
+	vfo = false;
+	rx_hz = tx_hz = 438500000u;
+	sat_alarm_set(iss, 2, 10, 0);
+	run_until_found();
+	poll_ms = 100;
+	run_s(view_now().alarm.aos - utc_now() + 3);
+	ngot = 0;
+	hold_refuse = true;
+	sat_auto_start(iss, SAT_AUTO_APRS);
+	run_s(8);
+	CHECK(!held && !sat_auto_on() && rx_hz == 438500000u && !vfo && count('S', 0) == 0);
+	CHECK(last_kind() == SAT_ALARM_NOTRACK && got[ngot - 1].ev.max_el == SAT_NO_BUSY);
+	hold_refuse = false;
 	poll_ms = POLL_MS;
 }
 
@@ -849,6 +916,7 @@ int main(void)
 	auto_cancel(iss, t0 + 460000);
 	auto_busy(iss, t0 + 520000);
 	user_track(iss, t0 + 580000);
+	popup_track(iss, t0 + 640000);
 	if (failures) {
 		printf("test_sat_svc: %d failures\n", failures);
 		return 1;

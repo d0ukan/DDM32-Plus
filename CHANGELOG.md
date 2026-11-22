@@ -10,8 +10,9 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   notification and auto track settings; OK tracks now (within 10 min of AOS or during the pass: receive only, the
   radio back to the previous channel 30 s after LOS), # APRS via ISS, 1 switches the downlink (also during a track).
   The new tool comes after All digital search; only Battery's number moves. With notifications on and auto track Off
-  the AOS banner is now a pop-up for 60 s, "ISS overhead, max 47°, OK: track": OK starts that track, any other key
-  hides it, none while transmitting. Fixed: Tools > Satellites without a GPS fix showed only "Back" in the hint row
+  the AOS banner on Home is now a pop-up for 60 s, "ISS overhead, max 47°, OK: track": OK starts that track (the
+  radio says "ISS tracking" once it holds, or why it can't), Back hides it, none while transmitting. During such a
+  track only the "# APRS via ISS" frame is sent; beacons wait for its end. Fixed: Tools > Satellites without a GPS fix showed only "Back" in the hint row
   although OK opens the pass alarm page ("OK alarm  Back").
 - Satellites: ISS notifications and auto track. The pass alarm page gains "Every pass" (the ISS or any satellite:
   every qualifying pass announced with the beeps and banner before and at AOS, armed again by itself and kept across

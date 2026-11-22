@@ -26,6 +26,7 @@ static bool fake_auto, fake_idle;	/* an auto track runs; the UI's last word on i
 static int cancels;
 static uint32_t soon_ms, aos_ms;	/* sim times the armed alarm is due */
 static uint32_t track_ms;		/* sim time an auto track's "tracking" event is due (0: none) */
+static uint8_t refuse;			/* ... a refusal instead (SAT_NO_*), the user's held track */
 static int beeps_soon, beeps_aos;
 static uint8_t iss, so50, ao91, po101;
 
@@ -86,7 +87,7 @@ bool sat_alarm_take(sat_alarm_event_t *out)
 	}
 	if (track_ms && now >= track_ms) {
 		track_ms = 0;
-		*out = (sat_alarm_event_t){ SAT_ALARM_TRACK, iss, 47, 0 };
+		*out = (sat_alarm_event_t){ refuse ? SAT_ALARM_NOTRACK : SAT_ALARM_TRACK, iss, refuse ? (int8_t)refuse : 47, 0 };
 		return true;
 	}
 	if (aos_ms && now >= aos_ms) {
@@ -111,6 +112,7 @@ void sat_auto_start(uint8_t idx, uint8_t mode)
 	starts++;
 	start_sat = idx;
 	start_mode = mode;
+	track_ms = sim_now() + 1000u;	/* the service's word a second later: "tracking", or why not */
 }
 void sat_auto_mode(uint8_t mode) { mode_now = mode; }
 
@@ -165,6 +167,7 @@ static void fake_reset(bool clock)
 	fake_auto = fake_idle = false;
 	cancels = 0;
 	starts = 0;
+	refuse = 0;
 	start_sat = SAT_NONE;
 	start_mode = mode_now = 0;
 	pop = SAT_NONE;
@@ -344,6 +347,23 @@ static void prep_up(void)
 }
 static void prep_no_clock(void) { fv.clock = SAT_CLOCK_NONE; }
 static void prep_aprs(void) { iss_aprs = true; }
+static void prep_busy(void) { refuse = SAT_NO_BUSY; }
+/* The fake alarm's warning and rise not coming (its banner hidden): the page's own lines in view */
+static void prep_quiet(void)
+{
+	soon_ms = aos_ms = 0;
+	ui_st.banner.kind = UI_BANNER_NONE;
+}
+/* A knob turn while the pop-up is up: not taken by it (ui_sat_auto_key false: Home's) */
+static bool knob_taken;
+static void prep_knob(void)
+{
+	input_event_t ev = { ACT_ENC_STEP, GESTURE_DOWN, 1 };
+	knob_taken = ui_sat_auto_key(&ev);
+}
+static void prep_manual(void) { refuse = SAT_NO_MANUAL; }
+#define ARMED_AO SATS "down down ok ok long:back "	/* AO-91's pass alarm armed (another satellite's), Home */
+#define TRACKING T("banner=ISS_tracking,_max_47", "banner=ISS_izleniyor,_maks_47")
 
 static int iss_checks(void)
 {
@@ -358,9 +378,21 @@ static int iss_checks(void)
 			  "screen=iss shows=AOS'a_5:00 shows=AOS_ shows=145.800_ses_/_SSTV shows=145.825_APRS "
 			  "shows=OK_takip__#_APRS__1_frek"), true);
 	/* OK within 10 min of AOS: the held track on 145.800 */
-	bad += iss_flow(n = "ISS OK tracks", ISSP, NULL, "ok",
-			T("toast=Tracking,_back_at_LOS", "toast=Takipte,_LOS'ta_geri"), false);
+	bad += iss_flow(n = "ISS OK tracks", ISSP, NULL, "ok", "toast=none banner=none", false);
 	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
+	/* ... "tracking" only once the service says so; its refusals as toasts */
+	bad += iss_flow("ISS OK tracks: the service's word", ISSP, NULL, "ok wait:1500", TRACKING, false);
+	bad += iss_flow("ISS OK refused: radio busy", ISSP, prep_busy, "ok wait:1500",
+			T("toast=Can't_track:_radio_busy banner=none", "toast=Takip_olmaz:_telsiz_me banner=none"), false);
+	bad += iss_flow("ISS OK refused: a track runs", ISSP, prep_manual, "ok wait:1500",
+			T("toast=Can't_track:_a_track_runs", "toast=Takip_olmaz:_takip_s"), false);
+	/* Another satellite's alarm: shown, left alone by the rows; Every pass On replaces it, said */
+	bad += iss_flow(n = "ISS with AO-91's alarm armed", ARMED_AO ISSP, prep_quiet, "right wait:300",
+			T("shows=Alarm_AO-91_armed", "shows=Alarm_AO-91_kurulu"), true);
+	ISS_CHECK(fv.alarm.target == ao91 && alarm_calls == 1 && al_lead == 5, n);
+	bad += iss_flow(n = "ISS every pass replaces AO-91's alarm", ARMED_AO ISSP, prep_quiet, "down down right",
+			T("toast=Every_ISS_pass:_other_alarm_off", "toast=Her_ISS_ge"), false);
+	ISS_CHECK(fv.alarm.target == iss && (al_opts & SAT_OPT_EVERY), n);
 	/* 1: 145.825 (marked, and the hint names 145.800), OK tracks that */
 	bad += iss_flow(n = "ISS 1: the APRS downlink", ISSP, NULL, "1 ok",
 			"shows=>_145.825_APRS", true);
@@ -399,20 +431,36 @@ static int iss_checks(void)
 
 	/* The AOS pop-up (auto track Off): "ISS overhead, max 23°", "OK: track"; OK tracks (145.800), Home stays */
 	bad += iss_flow(n = "Pop-up at AOS", ARMED, NULL, "wait:10500",
-			T("screen=home banner=ISS_overhead,_max_23" GLYPH_DEGREE " shows=OK:_track",
-			  "screen=home banner=ISS_tepede,_maks_23" GLYPH_DEGREE " shows=OK:_takip"), true);
+			T("screen=home banner=ISS_overhead,_max_23" GLYPH_DEGREE " shows=OK:_track shows=OK_track hides=OK_Menu",
+			  "screen=home banner=ISS_tepede,_maks_23" GLYPH_DEGREE " shows=OK:_takip shows=OK_takip"), true);
 	ISS_CHECK(beeps_aos == 1, n);
-	bad += iss_flow(n = "Pop-up OK tracks", ARMED, NULL, "wait:10500 ok",
-			T("screen=home banner=none toast=Tracking,_back_at_LOS", "screen=home banner=none toast=Takipte"),
-			false);
+	bad += iss_flow(n = "Pop-up OK tracks", ARMED, NULL, "wait:10500 ok", "screen=home banner=none toast=none", false);
 	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
+	bad += iss_flow("Pop-up OK: the service's word", ARMED, NULL, "wait:10500 ok wait:1500", T("screen=home banner=ISS_tracking,_max_47", "screen=home banner=ISS_izleniyor,_maks_47"),
+			false);
+	bad += iss_flow("Pop-up OK refused: radio busy", ARMED, prep_busy, "wait:10500 ok wait:1500",
+			T("screen=home toast=Can't_track:_radio_busy", "screen=home toast=Takip_olmaz:_telsiz_me"), false);
 	bad += iss_flow(n = "Pop-up OK tracks 145.825", ARMED, prep_aprs, "wait:10500 ok", "screen=home banner=none", false);
 	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_APRS, n);
 	bad += iss_flow(n = "Pop-up Back dismisses", ARMED, NULL, "wait:10500 back", "screen=home banner=none toast=none",
 			false);
 	ISS_CHECK(starts == 0, n);
-	bad += iss_flow(n = "Pop-up another key dismisses", ARMED, NULL, "wait:10500 down wait:300",
-			"screen=home banner=none", false);
+	/* Other keys and the knob are Home's: the pop-up stays up, nothing tracked */
+	bad += iss_flow(n = "Pop-up: another key is Home's", ARMED, NULL, "wait:10500 down wait:300",
+			T("screen=home banner=ISS_overhead shows=OK_track", "screen=home banner=ISS_tepede"), false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Pop-up: the knob is Home's", ARMED "wait:10500 ", prep_knob, "wait:300",
+			T("screen=home banner=ISS_overhead", "screen=home banner=ISS_tepede"), false);
+	ISS_CHECK(starts == 0 && !knob_taken, n);
+	bad += iss_flow(n = "Pop-up: long OK is Home's", ARMED, NULL, "wait:10500 long:ok wait:300",
+			T("banner=ISS_overhead", "banner=ISS_tepede"), false);
+	ISS_CHECK(starts == 0, n);
+	/* Not on Home (a menu open at the rise): the plain banner, no key taken */
+	bad += iss_flow(n = "No pop-up off Home", ARMED, NULL, "ok wait:10500",
+			T("screen=hub banner=ISS_AOS_now hides=OK:_track", "screen=hub hides=OK:_takip"),
+			true);
+	bad += iss_flow(n = "No pop-up off Home: OK and Back are the menu's", ARMED, NULL, "ok wait:10500 back ok",
+			"screen=hub", false);
 	ISS_CHECK(starts == 0, n);
 	/* Up for 60 s, then gone; OK after that is Home's again */
 	bad += iss_flow("Pop-up up for 60 s", ARMED, NULL, "wait:40000",
@@ -422,8 +470,8 @@ static int iss_checks(void)
 	/* Not while transmitting: no tone, no pop-up; after the release it comes, and OK tracks */
 	bad += iss_flow(n = "Pop-up waits for TX", ARMED, NULL, "pttdown wait:11000", "banner=none", false);
 	ISS_CHECK(beeps_aos == 0 && starts == 0, n);
-	bad += iss_flow(n = "Pop-up after TX", ARMED, NULL, "pttdown wait:11000 pttup wait:300 ok",
-			T("screen=home toast=Tracking", "screen=home toast=Takipte"), false);
+	bad += iss_flow(n = "Pop-up after TX", ARMED, NULL, "pttdown wait:11000 pttup wait:300 ok wait:1500",
+			T("screen=home banner=ISS_tracking,_max_47", "screen=home banner=ISS_izleniyor,_maks_47"), false);
 	ISS_CHECK(beeps_aos == 1 && starts == 1 && start_sat == iss, n);
 	/* Auto track On: the rise's banner as before (it starts by itself), OK is Home's */
 	bad += iss_flow(n = "No pop-up with auto track on", SATS "0 up right ok long:back ", NULL, "wait:10500",
