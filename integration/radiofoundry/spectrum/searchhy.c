@@ -19,6 +19,17 @@ static sh_stats_t st;
 static cand_t cand[SH_CANDS];
 static bool want_fast = true;
 static uint32_t probe_t0;
+/* The counters are written by the radio task and copied by the debug link task: odd while written (sh_view retries) */
+static volatile uint32_t wseq;
+/* The last carrier found not digital (sh_reject): where, on which pass, whether steady */
+static uint32_t rej_hz;
+static uint16_t rej_pass;
+static bool rej_steady;
+
+static void w_begin(void) { wseq++; __asm__ volatile("" ::: "memory"); }
+static void w_end(void) { __asm__ volatile("" ::: "memory"); wseq++; }
+
+static uint32_t dist(uint32_t a, uint32_t b) { return a > b ? a - b : b - a; }
 
 void sh_set_fast(bool fast) { want_fast = fast; }
 bool sh_fast_wanted(void) { return want_fast; }
@@ -36,7 +47,6 @@ static uint32_t first_age_ms(const cand_t *c, uint32_t now_ms)
 	return (uint32_t)(uint16_t)((uint16_t)(now_ms >> 4) - c->first_q) << 4;
 }
 
-static uint32_t dist(uint32_t a, uint32_t b) { return a > b ? a - b : b - a; }
 
 /* The candidate within `within` Hz of hz (the nearest), NULL = none; forgotten ones are dropped on the way */
 static cand_t *near_in(uint32_t hz, uint32_t within, uint32_t now_ms)
@@ -54,45 +64,73 @@ static cand_t *near_in(uint32_t hz, uint32_t within, uint32_t now_ms)
 
 static cand_t *near(uint32_t hz, uint32_t now_ms) { return near_in(hz, SH_NEAR_HZ, now_ms); }
 
-/* Time so far into the probing or sweeping total */
-static void mark(uint32_t now_ms, bool probing)
+/* Time so far into the probing or sweeping total (a call playing counts in neither), then the phase from now */
+static void mark(uint32_t now_ms, bool probing, bool playing)
 {
 	uint32_t dt = now_ms - st.mark_ms;
 	if (st.probing)
 		st.probe_ms += dt;
-	else
+	else if (!st.playing)
 		st.sweep_ms += dt;
 	st.mark_ms = now_ms;
 	st.probing = probing;
+	st.playing = playing;
 }
 
 void sh_start(uint8_t owner, uint32_t now_ms)
 {
+	w_begin();
 	memset(&st, 0, sizeof st);
 	memset(cand, 0, sizeof cand);
 	st.owner = owner;
 	st.fast = want_fast;
 	st.start_ms = st.mark_ms = st.pass_t0 = now_ms;
 	st.cur_steps = 1;	/* the first step, read before any advance */
+	rej_hz = 0;
+	w_end();
 }
 
 void sh_step(uint32_t now_ms)
 {
 	(void)now_ms;
+	w_begin();
 	if (st.cur_steps < UINT16_MAX)
 		st.cur_steps++;
+	w_end();
 }
 
 void sh_pass(uint32_t now_ms)
 {
+	w_begin();
 	st.passes++;
 	st.pass_ms = now_ms - st.pass_t0;
 	st.pass_t0 = now_ms;
 	st.pass_steps = st.cur_steps;
 	st.cur_steps = 0;
+	w_end();
 }
 
-void sh_seen(uint32_t hz, int16_t lvl, uint32_t now_ms)
+void sh_stop(void)
+{
+	w_begin();
+	if (st.probing) {
+		st.gone++;	/* stopped midway: so PROBES stays the sum of the outcomes */
+		st.probing = false;
+	}
+	st.playing = false;
+	w_end();
+}
+
+bool sh_reject(uint32_t hz, uint32_t pass, bool steady)
+{
+	bool ok = st.fast && steady && rej_steady && dist(rej_hz, hz) <= 6250u && (uint16_t)pass != rej_pass;
+	rej_hz = hz;
+	rej_pass = (uint16_t)pass;
+	rej_steady = steady;
+	return ok;
+}
+
+static void seen(uint32_t hz, int16_t lvl, uint32_t now_ms)
 {
 	cand_t *c = near(hz, now_ms);
 	int8_t l = (int8_t)(lvl < -128 ? -128 : lvl > 0 ? 0 : lvl);
@@ -144,21 +182,40 @@ static void watch(uint32_t hz, uint32_t now_ms)
 	c->st = (uint8_t)((c->st | C_USED | C_WATCH) & ~C_VISITED);
 }
 
-void sh_unsettled(uint32_t hz, uint32_t now_ms) { watch(hz, now_ms); }
+void sh_seen(uint32_t hz, int16_t lvl, uint32_t now_ms)
+{
+	w_begin();
+	seen(hz, lvl, now_ms);
+	w_end();
+}
 
-void sh_skipped(void) { st.skipped++; }
+void sh_unsettled(uint32_t hz, uint32_t now_ms)
+{
+	w_begin();
+	watch(hz, now_ms);
+	w_end();
+}
+
+void sh_skipped(void)
+{
+	w_begin();
+	st.skipped++;
+	w_end();
+}
 
 void sh_probe(bool watch_hit, uint32_t now_ms)
 {
-	mark(now_ms, true);
+	w_begin();
+	mark(now_ms, true, false);
 	probe_t0 = now_ms;
 	st.synced = false;
 	st.probes++;
 	if (watch_hit)
 		st.watch++;
+	w_end();
 }
 
-void sh_sync(uint32_t waited_ms)
+static void sync_note(uint32_t waited_ms)
 {
 	if (st.synced)
 		return;
@@ -166,28 +223,37 @@ void sh_sync(uint32_t waited_ms)
 	st.sync_last = (uint16_t)(waited_ms < UINT16_MAX ? waited_ms : UINT16_MAX);
 }
 
+void sh_sync(uint32_t waited_ms)
+{
+	w_begin();
+	sync_note(waited_ms);
+	w_end();
+}
+
 void sh_found(uint32_t hz, uint32_t now_ms)
 {
+	w_begin();
 	st.found++;
 	if (st.first_ms == 0)
 		st.first_ms = now_ms - st.start_ms ? now_ms - st.start_ms : 1u;
-	cand_t *c = near(hz, now_ms);
+	/* the find's own candidate (within half a step of 25 kHz: a weaker one watched beside it stays) */
+	cand_t *c = near_in(hz, SH_NEAR_HZ / 2u, now_ms);
 	st.seen_ms = c != NULL ? first_age_ms(c, now_ms) : now_ms - probe_t0;
 	if (st.seen_ms == 0)
 		st.seen_ms = 1;
 	if (c != NULL)
 		c->st = 0;	/* the found list reads it again from now (revisits) */
-	if (!st.synced)
-		sh_sync(now_ms - probe_t0);
+	sync_note(now_ms - probe_t0);
 	if (st.sync_last > st.sync_max)
 		st.sync_max = st.sync_last;
+	mark(now_ms, false, true);	/* the call plays: neither probing nor sweeping */
+	w_end();
 }
 
-void sh_end(uint8_t how, bool early, uint32_t hz, uint32_t now_ms)
+void sh_end(uint8_t how, uint32_t hz, uint32_t now_ms)
 {
-	mark(now_ms, false);
-	if (early)
-		st.early++;
+	w_begin();
+	mark(now_ms, false, false);
 	cand_t *c;
 	switch (how) {
 	case SH_END_NOSYNC:
@@ -207,6 +273,7 @@ void sh_end(uint8_t how, bool early, uint32_t hz, uint32_t now_ms)
 	default:
 		break;
 	}
+	w_end();
 }
 
 uint32_t sh_watch_pick(uint32_t lo, uint32_t hi, uint32_t now_ms, bool (*skip)(uint32_t hz, uint32_t now_ms))
@@ -242,14 +309,23 @@ uint32_t sh_watch_pick(uint32_t lo, uint32_t hi, uint32_t now_ms, bool (*skip)(u
 
 bool sh_view(uint8_t owner, bool running, uint32_t now_ms, sh_stats_t *out)
 {
-	if (st.owner != owner || owner == SH_NONE)
+	bool got = false;
+	for (unsigned tries = 0; tries < 8u && !got; tries++) {
+		uint32_t a = wseq;
+		__asm__ volatile("" ::: "memory");
+		if (a & 1u)
+			continue;
+		*out = st;
+		__asm__ volatile("" ::: "memory");
+		got = wseq == a;
+	}
+	if (!got || out->owner != owner || owner == SH_NONE)
 		return false;
-	*out = st;
 	if (running) {
 		uint32_t dt = now_ms - out->mark_ms;	/* the phase running now, so far */
 		if (out->probing)
 			out->probe_ms += dt;
-		else
+		else if (!out->playing)
 			out->sweep_ms += dt;
 		out->mark_ms = now_ms;
 	}

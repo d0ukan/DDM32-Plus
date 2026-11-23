@@ -49,23 +49,20 @@
 #define DMRS_PROBE_LONG_MS	1100u
 #endif
 #if CONFIG_SEARCH_HYBRID
-/* DDM32 Plus faster search (radio/searchhy.h, docs/plus.md "Faster searches"), the "fast" algorithm:
- *  - a sweep step's level is the peak of samples from DMRS_SAMPLE_MS after the retune, taken on the radio task's 10 ms
- *    tick (radio_sm_tick: dmrs_sampling / dmrs_sample) and at its polls; once they span DMRS_SPAN_MS with none near a
- *    hit, the step is quiet at the second poll (50 ms; classic: the third, 75 ms). A direct mode burst is on air
- *    27.5-30 ms in every 60, its gap 30-32.5 ms: a span of 30 ms with samples 10 ms apart meets a burst unless the
- *    gap is longer than the span (at most 2.5 ms of 60: a step whose samples all fall in it reads quiet, about 4 % of
- *    the time; the next pass reads it again). A sample near a hit hands the step to classic's settled readings.
- *    DMRS_SAMPLE_MS follows OpenDMR's reading 10 ms after a retune on the same FD6818 (code reading, not measured
- *    here; the search log's stats show it: steps a second, hits);
- *  - a DMR probe of a steady carrier (DMRS_EARLY_READS level readings or more, none in a gap: no direct mode TDMA; no
- *    burst, no TDMA hint from the sweep) ends after DMRS_EARLY_MS instead of DMRS_PROBE_MS: a repeater sends a sync at
- *    least every 180 ms (both slots in voice: each slot's burst A every 360 ms), so 400 ms holds the modem's start and
- *    one sync with about 100 ms to spare. Not for P25 / YSF / NXDN (the native receiver's lock time is not measured) */
+/* DDM32 Plus faster search (radio/searchhy.h, docs/plus.md "Faster searches"), the "fast" algorithm: a sweep step's
+ * level is the peak of samples from DMRS_SAMPLE_MS after the retune, taken on the radio task's 10 ms tick
+ * (radio_sm_tick: dmrs_sampling / dmrs_sample) and at its polls; once they span DMRS_SPAN_MS, no two more than
+ * DMRS_GAP_MS apart, with none near a hit, the step is quiet at the second poll (50 ms; classic: the third, 75 ms). A
+ * direct mode burst is on air 27.5-30 ms in every 60, its gap 30-32.5 ms: such samples meet a burst unless all fall in
+ * a gap longer than their span (at most 2.5 ms of 60: about 4 % of the steps on a direct mode carrier read quiet once;
+ * the next pass reads them again). A sample near a hit, a late tick (a gap over DMRS_GAP_MS) or too short a span hand
+ * the step to classic's settled readings. DMRS_SAMPLE_MS follows OpenDMR's reading 10 ms after a retune on the same
+ * FD6818 (code reading, not measured here; the search log's stats show it: steps a second, hits). The probe windows
+ * are classic's: an early end for a "steady" carrier was dropped (verifier, fastsrch: a same-room transmitter's TDMA
+ * gaps need not read as the floor, so a direct mode carrier could look steady) */
 #define DMRS_SAMPLE_MS		10u
 #define DMRS_SPAN_MS		30u
-#define DMRS_EARLY_MS		400u
-#define DMRS_EARLY_READS	8u
+#define DMRS_GAP_MS		12u
 #endif
 #define DMRS_MIN_BURSTS		2u	/* bursts with a good check that make it DMR */
 #define DMRS_LATE_MS		1500u	/* DMR without a call to play: held this long from the hit for one (late entry

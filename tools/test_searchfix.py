@@ -27,8 +27,8 @@ def run(args, **kw):
 SWITCHES = ['-DCONFIG_SEARCH_FAST=1', '-DCONFIG_SEARCH_SURE=1']
 HYBRID = ['-DCONFIG_SEARCH_HYBRID=1']
 # the model rows fastsrch added (after the original ones): before -> sure is printed for them, not checked (p25-fmnext
-# shows a hole of the surer engine: a weak P25 just below a strong FM carrier is taken into the FM carrier's run and
-# never probed; the fast algorithm's watch of a superseded run is the fix)
+# shows a hole of the surer engine that fast leaves open: a weak P25 just below a strong FM carrier is taken into the FM
+# carrier's run and never probed; docs/plus.md "Faster searches")
 FASTSRCH_ROWS = ('p25-rpt', 'p25-fmnext', 'p25-wide10', 'dmr-fmnext', 'dmr-wide10', 'all-p25-fmnext', 'all-wide10')
 
 
@@ -56,64 +56,82 @@ def engine_tests(ROOT, APP, OUT, flags):
         run([exe], cwd=ROOT)
 
 
+SEEDS = (None, 11, 22, 33)	# the default sequence and three more (SURE_SEED)
+LEAKS = (0, 40)		# a direct mode TDMA gap reads the floor / 40 dB under the burst (SURE_LEAK)
+
+
 def hybrid_model(ROOT, APP, OUT, flags, sure):
-    """fastsrch: the model built with SEARCH_HYBRID, run classic and fast (host-modelled figures)"""
+    """fastsrch: the model built with SEARCH_HYBRID, run classic and fast on 4 seeds, with and without the TDMA gap leak
+    (host-modelled figures). Every 60 s row: fast no fewer finds than classic - 4 of 200, a median no more than 1 s
+    slower (over every trial, a miss as 99 s), a sweep no more than 0.5 steps a second slower; every fpm row no fewer
+    calls a minute (5 %, or 0.1 a minute)"""
+    import os
     exe = OUT / 'test_search_hybrid'
     run(['clang', *flags, '-DCONFIG_P25_SEARCH=1', '-DCONFIG_DMR_SEARCH=1', *SWITCHES, *HYBRID,
          '-DCONFIG_ALL_SEARCH=1', '-DCONFIG_YSF=1', '-DCONFIG_NXDN=1',
          ROOT / 'tests/plus/test_search_sure.c', APP / 'core/radio/p25search.c', APP / 'core/radio/dmrsearch.c',
          APP / 'core/radio/searchhy.c', '-lm', '-o', exe], cwd=ROOT)
-    res = {}
-    for algo in ('classic', 'fast'):
-        out = run([exe, algo], cwd=ROOT, capture_output=True, text=True).stdout
+    jobs = {}
+    for seed in SEEDS:
+        for leak in LEAKS:
+            env = dict(os.environ)
+            env.pop('SURE_SEED', None)
+            env.pop('SURE_LEAK', None)
+            if seed is not None:
+                env['SURE_SEED'] = str(seed)
+            if leak:
+                env['SURE_LEAK'] = str(leak)
+            for algo in ('classic', 'fast'):
+                jobs[(seed, leak, algo)] = subprocess.Popen([str(exe), algo], cwd=ROOT, env=env,
+                                                            stdout=subprocess.PIPE, text=True)
+    allres = {}
+    for key, p in jobs.items():
+        out, _ = p.communicate()
+        assert p.returncode == 0, (key, out[-2000:])
         for line in out.splitlines():
             w = line.split()
             if w[:1] == ['MODEL']:
-                res[(w[1], w[2])] = [float(x) for x in w[3:]]
+                allres[(key, w[2])] = [float(x) for x in w[3:]]
             elif line.startswith('FAIL'):
                 raise SystemExit(line)
-    names = [k[1] for k in res if k[0] == 'classic']
-    print('Faster searches model (HOST-MODELLED, not measured; classic -> fast). 60 s rows: found of 200, median / '
-          '90th pct s to the first find (99 = not within 60 s), probes a minute, steps a second (no transmitter). '
-          'fpm rows (40 searches of 120 s): found, median s to the first find, probes a minute, calls caught a minute')
+    names = [k[1] for k in allres if k[0] == (None, 0, 'classic')]
+    print('Faster searches model (HOST-MODELLED, not measured; classic -> fast). 60 s rows: found of 200, median s to '
+          'the first find over every trial (a miss as 99 s), steps a second (no transmitter); fpm rows (40 searches of 120 s): '
+          'calls caught a minute. Columns: seed default / 11 / 22 / 33, each without and with a 40 dB TDMA gap leak')
+    bad = []
     for n in names:
-        c, f = res[('classic', n)], res[('fast', n)]
-        if n.startswith('fpm-'):
-            print(f'  {n:22s} found {c[0]:3.0f} -> {f[0]:3.0f}  median {c[1]:4.1f} -> {f[1]:4.1f}  probes/min '
-                  f'{c[3]:4.1f} -> {f[3]:4.1f}  calls/min {c[5]:5.2f} -> {f[5]:5.2f}')
-        else:
-            print(f'  {n:22s} found {c[0]:3.0f} -> {f[0]:3.0f}  median {c[1]:4.1f} -> {f[1]:4.1f}  p90 {c[2]:4.1f} -> '
-                  f'{f[2]:4.1f}  probes/min {c[3]:4.1f} -> {f[3]:4.1f}  steps/s {c[4]:4.1f} -> {f[4]:4.1f}')
-    # classic in the hybrid build is beta.8's engine: its original rows equal the build without the switch
+        cells = []
+        for seed in SEEDS:
+            for leak in LEAKS:
+                c, f = allres[((seed, leak, 'classic'), n)], allres[((seed, leak, 'fast'), n)]
+                if n.startswith('fpm-'):
+                    cells.append(f'{c[5]:.2f}>{f[5]:.2f}')
+                    if f[5] < c[5] * 0.95 - 0.1:	# 5 %, or 0.1 a minute (one call in ten minutes) at tiny counts
+                        bad.append((n, seed, leak, c, f))
+                    continue
+                cells.append(f'{c[0]:.0f}/{c[5]:.1f}/{c[4]:.1f}>{f[0]:.0f}/{f[5]:.1f}/{f[4]:.1f}')
+                if n.endswith('433200'):
+                    if c[0] != 0 or f[0] != 0:
+                        bad.append((n, seed, leak, c, f))
+                    continue
+                # the median over every trial (a miss counted as 99 s): the median of the finds alone favours the
+                # algorithm that finds fewer (all-dmr-close seed 11: 170 -> 189 found, its 19 extra finds the late ones)
+                if f[0] < c[0] - 4 or f[5] > c[5] + 1.0 or f[4] < c[4] - 0.5:
+                    bad.append((n, seed, leak, c, f))
+        print(f'  {n:22s} ' + '  '.join(cells))
+    for b in bad:
+        print('  OUTSIDE THE TOLERANCE:', b)
+    assert not bad, bad
+    res = {(algo, n): allres[((None, 0, algo), n)] for algo in ('classic', 'fast') for n in names}
+    # classic in the hybrid build is beta.8's engine: its rows equal the build without the switch
     for n, v in sure.items():
         assert res[('classic', n)][:5] == v[:5], (n, res[('classic', n)], v)
-    for n in names:
-        c, f = res[('classic', n)], res[('fast', n)]
-        if n.endswith('433200'):
-            assert c[0] == 0 and f[0] == 0, (n, c, f)
-            continue
-        if n.startswith('fpm-'):
-            assert f[5] >= c[5] * 0.95 - 0.05, (n, c, f)	# calls caught a minute: never clearly fewer
-            continue
-        # never clearly fewer finds (6 of 200: the random overs against the pass; p25-busy loses about 5 in its first
-        # minute to the watched lower neighbours of six FM carriers, each a 1.2 s P25 probe, and gains them back once
-        # those are skipped for minutes: fpm-p25-busy below), never clearly slower to the median
-        assert f[0] >= c[0] - 6, (n, c, f)
-        assert f[1] <= c[1] + 1.0 or n.endswith('fmnext'), (n, c, f)	# fmnext: classic finds a few, early (pass luck)
-        if 'busy' not in n and 'fmnext' not in n:
-            assert f[4] >= c[4] - 0.5, (n, c, f)	# never a slower sweep over a band of no carriers
     fast = {n: res[('fast', n)] for n in names}
     # the DMR and all digital sweeps: a quiet step in two polls (13.3 -> 20 steps a second)
     for n in ('dmr-direct', 'dmr-repeater', 'all-dmr-direct'):
         assert fast[n][4] >= 19.0, (n, fast[n])
     for n in ('dmr-owner-436275', 'all-owner-436275'):
         assert fast[n][0] >= 190 and fast[n][1] <= 4.0, (n, fast[n])
-    # a weak P25 / DMR just below a strong FM carrier: found (classic: hardly ever, the FM carrier's run took it in)
-    for n in ('p25-fmnext', 'dmr-fmnext', 'all-p25-fmnext'):
-        assert fast[n][0] >= 150, (n, fast[n])
-    # a busy band: no fewer calls caught a minute once the busy carriers are skipped
-    for n in ('fpm-p25-busy', 'fpm-dmr-busy', 'fpm-all-busy'):
-        assert fast[n][5] >= res[('classic', n)][5] - 0.1, (n, fast[n])
     return res
 
 

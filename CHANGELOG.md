@@ -33,12 +33,12 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   shows it as a stats line (the CSV ends with a `stats` row). Held 0 on a search screen switches between the new
   "fast" algorithm (default) and beta.8's ("classic"), so the same signal can be compared both ways. Fast: the DMR and
   All digital sweeps read a quiet step in 50 ms instead of 75 (samples on the 10 ms tick, their peak); carriers left
-  undecided (the over ended during the probe or before it, a weak signal just below a strong one) are read again
-  between steps for 30 s instead of a whole pass later; a DMR probe of a steady carrier with no burst ends at 0.4 s
-  instead of 0.6; a steady carrier found not digital twice is skipped 2 minutes instead of 30 s. Host model: the owner's
-  room radio found in a median 1.3 s instead of 2.6, a 10 MHz DMR pass 40 s instead of 60, and a weak P25 / DMR just
-  below a strong FM carrier found (beta.8 almost never found it). FLASH +3,292 B (879,944 B, 97.65 %), RAM +192 B
-  (2,080 B free).
+  undecided (the over ended during the probe or before it) are read again between steps for 30 s instead of a whole
+  pass later; a steady carrier found not digital again on a later pass is skipped 2 minutes instead of 30 s. The probe
+  windows are beta.8's. Host model (four random sequences, with and without a strong transmitter's TDMA gaps reading
+  high): the owner's room radio found in a median 1.3 s instead of 2.6, a 10 MHz DMR pass 40 s instead of 60, never
+  fewer finds or calls than beta.8. FLASH +3,648 B
+  (880,300 B, 97.69 %), RAM +200 B (2,072 B free).
 
 ## v1.0.0-beta.8 (2026-11-22, beta: not yet confirmed on the radio)
 

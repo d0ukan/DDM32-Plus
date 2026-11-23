@@ -2,9 +2,12 @@
 /* DDM32 Plus faster searches (CONFIG_SEARCH_HYBRID, radio/searchhy.h, docs/plus.md "Faster searches (beta.9
  * candidate)"): the engines step by step on the fast algorithm against classic (beta.8's) in the same build: the DMR
  * quiet step in two polls from the 10 ms tick's samples (classic three), a direct mode carrier still found whatever its
- * phase, a steady carrier's DMR probe ended at DMRS_EARLY_MS (a TDMA one keeps the long window), a steady carrier not
- * digital twice skipped SH_REJECT_MS, a carrier gone during its probe read again between steps (watch), the algorithm
- * latched at the start, and the counters the PC reads (searchlog_view.c X.st). Built by tools/test_searchfix.py. */
+ * phase, a late tick handing the step to classic's readings, the probe windows as classic's (no early end), a steady
+ * carrier not digital again on a later pass skipped SH_REJECT_MS (a TDMA one and a level that came and went keep
+ * classic's), a carrier gone during its probe read again between steps (watch) while the found list keeps its revisits,
+ * a weak signal under a strong FM carrier watched but not that carrier's own skirt, the algorithm latched at the
+ * start, and the counters the PC reads (searchlog_view.c X.st: a call's play time in neither total, a probe stopped
+ * midway counted gone). Built by tools/test_searchfix.py. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,15 +138,15 @@ static void test_dmr_step(void)
 
 static void test_dmr_probe(void)
 {
-	/* a steady carrier, no burst: fast leaves at DMRS_EARLY_MS (counted early and not synced), classic at
-	 * DMRS_PROBE_MS */
+	/* a steady carrier, no burst: fast keeps classic's window (the early end was dropped: a same-room transmitter's
+	 * gaps need not read as the floor) */
 	sh_set_fast(true);
 	dmrs_start(433000000u, 434000000u, 12500u, now);
 	CHECK(dmr_sweep(strong, 4000u) == F);
 	uint32_t ms = dmr_hold(strong, 0, 5000u);
-	CHECK(ms >= DMRS_EARLY_MS && ms <= DMRS_EARLY_MS + POLL);
+	CHECK(ms >= DMRS_PROBE_MS && ms <= DMRS_PROBE_MS + POLL);
 	sh_stats_t s = stats(SH_DMR);
-	CHECK(s.probes == 1u && s.nosync == 1u && s.early == 1u && s.found == 0 && s.probe_ms >= DMRS_EARLY_MS);
+	CHECK(s.probes == 1u && s.nosync == 1u && s.early == 0u && s.found == 0 && s.probe_ms >= DMRS_PROBE_MS);
 	/* a TDMA carrier, no burst: the long window, not early */
 	dmrs_start(433000000u, 434000000u, 12500u, now);
 	CHECK(dmr_sweep(tdma, 4000u) == F);
@@ -167,10 +170,16 @@ static void test_dmr_probe(void)
 	s = stats(SH_DMR);
 	CHECK(s.found == 1u && s.first_ms > 0 && s.first_ms <= now - t0 && s.seen_ms > 0 && s.seen_ms < 1000u);
 	CHECK(s.sync_last >= POLL && s.sync_last <= 2u * POLL && s.sync_max == s.sync_last);
+	uint32_t probe_ms = s.probe_ms;
 	CHECK(dmr_hold(quiet, 0, 5000u) != 0);	/* the call ended, the hang ran out */
 	s = stats(SH_DMR);
-	CHECK(s.nosync == 0 && s.gone == 0 && s.partial == 0 && !s.probing);
+	CHECK(s.nosync == 0 && s.gone == 0 && s.partial == 0 && !s.probing && !s.playing);
+	CHECK(s.probe_ms == probe_ms);	/* the call and its hang: neither probing nor sweeping */
+	/* a probe stopped midway counts as gone: PROBES stays the sum of the outcomes */
+	CHECK(dmr_sweep(strong, 4000u) != 0 && stats(SH_DMR).probing);
 	dmrs_stop();
+	sh_stats_t e;
+	CHECK(sh_view(SH_DMR, false, now, &e) && e.gone == 1u && e.probes == e.found + e.nosync + e.partial + e.gone);
 }
 
 static void test_dmr_reject(void)
@@ -272,7 +281,7 @@ static void test_dmr_watch(void)
 	sh_seen(432000000u, -60, now);
 	sh_unsettled(432000000u, now);
 	sh_seen(433000000u, -90, now);
-	sh_end(SH_END_GONE, false, 433000000u, now);
+	sh_end(SH_END_GONE, 433000000u, now);
 	extern bool fake_skip(uint32_t, uint32_t);
 	CHECK(sh_watch_pick(430000000u, 440000000u, now, fake_skip) == 432000000u);
 	CHECK(sh_watch_pick(430000000u, 440000000u, now, fake_skip) == 433000000u);
@@ -283,6 +292,44 @@ static void test_dmr_watch(void)
 }
 
 bool fake_skip(uint32_t hz, uint32_t t) { (void)t; return hz == 0; }
+
+static void test_dmr_skirt(void)
+{
+	/* a strong FM carrier with its skirt (12.5 kHz 30 dB, 25 kHz 45 dB down): fast probes it only, never a skirt step
+	 * (its lower neighbours read as a skirt would, so they are not watched) */
+	sh_set_fast(true);
+	dmrs_start(F - 200000u, F + 200000u, 12500u, now);
+	uint32_t t0 = now;
+	unsigned off_f = 0, on_f = 0;
+	while (now - t0 < 30000u) {
+		uint32_t got = dmr_sweep(strong, 1u);
+		if (got == 0)
+			continue;
+		if (got == F)
+			on_f++;
+		else
+			off_f++;
+		CHECK(dmr_hold(strong, 0, 5000u) != 0);
+	}
+	CHECK(on_f >= 1u && off_f == 0);
+	dmrs_stop();
+}
+
+/* A late tick (the radio task busy): the samples leave a gap over DMRS_GAP_MS, the step goes to classic's readings */
+static void test_dmr_gap(void)
+{
+	sh_set_fast(true);
+	dmrs_start(433000000u, 434000000u, 12500u, now);
+	dmrs_view_t v;
+	for (unsigned i = 0; i < 300u; i++) {
+		bool hit;
+		now += POLL;	/* no tick samples: only the polls' readings, 25 ms apart */
+		dmrs_snapshot(&v);
+		dmrs_sweep(quiet(dmrs_at_hz()), now, &hit);
+	}
+	CHECK(dmrs_snapshot(&v) && v.step_ms >= 74u && v.step_ms <= 76u);
+	dmrs_stop();
+}
 
 /* --- P25 --- */
 static uint32_t p25_sweep(band_t b, unsigned max)
@@ -340,8 +387,10 @@ int main(void)
 	test_dmr_probe();
 	test_dmr_reject();
 	test_dmr_watch();
+	test_dmr_skirt();
+	test_dmr_gap();
 	test_p25();
-	printf("Plus faster searches (fast vs classic: DMR quiet step, direct mode found at every phase, early end, long "
-	       "reject, watch, latch, counters): %d failures\n", failures);
+	printf("Plus faster searches (fast vs classic: DMR quiet step, direct mode found at every phase, late tick, classic "
+	       "windows, long reject, watch, revisits kept, skirt not watched, latch, counters): %d failures\n", failures);
 	return failures != 0;
 }

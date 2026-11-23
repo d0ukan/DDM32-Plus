@@ -27,15 +27,19 @@ enum { SH_END_FOUND, SH_END_NOSYNC, SH_END_PARTIAL, SH_END_GONE };	/* how a prob
 #define SH_NEAR_HZ	25000u	/* a strong step this near a candidate is that carrier (its skirt: 12.5-25 kHz) */
 #define SH_FORGET_MS	60000u	/* a candidate not read strong this long is forgotten (first seen starts anew) */
 #define SH_WATCH_MS	30000u	/* an undecided carrier is read again between steps this long after it was last seen */
-#define SH_REJECT_MS	120000u	/* fast: a steady carrier found not to be digital twice in a row is skipped this long
-				 * (classic: 30 s); a TDMA-looking DMR carrier never gets more than classic's */
+#define SH_REJECT_MS	120000u	/* fast: a steady carrier found not to be digital again on a later pass is skipped
+				 * this long (classic: 30 s); one whose level came and went (TDMA) never more than
+				 * classic's. A new start (held 0, a range change) clears the skips */
+#define SH_SKIRT_DB	40	/* a weaker run two steps below a stronger one is watched only when it reads more than
+				 * this under it: closer than its skirt would be (selectivity about 45 dB at 25 kHz) */
 
 typedef struct {
 	uint8_t owner;		/* SH_*: whose counters these are */
 	bool fast;		/* the running search's algorithm */
-	bool probing, synced;
+	bool probing, playing, synced;	/* a probe runs / a found call plays (counted in neither time) */
 	uint16_t passes, pass_steps, cur_steps;
-	uint16_t probes, found, nosync, partial, gone, skipped, early, watch;
+	uint16_t probes, found, nosync, partial, gone, skipped, early, watch;	/* early: always 0 in this build (the
+										 * early DMR probe end was dropped) */
 	uint16_t sync_last, sync_max;	/* ms from a found probe's start (its mode's window) to the first frame */
 	uint32_t start_ms, mark_ms, pass_t0, pass_ms, probe_ms, sweep_ms;
 	uint32_t first_ms;	/* from the start to the first find, 0 = none */
@@ -56,8 +60,12 @@ void sh_unsettled(uint32_t hz, uint32_t now_ms);	/* a run's target read quiet be
 void sh_skipped(void);				/* a target passed over: in the skip list */
 void sh_probe(bool watch, uint32_t now_ms);	/* a probe starts (watch: a watched carrier read again) */
 void sh_sync(uint32_t waited_ms);		/* the probe's first frame of its mode (once a probe) */
-void sh_found(uint32_t hz, uint32_t now_ms);	/* the probe confirmed its mode (once a probe) */
-void sh_end(uint8_t how, bool early, uint32_t hz, uint32_t now_ms);	/* the probe ended (SH_END_*) */
+void sh_found(uint32_t hz, uint32_t now_ms);	/* the probe confirmed its mode (once a probe): its call plays */
+void sh_end(uint8_t how, uint32_t hz, uint32_t now_ms);	/* the probe ended (SH_END_*) */
+void sh_stop(void);				/* the search stopped (a probe midway counts as gone) */
+/* A carrier found not digital (every time): true when the long skip may apply (fast, steady now and at the last
+ * rejection of this frequency, on another pass) */
+bool sh_reject(uint32_t hz, uint32_t pass, bool steady);
 /* fast: the strongest watched carrier in lo..hi not read again this round and not skipped (skip: the engine's skip
  * list), 0 = none */
 uint32_t sh_watch_pick(uint32_t lo, uint32_t hi, uint32_t now_ms, bool (*skip)(uint32_t hz, uint32_t now_ms));

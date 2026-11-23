@@ -25,7 +25,8 @@
  * first argument picks the algorithm ("fast" or "classic", the engine's name in the output); the radio task's 10 ms tick
  * hands the DMR engine its samples (dmrs_sampling / dmrs_sample) between the polls. After the 60 s rows above, rows
  * named "fpm-..." keep each search running 120 s and print, in the last column, the calls caught a minute (the engine's
- * seq: one per over found and counted). The rows after the original ones (p25-rpt, p25-fmnext, *-wide10) are added at
+ * seq: one per over found and counted). SURE_SEED / SURE_LEAK: the verifier's variants (gap_leak above). The rows after
+ * the original ones (p25-rpt, p25-fmnext, *-wide10) are added at
  * the end of their group so the original rows' figures stay identical to the build without the switch. */
 #include <math.h>
 #include <stdio.h>
@@ -57,6 +58,10 @@ static uint32_t now, tuned_hz, filt_ms, tuned_at;
 static unsigned seed = 4242u, case_seed = 991u;
 static bool all_kind;
 static bool keep_going;		/* fpm rows: the search runs on after a find */
+/* fastsrch verifier variants: SURE_LEAK=<dB> makes a direct mode carrier's TDMA gap read that many dB under its burst
+ * instead of the floor (a strong transmitter in the room, a level reading that averages over the gap); SURE_SEED=<n>
+ * another random sequence (the engines' and the cases') */
+static double gap_leak;
 static uint16_t seq0, seq1;	/* the engine's calls counted at the run's start and end */
 static const char *trace_name = "";
 static uint32_t trace_hz;	/* SURE_TRACE=<hz>: the engine's phases for that transmitter */
@@ -105,9 +110,13 @@ static double level(uint32_t t)
 		const sig_t *s = &sigs[i];
 		if (!keyed(s, t))
 			continue;
-		if (s->mode == M_DMRDIR && (t + s->phase) % 60u >= 30u)
-			continue;
-		double l = s->dbm - att(offset(tuned_hz, s->hz));
+		double gapdb = 0.0;
+		if (s->mode == M_DMRDIR && (t + s->phase) % 60u >= 30u) {
+			if (gap_leak == 0.0)
+				continue;
+			gapdb = gap_leak;	/* the gap reads gap_leak dB under the burst */
+		}
+		double l = s->dbm - att(offset(tuned_hz, s->hz)) - gapdb;
 		if (ceiling != 0.0 && l > ceiling)
 			l = ceiling;
 		if (l > best)
@@ -263,8 +272,10 @@ static void print_res(const char *eng, const char *name, res_t *r, int trials)
 										   (r->found * 9) / 10 : r->found - 1] : 99.0;
 	if (r->found < trials * 9 / 10)
 		p90 = 99.0;
-	printf("MODEL %s %s %d %.1f %.1f %.1f %.1f\n", eng, name, r->found, med, p90,
-	       r->run_s > 0 ? r->probes * 60.0 / r->run_s : 0.0, r->steps_s);
+	printf("MODEL %s %s %d %.1f %.1f %.1f %.1f %.1f\n", eng, name, r->found, med, p90,
+	       r->run_s > 0 ? r->probes * 60.0 / r->run_s : 0.0, r->steps_s,
+	       /* fastsrch: the median over every trial, a miss counted as 99 s (fair when the finds differ) */
+	       trials / 2 < r->found ? r->t[trials / 2] : 99.0);
 }
 
 /* --- DMR / all digital search --- */
@@ -728,6 +739,12 @@ int main(int argc, char **argv)
 	(void)argv;
 #endif
 	now = 100000u;
+	if (getenv("SURE_SEED")) {
+		seed = (unsigned)atoi(getenv("SURE_SEED"));
+		case_seed = seed * 7u + 3u;
+	}
+	if (getenv("SURE_LEAK"))
+		gap_leak = atof(getenv("SURE_LEAK"));
 	if (getenv("SURE_TRACE"))
 		trace_hz = (uint32_t)strtoul(getenv("SURE_TRACE"), NULL, 10);
 	static const scen_t p25s[] = {

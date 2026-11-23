@@ -745,11 +745,11 @@ X.st=ALGO,UP_MS,PASSES,PASS_MS,PASS_STEPS,PROBES,FOUND,NOSYNC,PARTIAL,GONE,SKIPP
 | ALGO | `fast` or `classic` (below) |
 | UP_MS | ms since the search started (stopped: up to its last probe / sweep change) |
 | PASSES, PASS_MS, PASS_STEPS | complete sweeps; the last one's duration (probes included) and steps |
-| PROBES | probes started; outcomes: FOUND (mode confirmed), NOSYNC (nothing of the mode heard, skipped), PARTIAL (something heard, not enough), GONE (the carrier went off the air during the probe) |
+| PROBES | probes started; outcomes: FOUND (mode confirmed), NOSYNC (nothing of the mode heard, skipped), PARTIAL (something heard, not enough), GONE (the carrier went off the air during the probe, or the search stopped during it); PROBES = FOUND + NOSYNC + PARTIAL + GONE once no probe runs |
 | SKIPPED | run targets passed over because they were in the skip list |
-| EARLY | DMR probes ended early (fast, item 4 below) |
+| EARLY | always 0 in this build (an early DMR probe end was tried and dropped, below; the field stays so the line keeps its form) |
 | WATCH | probes of watched carriers (fast, item 3) |
-| PROBE_MS, SWEEP_MS | time spent probing and sweeping |
+| PROBE_MS, SWEEP_MS | time spent probing and sweeping (a found call's play and hang count in neither) |
 | FIRST_MS | from the start to the first find (0 = none) |
 | SEEN_MS | the last find: from its carrier first read above the floor (any step within 25 kHz) to the find |
 | SYNC_LAST, SYNC_MAX | a found probe's wait for the first frame / burst of its mode (DMR: from the mode's window start; P25: from the hit, the hand-over to the native receiver included), last and largest |
@@ -772,58 +772,70 @@ search, the emergency ends it, no search over a watch, the search log counting):
 
 | # | Change | Why / what bounds it |
 |---|---|---|
-| 1 | **DMR and All digital sweep: a quiet step in two polls (50 ms) instead of three (75 ms).** The radio task's 10 ms tick reads the level (`board.radio->status`, the same two FD6818 reads the poll does) while a fast search's step waits for it, from 10 ms after the retune; the step's level is the peak of those samples and the polls' readings. Once the samples span 30 ms and none comes near a hit (half its margin), the step is quiet. Anything near a hit goes to classic's settled readings, so a strong step is judged exactly as before | A direct mode burst is on air 27.5-30 ms of every 60. Samples 10 ms apart over 30 ms meet a burst unless all fall in a gap longer than the span: up to 2.5 ms of 60, so about 4 % of the steps on a direct mode carrier read quiet once (the next pass reads them again; model: no row lost finds). The 10 ms settle is OpenDMR's (code reading, same FD6818), not measured here: a slower reading makes quiet steps after a strong one look strong (classic's path: slower, not lost). P25 search keeps one poll (25 ms; its carrier is continuous) |
-| 2 | **Candidate memory** (8 entries, 12 B each): every step read strong is noted (level, first and last seen, merged within 25 kHz); this gives SEEN_MS. | RAM |
-| 3 | **Watch**: a carrier left undecided is read again between sweep steps (the revisit slot every 16 steps, taking turns with the found list), strongest first, for 30 s (`SH_WATCH_MS`): its probe ended GONE or PARTIAL, its run's target read quiet before the probe (the over ended), or it was a weaker run that a stronger one took in at least two steps below the stronger one's target (a weak digital signal just below a strong FM carrier: classic followed the run to the FM carrier, probed and skipped it, and never probed the weak one) | A wide range no longer waits a whole pass (10 MHz DMR: 40-60 s) for the next over of a carrier it already saw. One step below a target is that target's own skirt and is not watched; two steps below can be a skirt too (45 dB down in the model): probed once or twice, then skipped |
-| 4 | **DMR probe of a steady carrier ends at 400 ms** (classic 600 ms): no burst, no TDMA hint from the sweep, at least 8 level readings and none in a gap | A DMR repeater sends a sync at least every 180 ms (both slots in voice: each slot's burst A every 360 ms), so 400 ms holds the modem's start and a sync with about 100 ms to spare. A direct mode carrier shows gaps (TDMA) and keeps the 1.1 s window. Not for P25 / YSF / NXDN: the native receiver's lock time is not measured (SYNC_MAX will tell) |
-| 5 | **A steady carrier not digital twice in a row is skipped 2 minutes** (`SH_REJECT_MS`; classic 10 s, then 30 s). A carrier whose level rose and fell like direct mode DMR, or brought any frame, keeps classic's skips (it may be DMR the modem missed) | Fewer probes of the same busy FM channels; the first rejection is still 10 s, so one unlucky probe of a real channel doesn't hide it for minutes |
+| 1 | **DMR and All digital sweep: a quiet step in two polls (50 ms) instead of three (75 ms).** The radio task's 10 ms tick reads the level (`board.radio->status`, the same two FD6818 reads the poll does) while a fast search's step waits for it, from 10 ms after the retune; the step's level is the peak of those samples and the polls' readings. Once the samples span 30 ms, no two more than 12 ms apart (a late tick), and none comes near a hit (half its margin), the step is quiet. Anything else goes to classic's settled readings, so a strong step is judged exactly as before | A direct mode burst is on air 27.5-30 ms of every 60. Samples 10 ms apart over 30 ms meet a burst unless all fall in a gap longer than the span: up to 2.5 ms of 60, so about 4 % of the steps on a direct mode carrier read quiet once (the next pass reads them again). The 10 ms settle is OpenDMR's (code reading, same FD6818), not measured here: a slower reading makes quiet steps after a strong one look strong (classic's path: slower, not lost). P25 search keeps one poll (25 ms; its carrier is continuous) |
+| 2 | **Candidate memory** (8 entries, 12 B each): every step read strong is noted (level, first and last seen, merged within 25 kHz); this gives SEEN_MS | RAM |
+| 3 | **Watch**: a carrier left undecided is read again between sweep steps, strongest first, for 30 s (`SH_WATCH_MS`): its probe ended GONE or PARTIAL, its run's target read quiet before the probe (the over ended), or it was a weaker run that a stronger one took in, at least two steps below the stronger one's target and reading more than 40 dB under it (`SH_SKIRT_DB`: closer than that carrier's own skirt, about 45 dB down two steps off). A watched carrier is read halfway between two found list revisits, which keep classic's every 16 steps; with no find in the range it takes the found list's slot too | A wide range no longer waits a whole pass (10 MHz DMR: 40-60 s) for the next over of a carrier it already saw. The 40 dB rule keeps a strong carrier's own lower neighbours from being watched as phantoms (verifier); it also means a weak signal just below a strong FM carrier is watched only when it reads within 40 dB of it (in the model, -110..-100 dBm under a -60 dBm FM carrier: never) |
+| 4 | **A steady carrier found not digital again on a later pass is skipped 2 minutes** (`SH_REJECT_MS`; classic 10 s, then 30 s). Steady: its level never went under the hit's half margin during either probe (P25 too, from the level the radio core reads while the native receiver probes), no TDMA hint, nothing of the mode heard. Anything else keeps classic's skips. A new start (held 0, a range change, leaving and coming back) clears every skip | Fewer probes of the same busy FM channels; the first rejection is still 10 s and the second must come from another pass, so one unlucky probe of a real channel doesn't hide it for minutes; a carrier whose level came and went (DMR TDMA, a strong transmitter's gaps) never gets more than classic's 30 s |
+
+Dropped after the verifier's review (8ac009d): a DMR probe of a "steady" carrier ended at 400 ms. Steady meant no level
+reading under floor + 5 dB; with a transmitter in the room a direct mode carrier's TDMA gaps need not read as the floor
+(the model with the gap reading 40 dB under the burst: the owner's case in All digital search lost 8-16 of 200). The
+probe windows are classic's again (DMR 0.6 s / 1.1 s, P25 1.2 s, YSF 0.7 s, NXDN 0.9 s); SYNC_MAX is what can shorten
+them later, from data.
 
 Not done, on purpose: probing weaker candidates later than stronger ones ("strongest first" for every hit). The sweep
 already probes a run's peak as soon as the run ends (an outstanding step is never kept waiting for the pass to end),
 and deferring a weaker hit only delays it: a carrier's level says nothing about whether it is digital. The strongest
 first order is kept where it costs nothing: among the watched carriers.
 
-**Host model, classic -> fast** (`tools/test_searchfix.py` runs `test_search_sure.c` built with the switch, `classic`
-and `fast`; HOST-MODELLED, not measured; the model as in "Search reliability" above, plus the radio task's 10 ms tick
-handing the DMR engine its samples). 60 s rows: found of 200 within 60 s, median s to the first find, steps a second
-with no transmitter; "calls a minute": 40 searches left running 120 s, the overs caught (the engine's call count):
+**Host model, classic -> fast** (`tools/test_searchfix.py` `hybrid_model` runs `test_search_sure.c` built with the
+switch, `classic` and `fast`; HOST-MODELLED, not measured; the model as in "Search reliability" above, plus the radio
+task's 10 ms tick handing the DMR engine its samples). Run on four random sequences (the default and `SURE_SEED` 11, 22,
+33), each without and with the verifier's leak (`SURE_LEAK=40`: a direct mode carrier's TDMA gap reads 40 dB under the
+burst instead of the floor: a strong transmitter in the room, a level reading that averages). The checks, on every row
+of all eight runs: fast finds no fewer than classic - 4 of 200, its median time to the first find over every trial (a
+miss counted as 99 s) is no more than 1 s longer, its sweep no more than 0.5 steps a second slower, and over 120 s runs
+it catches no fewer calls a minute (5 %, or 0.1 a minute); plus classic equal to the build without the switch, figure
+for figure, the DMR quiet step 19+ steps a second, the owner's rows 190+ of 200 within 4 s. All pass. The default
+sequence without the leak (the other seven runs differ by a few finds and tenths of a second; the full table is printed
+by the test):
 
-| Row | Found of 200 | Median s | Steps a second | Calls a minute |
+| Row | Found of 200 | Median s (every trial) | Steps a second | Calls a minute |
 |---|---|---|---|---|
-| dmr-owner-436275 (the owner's room radio, 436.000-436.500) | 197 -> 197 | 2.6 -> **1.3** | 13.3 -> **19.9** | 2.81 -> 2.76 |
-| dmr-strong (one strong direct mode radio, -70..-50 dBm) | 189 -> 198 | 10.2 -> **7.3** | 13.3 -> 19.9 | 2.74 -> **3.25** |
-| dmr-direct (-110..-60 dBm) | 188 -> 200 | 9.3 -> 7.1 | 13.3 -> 19.9 | |
-| dmr-repeater | 194 -> 198 | 8.7 -> 6.5 | 13.3 -> 19.9 | |
-| dmr-busy (six FM carriers in the range) | 184 -> 198 | 13.8 -> 10.1 | 9.9 -> 12.5 | 2.46 -> 3.11 |
-| dmr-fmnext (a weak DMR 25 kHz below a strong FM carrier) | **0 -> 170** | - -> 7.6 | | 0.09 -> **1.32** |
-| dmr-wide10 (430-440 MHz) | 126 -> 137 | 31.5 -> **23.3** | 13.3 -> 19.9 | 1.51 -> **2.24** |
-| p25-overs | 200 -> 200 | 3.7 -> 3.8 | 40 -> 40 | 3.57 -> 3.55 |
-| p25-rpt (a P25 repeater, always keyed) | 200 -> 200 | 3.0 -> 2.9 | 40 -> 40 | |
-| p25-busy | 195 -> 190 | 11.7 -> 11.7 | 12.7 -> 9.5 | 2.97 -> 3.04 |
-| p25-fmnext (a weak P25 25 kHz below a strong FM carrier) | **21 -> 181** | 2.7 -> 5.6 | | 0.04 -> **1.20** |
-| p25-wide10 | 166 -> 173 | 15.6 -> 15.3 | 40 -> 40 | 3.26 -> 3.35 |
-| all-owner-436275 | 197 -> 194 | 2.9 -> **1.5** | 13.3 -> 19.9 | |
-| all-p25 | 182 -> 199 | 9.6 -> 7.0 | 13.3 -> 19.9 | |
-| all-busy | 149 -> 158 | 25.9 -> 23.1 | 3.0 -> 5.1 | 1.42 -> 1.45 |
-| all-p25-fmnext | **0 -> 172** | - -> 12.3 | | 0.04 -> **1.66** |
-| all-wide10 | 97 -> 126 | 30.4 -> **22.9** | 13.3 -> 19.9 | 1.39 -> **2.15** |
+| dmr-owner-436275 (the owner's room radio, 436.000-436.500) | 197 -> 198 | 2.6 -> **1.3** | 13.3 -> **19.9** | 2.81 -> 2.95 |
+| ... with the 40 dB gap leak | 200 -> 200 | 2.6 -> **1.3** | 13.3 -> 19.9 | 3.19 -> 3.12 |
+| dmr-strong (one strong direct mode radio, -70..-50 dBm) | 189 -> 198 | 10.7 -> **7.4** | 13.3 -> 20.0 | 2.74 -> **3.36** |
+| dmr-direct (-110..-60 dBm) | 188 -> 200 | 9.8 -> 6.9 | 13.3 -> 19.9 | |
+| dmr-repeater | 194 -> 199 | 9.1 -> 6.6 | 13.3 -> 19.9 | |
+| dmr-busy (six FM carriers in the range) | 184 -> 192 | 15.5 -> 11.6 | 9.9 -> 12.1 | 2.46 -> 3.01 |
+| dmr-wide10 (430-440 MHz) | 126 -> 136 | 47.4 -> **33.2** | 13.3 -> 19.9 | 1.51 -> **2.15** |
+| p25-overs | 200 -> 200 | 3.7 -> 3.9 | 40 -> 40 | 3.57 -> 3.56 |
+| p25-rpt (a P25 repeater, always keyed) | 200 -> 200 | 3.0 -> 3.0 | 40 -> 40 | |
+| p25-busy | 195 -> 195 | 12.4 -> 11.7 | 12.7 -> 12.7 | 2.97 -> 2.95 |
+| p25-wide10 | 166 -> 172 | 17.8 -> 17.7 | 40 -> 40 | 3.26 -> 3.34 |
+| all-owner-436275 | 197 -> 195 | 2.9 -> **1.6** | 13.3 -> 19.9 | |
+| ... with the 40 dB gap leak | 195 -> 195 | 3.1 -> **1.5** | 13.3 -> 19.9 | |
+| all-p25 | 182 -> 198 | 10.8 -> 7.0 | 13.3 -> 20.0 | |
+| all-busy | 149 -> 159 | 32.2 -> 27.5 | 3.0 -> 4.2 | 1.42 -> 1.52 |
+| all-wide10 | 97 -> 127 | 99 -> **33.8** | 13.3 -> 19.9 | 1.39 -> **2.16** |
+| p25-fmnext / dmr-fmnext / all-p25-fmnext (a weak signal 25 kHz below a -60 dBm FM carrier) | 21 / 0 / 0 -> the same | - | faster sweep (DMR 12.5 -> 17.9) | about 0 in both |
 
 Read with care: the fast DMR step rests on the 10 ms settle (OpenDMR's figure, not ours) and the model's first-order
-reading lag; the fmnext rows rest on the model's selectivity (25 kHz 45 dB down). The model also found a hole in the
-**classic** (beta.8) engine: a weak P25 / DMR signal just below a strong FM carrier is almost never found (21 and 0 of
-200), because the run logic follows the levels up to the FM carrier and forgets the weaker run. P25 search over a busy
-band costs a little in its first minute (p25-busy 195 -> 190, 9.5 steps a second in the first 30 s: the watched lower
-neighbours of six FM carriers, each a 1.2 s P25 probe) and catches as many calls once those are skipped (calls a minute
-2.97 -> 3.04). The checks (`hybrid_model`): classic's original rows equal the build without the switch; fast never
-clearly fewer finds (6 of 200) nor a slower median (fmnext rows excepted: classic's few finds come early by pass
-luck), never a slower sweep over a band without carriers, a DMR quiet step at 19+ steps a second, the owner's rows 190+
-of 200 within 4 s, the fmnext rows 150+, the busy rows no fewer calls a minute. Unit tests: `tests/plus/test_searchhy.c`
-(fast against classic step by step: the 50 / 75 ms quiet step, a direct mode carrier found at every TDMA phase, the
-early end and its exceptions, the 2 minute skip and its exceptions, the watch after a gone probe on a 10 MHz range, a
-weak signal under a strong FM carrier, strongest first and the watch's expiry, the latch, every counter) and the
-searchfix engine tests again on classic in the hybrid build; the real radio state machine's P25, DMR and all digital
-search suites run with the switch on fast (`test_radio_searchhy`). PC: C# `SearchLogTests`, Rust `searchlog.rs` and
-`radio_pages.rs` tests (fakes only).
+reading lag. The model shows a hole in the **classic** (beta.8) engine that fast does not close: a weak P25 / DMR signal
+just below a strong FM carrier is almost never found (21 and 0 of 200), because the run logic follows the levels up to
+the FM carrier, probes and skips it, and forgets the weaker run. The first version of fast watched every such weaker run
+and found them (181 / 170 of 200), but it also watched every strong carrier's own lower skirt (phantom probes: P25 1.2 s
+each, slower sweeps on busy bands); with the 40 dB rule only signals that stand out from a skirt are watched, and in the
+model's selectivity none of those weak ones does. A real fix needs the receiver's measured selectivity (how far down a
+carrier reads one and two steps off), which the counters can't give; left open. Unit tests:
+`tests/plus/test_searchhy.c` (fast against classic step by step: the 50 / 75 ms quiet step, a late tick handing the step
+to classic, a direct mode carrier found at every TDMA phase, classic's probe windows, the 2 minute skip and its
+exceptions, the watch after a gone probe on a 10 MHz range, a strong carrier's skirt not probed, strongest first and the
+watch's expiry, the latch, every counter: a call's play time in neither total, a probe stopped midway counted gone) and
+the searchfix engine tests again on classic in the hybrid build; the real radio state machine's P25, DMR and all
+digital search suites run with the switch on fast (`test_radio_searchhy`; its fake receiver's level now follows the time
+in 5 ms slices, so the tick's samples see TDMA). PC: C# `SearchLogTests`, Rust `searchlog.rs` and `radio_pages.rs`
+tests (fakes only).
 
 **Radio test (owner; receive only, our radio keys nothing; the other radio on the owner's authorised frequencies).**
 PC: the Search log page running (it reads the counters once a second; the CSV keeps them). Same signal, old and new,
@@ -832,18 +844,22 @@ read the stats line:
 1. The other radio DMR direct mode on 436.275, CC1, TS1, low power, overs of 5-10 s with 5 s pauses. Tools > DMR search
    436.000-436.500. Hold 0 until "Search: classic (beta.8)", start, wait for the find, note FIRST_MS ("first find")
    and SEEN_MS ("seen->found"), let it run 2 minutes, note the stats line. Hold 0 ("Search: fast"), the same again.
-   Expect (model): fast's first find about half classic's, "pass" about 2/3 of classic's time for the same steps.
+   Expect (model): fast's first find about half classic's, "pass" about 2/3 of classic's time for the same steps;
+   "early" stays 0 in both.
 2. The same with the other radio on P25 (NAC $659, TG 101, 433.500, P25 search +-1 MHz). Expect: about the same in
    both (P25's sweep didn't change); SYNC ("sync ... max ...") is the native receiver's lock time, worth writing down.
 3. Nothing on air, DMR search 430-440 MHz, 1 minute each way: "pass" fast about 40 s against 60 s, probes 0 (hits 0 on
    the screen). If fast shows probes or hits on a quiet band that classic doesn't, the 10 ms settle is too short on this
    radio: report it.
 4. Optional: the other radio FM on 436.300 and DMR on 436.275 at once (two radios), All digital search: fast finds the
-   DMR; "no sync" grows by 2 and then stays for 2 minutes (the FM carrier skipped).
+   DMR; "no sync" grows by 2 (10 s apart, on two passes) and then stays for 2 minutes (the FM carrier skipped).
 
 Rows FS-1.. in [plus-radio-test.md](plus-radio-test.md). Send back the stats lines (or the CSV files) of each pair.
 
-Cost (`--plus --stack-check --verify-rebuild`, rebased on `ddm25` 2859d25): zero warnings, forced rebuild identical, every task's stack fits; FLASH 876,652 -> 879,944 B (+3,292, 97.65 %), static RAM +192 B (2,272 -> 2,080 B free; the 1,500 B floor kept). The RAM: the candidate memory 80 B, the counters about 72 B, the engines' own few bytes; `SH_CANDS` 6 instead of 8 would save 20 B.
+Cost (`--plus --stack-check --verify-rebuild`, on `ddm25` 2859d25): zero warnings, forced rebuild identical, every
+task's stack fits (radio task 676 B free); FLASH 876,652 -> 880,300 B (+3,648, 97.69 %), static RAM +200 B (2,272 ->
+2,072 B free; the 1,500 B floor kept). The RAM: the candidate memory 96 B, the counters about 76 B, the engines' own
+few bytes; `SH_CANDS` 6 instead of 8 would save 24 B.
 
 ### Airband AM and broadcast FM
 
