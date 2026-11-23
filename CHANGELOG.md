@@ -3,7 +3,7 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## v1.0.0-beta.9 (candidate, not released yet)
+## v1.0.0-beta.9 (2026-11-23, beta: the new parts not yet confirmed on the radio)
 
 - Sky plot (owner's request 2026-11-22; host-tested, not yet checked on the radio, rows SK-1..SK-6): key `2` on Tools >
   ISS and on Tools > Satellites (the satellite in focus) opens a polar plot of its next pass (or the one under way)
