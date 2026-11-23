@@ -81,7 +81,18 @@ static bool mw_watch(uint8_t n, uint8_t sel)
 static uint32_t mw_busy_hz;
 static void mw_poll(void)
 {
+#ifdef MW_POLL_TICKS
+    /* tools/test_fastscan.py: the radio task's 10 ms tick between the polls too (the faster scan reads on it) */
+    for (int i = 0; i < 2; i++) {
+        now += RADIO_TICK_MS;
+        signal(mw_busy_hz != 0 && hw.rx_hz == mw_busy_hz ? 0 : 120, true);
+        if (!native_lab_owns())
+            radio_sm_tick(&sm, now);
+    }
+    now += RADIO_POLL_MS - 2 * RADIO_TICK_MS;
+#else
     now += RADIO_POLL_MS;
+#endif
     signal(mw_busy_hz != 0 && hw.rx_hz == mw_busy_hz ? 0 : 120, true);
     if (native_lab_owns())
         radio_sm_native_maintenance(&sm, now);

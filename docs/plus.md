@@ -861,6 +861,117 @@ task's stack fits (radio task 676 B free); FLASH 876,652 -> 880,300 B (+3,648, 9
 2,072 B free; the 1,500 B floor kept). The RAM: the candidate memory 96 B, the counters about 76 B, the engines' own
 few bytes; `SH_CANDS` 6 instead of 8 would save 24 B.
 
+### Faster channel scan (`CONFIG_SCAN_FAST`, branch `fastscan`, v1.0.1 candidate)
+
+The owner's request after v1.0.0 (2026-11-23): the zone scan, the channel list scan and the VFO scan (the radio core's
+scan, not the range searches) as fast as reasonably possible; OpenDMR's channel scan was named as very fast. Its
+licence forbids copying, so only ideas from the lab repo's review of it were used (a reading every few ms from shortly
+after the retune; a quiet stop as short as its readings allow), and two facts read in its code: on this radio's FD6818
+it trusts the noise reading 20 ms after a channel change (it reads low, a carrier, a moment before that) and steps an
+analog channel in 30 ms. Dual watch and the multi-watch ring keep their own timing (their rules are in "The
+multi-watch ring" below); nothing here touches a search.
+
+**Where the time went (v1.0.0, code reading; the radio core's scan is upstream's `core/radio/scan.c` + `radio_sm.c`).**
+The scan runs on the radio task's 25 ms poll. Each stop: the retune (`tune()`: the FD6818's frequency, the mode switch
+and the DMR stack's start or end when the mode changes), then `SCAN_SETTLE_MS` 50 ms in which the scan ignores the
+readings, then listening until the scan dwell (Settings: scan dwell, 150 ms by default, at least 50) measured from the
+retune; the step comes at the first poll after it. A quiet channel of any mode therefore costs 150 ms (the model: 152
+ms with late polls), and that is all the time of a quiet zone: 16 channels 2.4 s a round, 32 4.9 s, 80 12.2 s. Of the
+six readings a stop gets, the scan uses five (50-150 ms).
+
+| Mode | Activity (what stops the stepping) | Wait on activity |
+|---|---|---|
+| FM | the squelch open with the RX tone (noise under the level's line) | a hold; a carrier without the tone: 350 ms for the tone when the channel needs one, else on at the dwell |
+| DMR | a carrier by the noise reading or the strength (-100 dBm at squelch 5, 3 dB a level), held 150 ms (direct mode is on air 27.5 ms of 60) | probe 700 ms; with bursts of its colour code since the settle up to 1.5 s (a late entry); a call that plays holds; a call not for us holds nothing |
+| P25 / YSF (zone scan) | the noise reading or the strength (DMR's line) | the second poll in a row holds; the native receiver takes the channel (no frame 1.2 s, then 2 s / 8 s cooldown; voice: 1.5 s after it) |
+| NXDN / dPMR | the noise reading (the FM path) | as FM |
+| any | | resume: carrier (default; 2 s scan delay after the signal), time (5 s hold), stop; priority stops and looks in the wait; nuisance delete; PTT goes back to the start channel |
+
+**What fast changes.** Only a quiet stop's length. From 20 ms after the retune the radio task's 10 ms tick reads the
+receiver (`board.radio->status`, the same two FD6818 reads as the poll) while a zone or VFO scan's stop listens. A
+reading is quiet when the scan's own carrier rule would see nothing, with a margin: the noise reading at least 4 above
+the squelch level's opening line, and on a digital channel (DMR, P25, YSF, NXDN, dPMR) the strength at least 6 dB under
+DMR's strength line, with no DMR call or burst since the retune. When the quiet readings span 20 ms (three readings,
+20-40 ms after the retune; DMR 60 ms, a whole TDMA frame, seven readings 20-80 ms) with none more than 12 ms after the
+one before (a late tick starts the span again), the scan steps at once through the same `scan_step` as at the dwell's
+end, so the priority channel, nuisance delete, the zone and band order and the counts are all as before. The first
+reading that is not clearly quiet hands the stop to the classic rules for good: its dwell, probe and hold exactly as in
+v1.0.0. A squelch already open, AM or broadcast receive, the monitor, PTT, a hotspot, APRS on the receiver or battery
+saving asleep: classic rules. After a step made on the tick the poll's squelch waits until the stop is 25 ms old (a
+classic stop's first poll is that old), so the noise reading's dip right after the retune never opens the squelch.
+
+| Quiet stop | v1.0.0 | fast (model, tick lateness included) |
+|---|---|---|
+| FM, P25 / YSF, NXDN, dPMR | 150 ms | about 44 ms (3 readings 20-40 ms) |
+| DMR | 150 ms | about 87 ms (7 readings 20-80 ms) |
+| 16 / 32 / 80 FM channels, a round | 2.4 / 4.9 / 12.2 s | 0.69 / 1.40 / 3.49 s (3.5x) |
+| the same, every 4th DMR and every 8th P25 | 2.4 / 4.9 / 12.3 s | 0.88 / 1.76 / 4.41 s (2.8x) |
+
+**Counters (both algorithms) and the switch.** The debug link's last section, `scanst` (GET_VIEW 31; read only;
+`scanfast_view.c`), the running or last zone / VFO scan (dual watch not counted; counts modulo 65536):
+
+```
+scanst.built=1
+scanst.on=0|1
+scanst.st=ALGO,UP_MS,STOPS,PASSES,PASS_MS,PASS_STOPS,NOTICED,HELD,FAST_QUIET,FALLBACK,LATE
+scanst.quiet=FM_N,FM_MS,DMR_N,DMR_MS,P25_N,P25_MS,OTHER_N,OTHER_MS
+scanst.rate=CPS_X10
+```
+
+ALGO `fast` / `classic`; UP_MS since the scan (or the counters, after a switch) started; PASSES complete rounds (the
+first wrap starts the count), PASS_MS / PASS_STOPS the last one's; NOTICED stops that probed or held, HELD those that
+held; FAST_QUIET stops the fast rule ended; FALLBACK stops it handed to the classic rules; LATE spans started again after
+a late tick; `quiet` the quiet stops by mode and their total time (P25 counts YSF, OTHER NXDN and dPMR: FM_MS / FM_N is
+the FM quiet dwell); `rate` quiet channels a second times ten. Not shown by the PC programmers yet (debug link only):
+`tools/plus_live.py` in the lab repo or any GET_VIEW 31 reader. **Held 0 on Home while a zone or VFO scan runs** switches
+fast (the default) / classic, toast "Scan: fast" / "Scan: classic (v1.0.0)" (Turkish "Tarama: hızlı" / "Tarama: klasik
+(v1.0.0)"); kept in RAM while the radio is on; a running scan takes it at its next stop and the counters start again.
+A short 0 still skips the channel the scan stopped on. No band rule anywhere.
+
+**Host model, classic -> fast** (`tests/plus/test_fastscan_radio.inc`, run by `tools/test_fastscan.py` from
+`make classic-test`; HOST-MODELLED, not measured). The real radio state machine and native P25 receiver on the fake
+board, the radio task's tick and poll (one in ten 1-3 ms late), the receiver's level through a first-order lag tau (0,
+5, 10, 20 ms) that starts from the last frequency's reading, the noise reading from the level (4 a dB, the squelch line
+about -108 dBm) with a 15 ms dip after each retune, signals in overs (1.5-4 s on, 3-12 s off) on one channel of a mixed
+zone; four random sequences per row (`FASTSCAN_SEEDS`). "Caught": the scan probed or held the channel while the over
+was on the air. "False quiet": a stop the fast rule ended on the signal's channel with the signal on the air all along.
+Rows at tau 0 (5 and 10 give the same within one over; the full table is printed by the test):
+
+| Row (signal) | n | s a round (holds included) | overs caught of all | median catch s | false quiet |
+|---|---|---|---|---|---|
+| FM -105 dBm (3 dB over the squelch line) | 16 / 32 / 80 | 3.8 -> 1.6 / 6.0 -> 3.0 / 13.4 -> 5.7 | 44 -> 49 of 49 / 27 -> 48 of 48 / 11 -> 28 of 47 | 0.94 -> 0.47 / 1.61 -> 0.75 / 2.02 -> 1.58 | 0 |
+| FM -107 dBm (1 dB over) | 16 / 32 / 80 | 3.8 -> 1.5 / 6.1 -> 2.8 / 13.2 -> 5.6 | 46 -> 46 / 26 -> 45 of 45 / 10 -> 29 of 48 | | 0 |
+| FM around the squelch line (noise 44..67 at random) | 16 / 32 / 80 | 3.7 -> 1.6 / 5.9 -> 2.6 / 13.0 -> 5.6 | 39 -> 47 of 47 / 23 -> 39 of 49 / 8 -> 28 of 46 | | 3 / 5 / 2 |
+| DMR direct mode, same room (-60 dBm, gaps at the floor) | 16 / 32 / 80 | 2.6 -> 1.1 / 5.1 -> 2.0 / 12.4 -> 4.7 | 44 -> 44 of 44 / 26 -> 43 of 44 / 14 -> 32 of 46 | 1.06 -> 0.53 / 1.59 -> 1.11 / 1.68 -> 1.66 | 0 |
+| ... with the leak (gaps 40 dB under the burst) | 16 / 32 / 80 | 2.6 -> 1.1 / 5.1 -> 2.0 / 12.5 -> 4.7 | 44 -> 46 of 46 / 23 -> 46 of 48 / 17 -> 25 of 47 | | 0 |
+| DMR -95 dBm | 16 / 32 / 80 | 2.6 -> 1.1 / 5.1 -> 2.0 / 12.4 -> 4.7 | 43 -> 46 of 46 / 24 -> 44 of 45 / 11 -> 31 of 44 | | 0 |
+| P25 -95 dBm, the noise reading deaf to it | 16 / 32 / 80 | 2.7 -> 1.0 / 5.2 -> 2.0 / 12.4 -> 4.8 | 36 -> 40 of 46 / 25 -> 37 of 44 / 6 -> 29 of 46 | 1.34 -> 0.62 / 1.36 -> 0.89 / 1.20 -> 1.42 | 0 |
+
+The checks, on every row: fast is faster; nothing held in a quiet zone; with a lag up to 10 ms fast catches no fewer
+overs than classic (summed over the seeds); no false quiet for DMR (leak or not), P25 and FM 3 dB over the line at any
+lag up to 20 ms, nor FM 1 dB over the line up to 10 ms. All pass. **The limit the model shows:** with a reading that
+lags 20 ms, an FM carrier only 1 dB over the squelch line is read quiet at 40 ms (fast caught 13 of 46 overs in the
+16-channel zone, classic 45): the fast rule rests on the FD6818's noise reading being ready 20-40 ms after the retune.
+OpenDMR on the same chip trusts it at 20 ms and steps analog channels in 30 ms (code reading), which suggests the lag
+is far shorter, but it is not measured here; the A/B switch and the radio rows below are the test. "Around the squelch
+line" has false quiets by nature (a reading that hovers over the line is quiet half the time); classic misses those
+stops too, and fast still catches more overs because it comes back three times as often.
+
+**The other suites with fast on** (`tools/test_fastscan.py`): upstream's radio suite, the Classic / Plus P25 suites,
+the multi-watch ring and the priority channel / temporary skip suite pass with the switch compiled in, on classic and on
+fast (75 stops ended by the fast rule in the latter, with the 10 ms tick added between their polls); upstream's scan
+suite (`radioFeaturesTest`: zone, VFO and mixed scans, PTT, tones, DMR calls in progress, a receiver deaf to DMR, dual
+watch) passes on classic and, on fast, all but two checks that assume a 150 ms stop (on its 5-channel zone the faster scan
+is already round again on the DMR channel, where the monitor key doesn't pause it in either algorithm, or still on it;
+the four such checks are listed with the reason in the test, any other failure fails it). Engine unit test:
+`tests/plus/test_fastscan.c`.
+
+**Radio test (owner; receive only, our radio keys nothing; the other radio on the owner's authorised frequencies).**
+Rows SF-1.. in [plus-radio-test.md](plus-radio-test.md): a quiet zone's round each way (the counters' PASS_MS), a weak
+FM signal and the room's DMR radio found each way, P25.
+
+Cost (`--plus --stack-check --verify-rebuild`): zero warnings, forced rebuild identical, every task's stack fits; FLASH 880,372 -> 882,180 B (+1,808, 97.90 %), static RAM +104 B (2,072 -> 1,968 B free; the 1,500 B floor kept): the counters 56 B, the stop's state and the pass and step bookkeeping about 48 B.
+
 ### Airband AM and broadcast FM
 
 The DM-32 glue exists upstream but is unverified on the radio (hardware-dm32.md 8.7): AM is the

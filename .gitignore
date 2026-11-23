@@ -707,3 +707,13 @@ __pycache__/
 # Upstream RadioFoundry fixes (tools/plus_rfports.py, CONFIG_RF_FIXES)
 !/tools/plus_rfports.py
 !/tools/test_rfports.py
+# branch fastscan: faster channel scan (tools/plus_fastscan.py, docs/plus.md "Faster channel scan")
+!/tools/plus_fastscan.py
+!/tools/test_fastscan.py
+!/integration/radiofoundry/scanfast/scanfast.h
+!/integration/radiofoundry/scanfast/scanfast.c
+!/integration/radiofoundry/scanfast/radio_scanfast.inc
+!/integration/radiofoundry/scanfast/scanfast_view.c
+!/integration/radiofoundry/scanfast/ui_scanfast.c
+!/tests/plus/test_fastscan.c
+!/tests/plus/test_fastscan_radio.inc

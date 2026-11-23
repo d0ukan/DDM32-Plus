@@ -989,6 +989,9 @@ def main():
     # DDM32 Plus round 15 scan: search ranges and speed, the multi-watch ring (tools/test_scan.py)
     import test_scan
     test_scan.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus faster channel scan: the engine, the suites with it built in, upstream's scan suite, the model (tools/test_fastscan.py)
+    import test_fastscan
+    test_fastscan.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus searchfix: the surer P25 / DMR / all digital searches (tools/test_searchfix.py)
     import test_searchfix
     test_searchfix.main(ROOT,APP,OUT,flags,host)

@@ -831,6 +831,25 @@ here was measured yet: the expectations are the host model's.
 | FS-7 | A strong FM carrier (the other radio FM, same room) on 436.300; DMR search 436.000-436.500, fast, 1 minute | "probes" grows by about 2 then stops (the carrier, not its neighbours: no probe on 436.2750 / 436.2875 unless something is there) |
 | FS-8 | Safety as before, fast: PTT during "Probe"; leave the screen; a watch running then OK on the search | PTT stops the search and keys nothing; it stops 5 s after leaving; "Stop the scan or watch first" |
 
+## Faster channel scan (branch `fastscan`, docs/plus.md "Faster channel scan", v1.0.1 candidate)
+
+Receive only in every row: our radio keys nothing. The other radio transmits on the owner's authorised frequencies.
+Held 0 on Home while a zone or VFO scan runs switches fast / classic ("Scan: fast" / "Scan: classic (v1.0.0)", Turkish
+"Tarama: hızlı" / "Tarama: klasik (v1.0.0)"). The counters are the debug link section `scanst` (GET_VIEW 31; not on the
+PC programmers' pages yet): send the `scanst.*` lines of each run. Nothing here was measured yet: the expectations are
+the host model's.
+
+| # | Do | Expect |
+|---|---|---|
+| SF-1 | Nothing on air. A zone of 16 FM channels (or the owner's own zone), scan 30 s on fast, read `scanst`; held 0, 30 s on classic, read it again | fast: PASS_MS about 0.7 s for 16 FM channels (FM_MS / FM_N about 40-45 ms), FALLBACK near 0, NOTICED 0; classic: about 2.4 s (150 ms a stop). FALLBACK high on fast = the readings 20-40 ms after the retune are not quiet on this radio (the noise reading's dip lasts longer, or a strong signal nearby): send the lines |
+| SF-2 | The same zone with some DMR channels | DMR_MS / DMR_N about 85-90 ms on fast, 150 on classic |
+| SF-3 | The other radio FM on one of the zone's channels, low power, a few metres away, overs of 3-5 s with 5 s pauses; 2 minutes fast, 2 minutes classic | both stop on it and play it; fast stops sooner after the over starts (model median 0.5 s against 0.9 s in 16 channels) and misses no over that classic catches |
+| SF-4 | SF-3 with the other radio far away or behind walls so the signal only just opens the squelch (Home's meter near the squelch level) | fast catches at least as many overs as classic. **Fewer on fast = the noise reading lags more than the model assumed** (the one limit the model shows): report it; classic is the fallback until then |
+| SF-5 | The other radio DMR direct mode (CC1, TS1, a channel of the zone) in the same room, overs of 5-10 s; fast, then classic | both stop on it (probe, then the call plays if the talkgroup matches); fast sooner; the counters' NOTICED grow |
+| SF-6 | The other radio P25 (NAC $659, TG 101) on a P25 channel of the zone, overs of 5 s | both stop and the native receiver plays it; fast sooner |
+| SF-7 | Fast: monitor held while scanning (FM channel); PTT while stepping and while stopped on a signal; # 1 skip, # 5 priority; a VFO band scan | as in v1.0.0: monitor pauses (on a DMR channel the key toggles DMR monitor, as before), PTT goes back to the start channel / talks back on the signal, skip and priority as before; the VFO scan steps about 3x faster on FM |
+| SF-8 | Dual watch and a triple watch running | unchanged (their own timing); held 0 there does nothing new |
+
 ## Upstream RadioFoundry fixes (branch `rfports`, docs/plus.md "Upstream RadioFoundry fixes")
 
 Each step that opens the serial port, installs, restarts or transmits needs the owner's approval in chat first.

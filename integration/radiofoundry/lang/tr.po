@@ -6646,3 +6646,11 @@ msgstr "Arama: hızlı"
 #: core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
 msgid "Search: classic (beta.8)"
 msgstr "Arama: klasik (beta.8)"
+
+#: core/ui/ui_scanfast.c
+msgid "Scan: fast"
+msgstr "Tarama: hızlı"
+
+#: core/ui/ui_scanfast.c
+msgid "Scan: classic (v1.0.0)"
+msgstr "Tarama: klasik (v1.0.0)"

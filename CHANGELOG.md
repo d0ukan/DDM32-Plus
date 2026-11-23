@@ -18,6 +18,20 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
   Zone options > "Add unzoned channels". Host-tested only (tests/plus/test_zone_cap.c `test_find_and_import_join`,
   tests/plus/test_dota_import.c with `CONFIG_CHAN_EXTRAS`). FLASH +220 B (880,600 B, 97.72 %), RAM +0 B (2,072 B free).
 
+- Faster channel scan (owner's request 2026-11-23; host-tested only, rows SF-1..SF-8; docs/plus.md "Faster channel
+  scan"): the zone scan and the VFO scan leave a quiet channel as soon as the receiver's readings say it is quiet
+  instead of listening the whole 150 ms scan dwell. The radio task's 10 ms tick reads the receiver from 20 ms after the
+  retune; three quiet readings (20-40 ms) end an FM, P25 / YSF, NXDN or dPMR stop, a whole 60 ms TDMA frame of them a
+  DMR stop. Anything not clearly quiet (a margin over the scan's own carrier rule) keeps v1.0.0's dwell, probe and
+  hold. Host model: a quiet 16-channel FM zone goes round in about 0.7 s instead of 2.4 s (3.5x), a mixed one (every
+  4th DMR, every 8th P25) 2.8x faster; every over v1.0.0 catches is caught too, sooner, including a DMR radio in the same
+  room with or without the TDMA gap leak, P25 with a noise reading deaf to it and FM 1-3 dB over the squelch line. The
+  limit: if the receiver's noise reading lags a new carrier by about 20 ms, an FM signal only 1 dB over the squelch line
+  can be passed over (the radio rows check this). Held 0 on Home while scanning switches fast / classic ("Scan: fast" /
+  "Scan: classic (v1.0.0)"), kept while the radio is on. New debug link section `scanst` (counters for both: rounds,
+  quiet dwell by mode, stops noticed and held, fast stops and fall-backs). Dual watch and the multi-watch ring are
+  unchanged. FLASH +1,808 B (882,180 B, 97.90 %), RAM +104 B (1,968 B free), stacks fit (--stack-check passed).
+
 ## v1.0.0 (2026-11-23, first stable release)
 
 - Tools > ISS: a row "Show orbit" (Turkish "Yörüngeyi göster") under "Auto track" opens the sky plot with OK, exactly
