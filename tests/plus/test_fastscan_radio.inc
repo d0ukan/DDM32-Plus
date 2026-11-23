@@ -34,6 +34,7 @@ static struct {
 	uint16_t pos;		/* its channel */
 	int16_t dbm;
 	uint8_t leak_db;	/* DMR: its gaps read this far under the burst (0: the floor) */
+	uint8_t njit;		/* the noise reading +- this at random each reading (verifier's variant) */
 	double tau;
 	uint32_t rand;
 	uint32_t t0[FX_OVERS], len[FX_OVERS];
@@ -118,6 +119,8 @@ static void fx_status(void)
 		noise = 44 + (int)fx_rand(24);			/* around the squelch line */
 	if (now - fx.tuned_at < FX_DIP_MS)
 		noise = 30;
+	else if (fx.njit != 0)
+		noise += (int)fx_rand(2u * fx.njit + 1u) - fx.njit;
 	hw.st.noise = (uint8_t)(noise < 8 ? 8 : noise > 120 ? 120 : noise);
 	hw.st.rssi_dbm = (int16_t)lround(r);
 	hw.st.tone_ok = true;
@@ -303,24 +306,24 @@ static void fx_setup(uint16_t n, bool all_fm, uint8_t kind, uint16_t pos, int16_
 static void test_fastscan_semantics(void)
 {
 	fs_stats_t v;
-	/* An all-FM zone, quiet: every stop ends on the fast rule, three readings 20-40 ms after the retune; nothing held, no squelch opened
+	/* An all-FM zone, quiet: every stop ends on the fast rule, three readings 30-50 ms after the retune; nothing held, no squelch opened
 	 * by the noise reading's dip after a retune (the poll waits while the tick's stop is young) */
 	fx_setup(16, true, FX_NONE, 0, 0, 0, 0);
 	fx_res_t r = fx_run(true, 1, 6000);
 	fs_view(now, &v);
 	CHECK(r.holds_quiet == 0 && v.noticed == 0 && v.held == 0 && v.fallback == 0 && v.fast_quiet + 1u >= v.stops);
-	CHECK(v.q_n[FS_M_FM] > 100 && v.q_ms[FS_M_FM] / v.q_n[FS_M_FM] <= 46 && v.passes >= 5 && v.pass_stops == 16);
+	CHECK(v.q_n[FS_M_FM] > 100 && v.q_ms[FS_M_FM] / v.q_n[FS_M_FM] <= 56 && v.passes >= 5 && v.pass_stops == 16);
 	printf("Faster scan: quiet FM zone %.1f ms a stop (%u stops), fallback %u\n", r.ms_per_stop, v.stops, v.fallback);
 	fx_res_t c = fx_run(false, 1, 6000);
 	fs_view(now, &v);
 	CHECK(c.holds_quiet == 0 && v.fast_quiet == 0 && !v.fast && v.q_ms[FS_M_FM] / v.q_n[FS_M_FM] >= 150);
-	/* Mixed: DMR stops a whole TDMA frame (20 + 60 ms), P25 / FM three readings */
+	/* Mixed: DMR stops a whole TDMA frame (30 + 60 ms), P25 / FM three readings */
 	fx_setup(16, false, FX_NONE, 0, 0, 0, 0);
 	r = fx_run(true, 2, 6000);
 	fs_view(now, &v);
 	uint32_t dmr = v.q_ms[FS_M_DMR] / (v.q_n[FS_M_DMR] ? v.q_n[FS_M_DMR] : 1u);
 	uint32_t p25 = v.q_ms[FS_M_P25] / (v.q_n[FS_M_P25] ? v.q_n[FS_M_P25] : 1u);
-	CHECK(r.holds_quiet == 0 && dmr >= 80 && dmr <= 92 && p25 <= 46 && v.fallback == 0);
+	CHECK(r.holds_quiet == 0 && dmr >= 90 && dmr <= 102 && p25 <= 56 && v.fallback == 0);
 	printf("Faster scan: mixed zone, quiet dwell FM %u ms, DMR %u ms, P25 %u ms\n",
 	       (unsigned)(v.q_ms[FS_M_FM] / v.q_n[FS_M_FM]), (unsigned)dmr, (unsigned)p25);
 	/* A signal: held as in classic (FM: the squelch open, the hold), and the wait after it */
@@ -354,6 +357,58 @@ static void test_fastscan_semantics(void)
 	printf("Faster scan: holds, the switch, the counters\n");
 }
 
+/* A priority look in the wait after a call, ended quiet on the tick, tunes back to the wait's channel (RESUME): a poll
+ * inside the noise reading's dip right after that retune must not open the squelch (a false hold that starts the wait
+ * again, a look in each). Verifier's case on 7db7c7b, where the poll's wait required the listen phase */
+#include "radio/scanprio.h"
+static void test_fastscan_prio_look(void)
+{
+	unsigned looks = 0, false_holds = 0, late = 0;
+	for (uint32_t seed = 1; seed <= 12; seed++) {
+		fx_setup(16, true, FX_FM, 6, -105, 0, 0);
+		fx.rand = seed * 40503u;
+		fx_codeplug();
+		start();
+		native_lab_init();
+		fake_power.switch_on = classic_on;
+		fake_power.battery_mv = classic_battery;
+		classic_busy = classic_stop = classic_receiving = false;
+		fs_set_fast(true);
+		radio_scan_prio_set(scanprio_pack(11, 0));	/* channel 11: position 10 */
+		fx.overs = 1;
+		fx.t0[0] = now + 1500u + fx_rand(400);
+		fx.len[0] = 3000u;
+		fx_begin_scan();
+		uint32_t end = fx.t0[0] + fx.len[0], left = 0;
+		bool looking = false;
+		uint8_t was = SCAN_PH_LISTEN;
+		while ((int32_t)(now - end - 4000u) < 0) {
+			fx_ms();
+			if ((int32_t)(now - end) < 0) {
+				was = sm.scan.phase;
+				continue;
+			}
+			bool at_wait = sm.view.zone_pos == fx.pos && hw.rx_hz == fx_hz(fx.pos);
+			bool at_prio = hw.rx_hz == fx_hz(10);
+			if (at_prio && !looking && left == 0)
+				looks++;
+			looking = at_prio;
+			/* the wait held again with nothing on the air: a squelch opened on the dip */
+			if (at_wait && left == 0 && was == SCAN_PH_RESUME && sm.scan.phase == SCAN_PH_HOLD)
+				false_holds++;
+			was = sm.scan.phase;
+			if (left == 0 && !at_wait && !at_prio)
+				left = now;
+		}
+		if (left == 0 || left - end > sm.set.scan_delay_ms + 400u)
+			late++;
+	}
+	radio_scan_prio_set(0);
+	CHECK(looks >= 6 && false_holds == 0 && late == 0);
+	printf("Faster scan: a priority look in the wait, ended on the tick: %u looks in 12 waits, %u false holds, "
+	       "%u waits late\n", looks, false_holds, late);
+}
+
 /* --- The table: classic -> fast --- */
 
 typedef struct {
@@ -362,24 +417,30 @@ typedef struct {
 	uint8_t kind;
 	int16_t dbm;
 	uint8_t leak;
+	uint8_t njit;
 } fx_row_t;
 
 static const fx_row_t fx_rows[] = {
-	{ "quiet-fm", true, FX_NONE, 0, 0 },
-	{ "quiet-mix", false, FX_NONE, 0, 0 },
-	{ "fm-105", false, FX_FM, -105, 0 },
-	{ "fm-107", false, FX_FM, -107, 0 },
-	{ "fm-edge", false, FX_FM_EDGE, 0, 0 },
-	{ "dmr-room", false, FX_DMR, -60, 0 },
-	{ "dmr-room-leak", false, FX_DMR, -60, 40 },
-	{ "dmr-95", false, FX_DMR, -95, 0 },
-	{ "p25-95", false, FX_P25, -95, 0 },
+	{ "quiet-fm", true, FX_NONE, 0, 0, 0 },
+	{ "quiet-mix", false, FX_NONE, 0, 0, 0 },
+	{ "quiet-mix-jit6", false, FX_NONE, 0, 0, 6 },
+	{ "fm-105", false, FX_FM, -105, 0, 0 },
+	{ "fm-105-jit6", false, FX_FM, -105, 0, 6 },
+	{ "fm-107", false, FX_FM, -107, 0, 0 },
+	{ "fm-107-jit6", false, FX_FM, -107, 0, 6 },
+	{ "fm-edge", false, FX_FM_EDGE, 0, 0, 0 },
+	{ "dmr-room", false, FX_DMR, -60, 0, 0 },
+	{ "dmr-room-jit6", false, FX_DMR, -60, 0, 6 },
+	{ "dmr-room-leak", false, FX_DMR, -60, 40, 0 },
+	{ "dmr-95", false, FX_DMR, -95, 0, 0 },
+	{ "dmr-95-jit6", false, FX_DMR, -95, 0, 6 },
+	{ "p25-95", false, FX_P25, -95, 0, 0 },
 };
 
 static int test_fastscan_table(void)
 {
 	static const uint16_t sizes[] = { 16, 32, 80 };
-	static const double taus[] = { 0, 5, 10, 20 };
+	static const double taus[] = { 0, 5, 10, 20, 30 };
 	int before = failures;
 	unsigned seeds = 4;
 	const char *env = getenv("FASTSCAN_SEEDS");
@@ -391,7 +452,7 @@ static int test_fastscan_table(void)
 	for (unsigned ri = 0; ri < sizeof fx_rows / sizeof fx_rows[0]; ri++) {
 		const fx_row_t *row = &fx_rows[ri];
 		for (unsigned si = 0; si < 3; si++) {
-			for (unsigned ti = 0; ti < 4; ti++) {
+			for (unsigned ti = 0; ti < 5; ti++) {
 				if (row->kind == FX_NONE && ti > 0)
 					continue;	/* a quiet zone's time doesn't depend on the lag */
 				fx_res_t sum[2];
@@ -403,6 +464,7 @@ static int test_fastscan_table(void)
 						/* the signal's channel: an FM one (the row's kind replaces it) away from the start */
 						fx_setup(sizes[si], row->all_fm, row->kind, (uint16_t)(sizes[si] / 2u + seed % 3u),
 							 row->dbm, row->leak, taus[ti]);
+						fx.njit = row->njit;
 						fx_res_t r = fx_run(a == 1, seed * 7919u + ri * 31u + si, row->kind == FX_NONE ? 20000 : 120000);
 						sum[a].overs += r.overs;
 						sum[a].caught += r.caught;
@@ -418,17 +480,22 @@ static int test_fastscan_table(void)
 				       sum[0].caught, sum[1].caught, sum[0].overs, med[0] / 1000.0, med[1] / 1000.0,
 				       sum[1].missed);
 				/* The checks: never slower; in a quiet zone nothing held; every over classic catches, fast catches
-				 * too (summed over the seeds) with a lag up to 10 ms; never a stop ended by the fast rule while the
-				 * signal was on the air: DMR, P25 and FM 3 dB over the squelch line with a lag up to 20 ms, FM 1 dB
-				 * over it up to 10 ms (around the squelch line: printed, not checked; classic misses there too) */
+				 * too (summed over the seeds), and no stop is ended by the fast rule while the signal is on the air:
+				 * with a lag up to 20 ms for FM 3 dB over the squelch line (noise jitter +-6 or not), FM 1 dB over it
+				 * without jitter, DMR (leak, jitter) and P25; FM 1 dB over with jitter up to 10 ms; at 30 ms DMR and
+				 * P25 without jitter. The rest is printed, not checked (the limits: docs/plus.md); around the
+				 * squelch line classic misses too */
 				CHECK(pass1 < pass0);
 				CHECK(sum[0].holds_quiet == 0 && sum[1].holds_quiet == 0);
 				CHECK(sum[0].overs == sum[1].overs);
-				if (taus[ti] <= 10)
+				bool weak_fm = row->kind == FX_FM && row->dbm < -105;
+				bool checked = row->kind != FX_FM_EDGE &&
+					       (taus[ti] <= 10 || (taus[ti] <= 20 && !(weak_fm && row->njit != 0)) ||
+						((row->kind == FX_DMR || row->kind == FX_P25) && row->njit == 0));
+				if (checked) {
 					CHECK(sum[1].caught >= sum[0].caught);
-				if (row->kind == FX_DMR || row->kind == FX_P25 || (row->kind == FX_FM && row->dbm >= -105) ||
-				    (row->kind == FX_FM && taus[ti] <= 10))
 					CHECK(sum[1].missed == 0);
+				}
 				if (sum[1].caught < sum[0].caught)
 					printf("NOTE %s n %u tau %.0f: fast caught fewer\n", row->name, (unsigned)sizes[si], taus[ti]);
 			}
@@ -441,6 +508,7 @@ int main(void)
 {
 	int before = failures;
 	test_fastscan_semantics();
+	test_fastscan_prio_look();
 	int t = test_fastscan_table();
 	printf("Faster scan radio core: %d checks, %d failures (table %d)\n", checks, failures - before, t);
 	return failures != before;

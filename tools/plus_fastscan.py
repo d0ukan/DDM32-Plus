@@ -60,15 +60,18 @@ def prepare_fastscan(transform, install):
         ('void radio_sm_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n',
          'void radio_sm_tick(radio_sm_t *sm, uint32_t now_ms)\n{\n'
          '#if CONFIG_SCAN_FAST\n\tfsc_tick(sm, now_ms);\t// DDM32 Plus faster scan: a quiet stop moves on here\n#endif\n'),
-        # the poll's squelch waits while a stop the tick stepped to is younger than a classic stop's first poll
+        # the poll's squelch doesn't open while the tick's retune is younger than a classic stop's first poll (only the
+        # opening: VOX, roaming and the floor tracking run as always)
         ('\t\tscan_talked(&sm->scan, now_ms);\t// transmitting: the wait after it starts when it ends\n\t}\n#endif\n#endif\n',
          '\t\tscan_talked(&sm->scan, now_ms);\t// transmitting: the wait after it starts when it ends\n\t}\n#endif\n'
          '#if CONFIG_SCAN_FAST\n'
-         '\tif (fsc_guard(sm, now_ms)) {\n'
-         '\t\toutputs(sm);\n'
-         '\t\treturn;\t\t// DDM32 Plus faster scan: a reading this soon after the retune never opens the squelch\n'
-         '\t}\n'
+         '\tbool fsc_hush = fsc_guard(sm, now_ms);\t// DDM32 Plus faster scan: the squelch waits after the tick\'s retune\n'
          '#endif\n#endif\n'),
+        ('\tbool opens = (listening || (sm->view.tone_ok && (sq == 0 || st.noise < open_below))) && !dual_peeking(sm);\n',
+         '\tbool opens = (listening || (sm->view.tone_ok && (sq == 0 || st.noise < open_below))) && !dual_peeking(sm);\n'
+         '#if CONFIG_SCAN_FAST\n'
+         '\topens = opens && !fsc_hush;\t// DDM32 Plus faster scan: not on a reading right after the tick\'s retune\n'
+         '#endif\n'),
     ])
 
     # The switch: held 0 on Home while a zone or VFO scan runs (a short 0 still skips, ui_scanx.c)

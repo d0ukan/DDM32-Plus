@@ -12,8 +12,10 @@
 // mode's time (FS_SPAN_MS; DMR a TDMA frame, FS_SPAN_DMR_MS) the scan steps at once, as its dwell's end would
 // (scan_step: the priority channel, nuisance delete, the zone or band order are all its).
 //
-// After a step made on the tick the poll's squelch waits until the stop is FS_POLL_GUARD_MS old (a classic stop's
-// first poll is that old), so a reading right after the retune never opens it. The counters (scanfast.c) follow every
+// After a step made on the tick the poll's squelch doesn't open until the retune is FS_POLL_GUARD_MS old (a classic
+// stop's first poll is that old), so a reading right after the retune never opens it: a new stop, and the return from a
+// priority look to the wait it interrupted (radio_scanprio.inc scx_step: phase RESUME there). Only the opening waits:
+// the rest of the poll (VOX, roaming, the floor) runs as always. The counters (scanfast.c) follow every
 // stop from here: the scan's own probe and hold counts say which stops heard something.
 
 static uint16_t fsc_steps;	// scan_t.steps when last looked at
@@ -130,12 +132,13 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 	fsc_observe(sm);
 }
 
-// radio_sm_poll after the scan's service: true while a stop the tick stepped to is younger than a classic stop is at
-// its first poll (the squelch waits). By the stop, not the algorithm: the switch to classic takes effect at the stop
+// radio_sm_poll's squelch: true while the receiver's last retune was the tick's step and is younger than a classic
+// stop is at its first poll (the squelch doesn't open yet). By the retune, not the phase or the algorithm: a quiet
+// priority look ended on the tick tunes back to its wait (RESUME), and the switch to classic takes effect at the stop
 // the tick has just stepped to, which is as young
 static bool fsc_guard(const radio_sm_t *sm, uint32_t now_ms)
 {
 	const scan_t *sc = &sm->scan;
-	return scan_on(sc) && fsc_kind(sm) && fsc_stepped && sc->tuned_ms == fsc_stepped_ms && sc->phase == SCAN_PH_LISTEN &&
-	       sm->view.state == RS_IDLE && now_ms - sc->tuned_ms < FS_POLL_GUARD_MS;
+	return scan_on(sc) && fsc_kind(sm) && fsc_stepped && sc->tuned_ms == fsc_stepped_ms && sm->view.state == RS_IDLE &&
+	       now_ms - sc->tuned_ms < FS_POLL_GUARD_MS;
 }

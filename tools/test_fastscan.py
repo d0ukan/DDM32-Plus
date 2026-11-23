@@ -132,7 +132,7 @@ def model(ROOT, APP, OUT, host):
                        '\n#define main classic_radio_main\n#include "' + str(ROOT / 'tests/classic/test_radio.inc') +
                        '"\n#undef main\n#include "' + str(ROOT / 'tests/plus/test_fastscan_radio.inc') + '"\n')
     argv = radio_argv(ROOT, APP, OUT, host, wrapper, 'test_radio_fastscan_model')
-    run([*argv, '-lm'], cwd=host)
+    run([*argv, '-DCONFIG_SCAN_PRIO=1', '-lm'], cwd=host)
     run([OUT / 'test_radio_fastscan_model'], cwd=host)
 
 

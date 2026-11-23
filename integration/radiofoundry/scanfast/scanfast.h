@@ -3,7 +3,7 @@
  * scan move on from a quiet channel as soon as its readings say it is quiet, not after the whole dwell. No RTOS, no
  * hardware: the radio core (radio_scanfast.inc) reads the receiver on its 10 ms tick and hands the readings here.
  *
- *  - Per stop: from FS_SETTLE_MS after the retune, every reading is tested against the scan's own carrier rule with a
+ *  - Per stop: from FS_SETTLE_MS (30 ms) after the retune, every reading is tested against the scan's own carrier rule with a
  *    margin (radio_scanfast.inc). One reading that is not clearly quiet hands the stop back to the classic rules for
  *    the rest of it (dwell, probe, hold: the scan as in v1.0.0). Once the quiet readings span the mode's time with no
  *    two more than FS_GAP_MS apart, the stop is quiet and the scan moves on. A late reading starts the span again.
@@ -17,16 +17,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define FS_SETTLE_MS	20u	/* a reading this soon after the retune is not used: the receiver's noise reading reads
-				 * low (a carrier) for a moment after a frequency change */
+#define FS_SETTLE_MS	30u	/* a reading this soon after the retune is not used: the receiver's noise reading reads
+				 * low (a carrier) for a moment after a frequency change, and a new carrier may show late
+				 * (verifier: 30, so a reading lagging 20 ms still shows an FM carrier 1 dB over the line) */
 #define FS_GAP_MS	12u	/* readings further apart than this (a late tick) start the span again */
-#define FS_SPAN_MS	20u	/* a continuous carrier (FM, P25, YSF, NXDN, dPMR): three readings 10 ms apart, so a
-				 * reading that lags the carrier by up to about 20 ms still shows it (host model) */
+#define FS_SPAN_MS	20u	/* a continuous carrier (FM, P25, YSF, NXDN, dPMR): three readings 10 ms apart (30-50 ms
+				 * after the retune) */
 #define FS_SPAN_DMR_MS	60u	/* DMR: one whole 60 ms TDMA frame (a direct mode burst is on air 27.5 ms of it) */
-#define FS_NOISE_MARGIN	4u	/* a quiet reading's noise is at least this far above the squelch's opening line */
+#define FS_NOISE_MARGIN	8u	/* a quiet reading's noise is at least this far above the squelch's opening line (2 dB
+				 * at the model's 4 a dB; the floor reads about 50 above it, so a quiet zone doesn't mind) */
 #define FS_RSSI_MARGIN	6	/* ... and (digital modes) its strength this many dB under the DMR strength line */
-#define FS_POLL_GUARD_MS 25u	/* after a step made on the tick, the radio core's squelch waits this long (the age a
-				 * classic stop's first poll has) */
+#define FS_POLL_GUARD_MS 25u	/* after a step made on the tick (to a stop, or back from a priority look to the wait),
+				 * the radio core's squelch doesn't open until the retune is this old (the age a classic
+				 * stop's first poll has) */
 
 enum { FS_M_FM, FS_M_DMR, FS_M_P25, FS_M_OTHER, FS_MODES };	/* P25 counts YSF (the native receiver's modes) */
 enum { FS_WAIT, FS_QUIET, FS_CLASSIC };				/* fs_feed's verdict */
