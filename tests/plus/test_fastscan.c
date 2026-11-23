@@ -17,51 +17,52 @@ static fs_stop_t stop_at(uint32_t t)
 
 static void test_feed(void)
 {
+	const uint32_t S = FS_SETTLE_MS;	/* 30 */
 	/* FM: readings before the settle are not used; three readings 10 ms apart after it end the stop */
 	fs_stop_t s = stop_at(1000);
-	CHECK(fs_feed(&s, 1010, true, FS_SPAN_MS) == FS_WAIT && s.first_ms == 1000);
-	CHECK(fs_feed(&s, 1019, false, FS_SPAN_MS) == FS_WAIT && s.state == FS_ST_SAMPLING);	/* still settling */
-	CHECK(fs_feed(&s, 1020, true, FS_SPAN_MS) == FS_WAIT && s.first_ms == 1020);
-	CHECK(fs_feed(&s, 1030, true, FS_SPAN_MS) == FS_WAIT);
-	CHECK(fs_feed(&s, 1040, true, FS_SPAN_MS) == FS_QUIET && s.state == FS_ST_DONE);
-	CHECK(fs_feed(&s, 1050, true, FS_SPAN_MS) == FS_WAIT);	/* done: nothing more */
+	CHECK(fs_feed(&s, 1000 + S - 10, true, FS_SPAN_MS) == FS_WAIT && s.first_ms == 1000);
+	CHECK(fs_feed(&s, 1000 + S - 1, false, FS_SPAN_MS) == FS_WAIT && s.state == FS_ST_SAMPLING);	/* still settling */
+	CHECK(fs_feed(&s, 1000 + S, true, FS_SPAN_MS) == FS_WAIT && s.first_ms == 1000 + S);
+	CHECK(fs_feed(&s, 1010 + S, true, FS_SPAN_MS) == FS_WAIT);
+	CHECK(fs_feed(&s, 1020 + S, true, FS_SPAN_MS) == FS_QUIET && s.state == FS_ST_DONE);
+	CHECK(fs_feed(&s, 1030 + S, true, FS_SPAN_MS) == FS_WAIT);	/* done: nothing more */
 
 	/* One reading not clearly quiet: the classic rules for the rest of the stop, whatever follows */
 	s = stop_at(2000);
-	CHECK(fs_feed(&s, 2020, true, FS_SPAN_MS) == FS_WAIT);
-	CHECK(fs_feed(&s, 2030, false, FS_SPAN_MS) == FS_CLASSIC && s.state == FS_ST_CLASSIC);
-	CHECK(fs_feed(&s, 2040, true, FS_SPAN_MS) == FS_WAIT && fs_feed(&s, 2050, true, FS_SPAN_MS) == FS_WAIT);
+	CHECK(fs_feed(&s, 2000 + S, true, FS_SPAN_MS) == FS_WAIT);
+	CHECK(fs_feed(&s, 2010 + S, false, FS_SPAN_MS) == FS_CLASSIC && s.state == FS_ST_CLASSIC);
+	CHECK(fs_feed(&s, 2020 + S, true, FS_SPAN_MS) == FS_WAIT && fs_feed(&s, 2030 + S, true, FS_SPAN_MS) == FS_WAIT);
 
 	/* DMR: the readings must span a whole 60 ms frame */
 	s = stop_at(3000);
 	uint8_t v = FS_WAIT;
-	uint32_t t = 3020;
-	for (; t <= 3200 && v == FS_WAIT; t += 10)
+	uint32_t t = 3000 + S;
+	for (; t <= 3300 && v == FS_WAIT; t += 10)
 		v = fs_feed(&s, t, true, FS_SPAN_DMR_MS);
-	CHECK(v == FS_QUIET && t - 10 == 3080);
+	CHECK(v == FS_QUIET && t - 10 == 3000 + S + 60);
 
 	/* A late reading (more than FS_GAP_MS after the last) starts the span again: DMR never steps on a gap that
 	 * could hide a burst */
 	fs_stats_t before, after;
 	fs_view(0, &before);
 	s = stop_at(4000);
-	CHECK(fs_feed(&s, 4020, true, FS_SPAN_DMR_MS) == FS_WAIT);
-	CHECK(fs_feed(&s, 4030, true, FS_SPAN_DMR_MS) == FS_WAIT);
-	CHECK(fs_feed(&s, 4060, true, FS_SPAN_DMR_MS) == FS_WAIT && s.first_ms == 4060);	/* 30 ms gap */
+	CHECK(fs_feed(&s, 4000 + S, true, FS_SPAN_DMR_MS) == FS_WAIT);
+	CHECK(fs_feed(&s, 4010 + S, true, FS_SPAN_DMR_MS) == FS_WAIT);
+	CHECK(fs_feed(&s, 4040 + S, true, FS_SPAN_DMR_MS) == FS_WAIT && s.first_ms == 4040 + S);	/* 30 ms gap */
 	fs_view(0, &after);
 	CHECK(after.late == (uint16_t)(before.late + 1u));
 	v = FS_WAIT;
-	for (t = 4072; t <= 4300 && v == FS_WAIT; t += 12)	/* 12 ms apart: still a span */
+	for (t = 4052 + S; t <= 4400 && v == FS_WAIT; t += 12)	/* 12 ms apart: still a span */
 		v = fs_feed(&s, t, true, FS_SPAN_DMR_MS);
-	CHECK(v == FS_QUIET && t - 12 == 4060 + 60);
+	CHECK(v == FS_QUIET && t - 12 == 4040 + S + 60);
 	/* Off (the classic algorithm): never a verdict */
 	s = stop_at(5000);
 	s.state = FS_ST_OFF;
 	CHECK(fs_feed(&s, 5100, true, FS_SPAN_MS) == FS_WAIT && fs_feed(&s, 5110, false, FS_SPAN_MS) == FS_WAIT);
 	/* A gap of exactly FS_GAP_MS is no gap */
 	s = stop_at(6000);
-	CHECK(fs_feed(&s, 6020, true, FS_SPAN_DMR_MS) == FS_WAIT);
-	CHECK(fs_feed(&s, 6032, true, FS_SPAN_DMR_MS) == FS_WAIT && s.first_ms == 6020);
+	CHECK(fs_feed(&s, 6000 + S, true, FS_SPAN_DMR_MS) == FS_WAIT);
+	CHECK(fs_feed(&s, 6012 + S, true, FS_SPAN_DMR_MS) == FS_WAIT && s.first_ms == 6000 + S);
 	printf("Faster scan engine: settle, span, late readings, the hand-over, DMR's frame\n");
 }
 
