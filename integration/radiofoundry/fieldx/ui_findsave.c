@@ -5,7 +5,7 @@
  * Every write goes through the zone editor's queue (ui_svc_zone_edit, run as a storage job by ui_svc_storage.c, the
  * foreign codeplug question included): ZONE_OP_NEW for the zone, then one ZONE_OP_ADD_NEW a find (the channel
  * editor's "Copy here": the channel written at a free number and put at the zone's end in one job, checked before
- * anything is written). One step a UI tick, the next only once the queue is empty and the step is seen in the
+ * anything is written; with CONFIG_CHAN_EXTRAS ZONE_OP_ADD_JOIN: the same and into "All channels" too). One step a UI tick, the next only once the queue is empty and the step is seen in the
  * codeplug (the zone found again by its name: a zone index can move). A step that did not land (a refusal, whose
  * own toast said why, a full codeplug, a full zone) ends the save with the count so far.
  *
@@ -142,7 +142,11 @@ static bool __attribute__((noinline)) post_add(uint16_t pos, uint16_t num, const
 {
 	zone_op_t op;
 	memset(&op, 0, sizeof op);
+#if CONFIG_CHAN_EXTRAS
+	op.kind = ZONE_OP_ADD_JOIN;	/* the find zone at pos and All channels (zone_join.inc): Home steps through the finds too */
+#else
 	op.kind = ZONE_OP_ADD_NEW;
+#endif
 	op.zone = fs.zone;
 	op.pos = pos;
 	op.channel = num;

@@ -3711,6 +3711,28 @@ channels renamed, the rollback on a failing zone write, the 16-channel layout), 
 steps onto the new channel; another zone, a Find & save zone, the VFO, dual watch with B selected on another zone, All
 channels renamed; All channels full said; the Zone options row). Radio test rows Z-1b..Z-1d.
 
+#### Find & save and DOTA into All channels (v1.0.1 candidate, branch `allch2`)
+
+Owner, v1.0.0: Home (Up / Down, the knob) reached 26 channels, Channels listed 33. Home on "All channels" steps zone 0's
+stored list (a copy made when the radio stored its first zone); every channel made after that must be put in it by the
+write that makes it. Audit of every path that creates a channel on the radio:
+
+| Path | Joins All channels? |
+|---|---|
+| Channel editor: New from current, Save as new channel, the VFO's copy, Copy here | yes (`ZONE_OP_ADD_JOIN`, beta.7) |
+| Tools > Repeaters `*` | yes (`ZONE_OP_ADD_JOIN`, beta.8) |
+| Find & save (`#` on the search lists, hold OK on a find) | **no until v1.0.1**: `ZONE_OP_ADD_NEW` into "Bulunanlar N" only; now `ZONE_OP_ADD_JOIN` at the find zone's end |
+| DOTA import (one channel, selected channels, new zone, DOTA Clone) | **no until v1.0.1**: only the target / new zone; now `zone_edit_join_all` after the commit (one write, skips what zone 0 holds) |
+| CPS / the PC programmer | writes a whole codeplug, zones included (the PC tool's own zone 0) |
+| Zones > Add channel / Create New Zone | picks existing channels; no new channel |
+
+`zone_edit_join_all` (zone_join.inc) does nothing on virtual zones or when All channels was renamed. When zone 0 is full the
+ones that do not fit stay out and the toast says "All channels full, not in it: ch N". A failed zone-0 write is
+noted as "In no zone: channel N" and never undoes the import. Channels made by v1.0.0 are repaired by hand: Zones > All
+channels > Zone options > "Add unzoned channels". Tests: `test_find_and_import_join` in `tests/plus/test_zone_cap.c`
+(the owner's shape: 26 channels, a find zone, seven finds, All channels 33; an import's zone; zone 0 full; renamed) and
+`tests/plus/test_dota_import.c` built with `CONFIG_CHAN_EXTRAS`.
+
 #### Repeaters as channels (beta.8, branch `rptadd`)
 
 Owner's request: in Tools > Repeaters, one key adds the selected repeater as a new channel in the zone the radio is in.

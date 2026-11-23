@@ -3,6 +3,21 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## v1.0.1 (candidate, not released yet)
+
+- Home stopped at channel 26 of 33 (owner's report 2026-11-23, v1.0.0). Cause, besides channels made before beta.7 that
+  were never repaired: two channel-making paths still wrote their channels into their own zone only, never into "All
+  channels" (zone 0, a stored copy once the radio has a zone). Find & save (`#` in a search, hold OK on a find) put
+  its channels in "Bulunanlar N" only, and a DOTA import (a new zone, the end of a zone, DOTA Clone's zones) into that
+  zone only. So Home on All channels, Up / Down and the knob, did not reach them while Channels listed them. Fixed:
+  Find & save now saves each find with the same single write as New from current (`ZONE_OP_ADD_JOIN`: "Bulunanlar N"
+  at its end and All channels), and a DOTA import adds its new channels to All channels after the commit
+  (`zone_edit_join_all`, one write; those already in it are skipped; All channels full: the first that did not fit is
+  said, "All channels full, not in it: ch N"; the import itself is never undone by it). All channels renamed: nothing
+  joins it, as before. Channels already stranded by v1.0.0 are repaired once by hand: Zones > All channels >
+  Zone options > "Add unzoned channels". Host-tested only (tests/plus/test_zone_cap.c `test_find_and_import_join`,
+  tests/plus/test_dota_import.c with `CONFIG_CHAN_EXTRAS`). FLASH +220 B (880,600 B, 97.72 %), RAM +0 B (2,072 B free).
+
 ## v1.0.0 (2026-11-23, first stable release)
 
 - Tools > ISS: a row "Show orbit" (Turkish "Yörüngeyi göster") under "Auto track" opens the sky plot with OK, exactly

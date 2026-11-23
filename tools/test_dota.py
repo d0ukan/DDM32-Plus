@@ -31,6 +31,13 @@ def main(ROOT, APP, OUT, flags, host):
          core / 'codeplug/zone_settle.c', core / 'settings/settings.c', core / 'storage/storage.c',
          host / 'sim/sim_flash.c', '-o', OUT / 'test_dota_import'], cwd=ROOT)
     run([OUT / 'test_dota_import'], cwd=ROOT)
+    # The same with the zone editor's All channels join (CONFIG_CHAN_EXTRAS: zone_join.inc): an import's channels are in
+    # All channels too
+    run(['clang', *flags, *dota, '-DCONFIG_CHAN_EXTRAS=1', '-I' + str(host), tp / 'test_dota_import.c',
+         core / 'radio/dota_import.c', core / 'radio/dota_rec.c', *codeplug, core / 'codeplug/zone_edit.c',
+         core / 'codeplug/zone_shift.c', core / 'codeplug/zone_settle.c', core / 'settings/settings.c',
+         core / 'storage/storage.c', host / 'sim/sim_flash.c', '-o', OUT / 'test_dota_import_all'], cwd=ROOT)
+    run([OUT / 'test_dota_import_all'], cwd=ROOT)
     # Two whole sessions talking (dota.c twice: a_* sends, b_* receives) over fake FM and DMR transports
     api = ('dota_selection', 'dota_on', 'dota_start', 'dota_stop', 'dota_view', 'dota_ptt_prompt_clear',
            'dota_job_wanted', 'dota_job', 'dota_begin', 'dota_owns_radio',

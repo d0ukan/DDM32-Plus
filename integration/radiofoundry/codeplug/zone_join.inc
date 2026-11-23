@@ -127,3 +127,31 @@ zone_edit_result_t zone_edit_add_unzoned(uint16_t zone)
 	storage_unlock();
 	return r;
 }
+
+/* Channels already written (a DOTA import: staged, then committed) at the end of "All channels" (zone 0 while it keeps
+ * that name), those it holds already skipped, in one write. Zone 0 full: the ones that did not fit stay out and the note
+ * says the first (ZONE_NOTE_NOT_ALL); a failed write is noted as in no zone. Virtual zones or All channels renamed:
+ * nothing to do (ZONE_EDIT_NO_ZONE). The channels are in their own zone either way, so a failure here never undoes them */
+zone_edit_result_t zone_edit_join_all(const uint16_t *numbers, uint16_t count)
+{
+	storage_lock();
+	zone_edit_result_t r = ZONE_EDIT_NO_ZONE;
+	if (count != 0 && codeplug_zones_stored() && load(0) == ZONE_EDIT_OK && all_zone()) {
+		uint16_t had = work.count, left = 0;
+		r = ZONE_EDIT_OK;
+		for (uint16_t i = 0; i < count; i++) {
+			if (zone_list_find(&work, numbers[i]) >= 0)
+				continue;
+			if (zone_list_insert(&work, work.count, numbers[i], codeplug_zone_capacity()) != ZONE_EDIT_OK && left == 0)
+				left = numbers[i];
+		}
+		if (work.count != had)
+			r = write_back(0);
+		if (r != ZONE_EDIT_OK)
+			note(ZONE_NOTE_NO_ZONE, numbers[0]);
+		else if (left != 0)
+			note(ZONE_NOTE_NOT_ALL, left);
+	}
+	storage_unlock();
+	return r;
+}

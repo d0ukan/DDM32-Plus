@@ -302,6 +302,10 @@ static void test_new_zone(void)
 	dota_imp_undo(&im);
 	CHECK(shown(true) == before_all);
 	/* again, committed */
+#if CONFIG_CHAN_EXTRAS
+	zone_t all;
+	uint16_t all0 = codeplug_zone(0, &all) ? all.count : 0;
+#endif
 	CHECK(dota_imp_begin(&im, &cfg, &m, 3, &fc, &fz, &room) == DOTA_R_OK);
 	stage_all();
 	CHECK(dota_imp_commit(&im));
@@ -309,6 +313,12 @@ static void test_new_zone(void)
 	zone_t z;
 	int zi = find_zone("Far 2", &z);
 	CHECK(zi >= 0 && z.count == T_CH - 1);
+#if CONFIG_CHAN_EXTRAS
+	/* the new zone's channels are in All channels (zone 0) too: Home on it steps through them */
+	CHECK(all0 > 0 && codeplug_zone(0, &all) && strcmp(all.name, "All channels") == 0 && all.count == all0 + T_CH - 1);
+	for (int i = 0; i < z.count && zi >= 0; i++)
+		CHECK(zone_list_find(&all, z.channels[i]) >= 0);
+#endif
 	/* the channels in order, receive only, the DMR ones with their contact and list, P25 with its tag */
 	contact_t ct;
 	int k = 0;

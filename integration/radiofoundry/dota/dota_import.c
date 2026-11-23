@@ -290,6 +290,18 @@ static void unique_name(dota_imp_t *im, char *name)
 		zone_copy_name(name, base);
 }
 
+/* The channels just made, im->rec.numbers (count of them), into "All channels" as well: a zone made by an import is not
+ * the zone Home steps through when that is All channels (zone_join.inc; a failure does not undo the import) */
+static void join_all(const dota_imp_t *im, uint16_t count)
+{
+#if CONFIG_CHAN_EXTRAS
+	(void)zone_edit_join_all(im->rec.numbers, count);
+#else
+	(void)im;
+	(void)count;
+#endif
+}
+
 /* A new zone named name with the channels in im->rec.numbers */
 static bool make_zone(dota_imp_t *im, const char *name, uint16_t count)
 {
@@ -327,14 +339,21 @@ bool dota_imp_commit(dota_imp_t *im)
 	if (im->kind != DOTA_KIND_CLONE) {
 		if (count == 0)
 			return true;	/* nothing this radio can receive: nothing to add */
-		if (im->cfg.mode == DOTA_IMP_NEW)
-			return make_zone(im, im->cfg.name, count);
+		if (im->cfg.mode == DOTA_IMP_NEW) {
+			if (!make_zone(im, im->cfg.name, count))
+				return false;
+			join_all(im, count);
+			return true;
+		}
 		zone_t *z = &im->z;
 		if (!codeplug_zone(im->cfg.zone, z))
 			return false;
 		for (uint16_t i = 0; i < count && z->count < CODEPLUG_ZONE_MAX; i++)
 			z->channels[z->count++] = numbers[i];
-		return codeplug_set_zone(im->cfg.zone, z);
+		if (!codeplug_set_zone(im->cfg.zone, z))
+			return false;
+		join_all(im, count);	/* the zone it was added to may be any one */
+		return true;
 	}
 	/* DOTA Clone: each staged zone in order under the sender's name. Each takes the lowest free slot, which is where
 	 * the next one was staged (the ranks shift by the zones already made); a zone left empty is passed over */
@@ -357,6 +376,7 @@ bool dota_imp_commit(dota_imp_t *im)
 		}
 		if (!make_zone(im, name, count))
 			return false;
+		join_all(im, count);
 	}
 	return true;
 }

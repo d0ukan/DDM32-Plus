@@ -248,6 +248,63 @@ static void test_copy_into_all(void)
 	CHECK(holds(1, (const uint16_t[]){ 11 }, 1));
 }
 
+/* Find & save (ui_findsave.c) and a DOTA import (dota_import.c): their channels are in All channels as well as in the
+ * "Bulunanlar N" / new zone, so Home on All channels steps through them (owner 2026-11-23: 26 of 33) */
+static void test_find_and_import_join(void)
+{
+	fresh();
+	for (uint16_t n = 1; n <= 26; n++) {
+		channel_t c = kind_of(n);
+		CHECK(codeplug_set_channel(n, &c));
+	}
+	uint16_t at, n;
+	zone_t z;
+	CHECK(zone_edit_join_all((const uint16_t[]){ 1 }, 1) == ZONE_EDIT_NO_ZONE);	/* virtual zones: nothing to do */
+	CHECK(zone_edit_new("Bulunanlar 1", &at) == ZONE_EDIT_OK && at == 1);
+	/* Find & save: the finds at the find zone's end (an explicit position, as ui_findsave posts) and into All channels */
+	for (uint16_t k = 0; k < 7; k++) {
+		channel_t f = kind_of((uint16_t)(27u + k));
+		CHECK(zone_edit_add_join(1, k, (uint16_t)(27u + k), &f) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_IDLE);
+	}
+	CHECK(holds(1, (const uint16_t[]){ 27, 28, 29, 30, 31, 32, 33 }, 7));
+	CHECK(codeplug_zone(0, &z) && z.count == 33 && z.channels[26] == 27 && z.channels[32] == 33);
+	for (uint16_t k = 27; k <= 33; k++)
+		CHECK(!unzoned(k));
+	/* An import: channels written and put in a new zone (the staged commit), then joined; twice does nothing new */
+	for (uint16_t k = 40; k <= 42; k++) {
+		channel_t f = kind_of(k);
+		CHECK(codeplug_set_channel(k, &f));
+	}
+	zone_t d = zone_of("Imported", (const uint16_t[]){ 40, 41, 42 }, 3);
+	CHECK(zone_edit_create(&d, &at) == ZONE_EDIT_OK && unzoned(40) == false);
+	const uint16_t got[] = { 40, 41, 42 };
+	CHECK(zone_edit_join_all(got, 3) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_IDLE);
+	CHECK(codeplug_zone(0, &z) && z.count == 36 && z.channels[33] == 40 && z.channels[35] == 42);
+	CHECK(zone_edit_join_all(got, 3) == ZONE_EDIT_OK && codeplug_zone(0, &z) && z.count == 36);
+	/* All channels full: what fits goes in, the first that did not is said */
+	for (uint16_t k = 50; k < 50u + 60u; k++) {
+		channel_t f = kind_of(k);
+		CHECK(codeplug_set_channel(k, &f));
+	}
+	uint16_t many[60];
+	for (uint16_t i = 0; i < 60; i++)
+		many[i] = (uint16_t)(50u + i);
+	CHECK(zone_edit_join_all(many, 60) == ZONE_EDIT_OK && last_note(&n) == ZONE_NOTE_NOT_ALL && n == 50u + 44u);
+	CHECK(codeplug_zone(0, &z) && z.count == 80 && z.channels[79] == 50u + 43u);
+	/* All channels renamed: an ordinary zone, nothing joins it */
+	fresh();
+	for (uint16_t k = 1; k <= 3; k++) {
+		channel_t f = kind_of(k);
+		CHECK(codeplug_set_channel(k, &f));
+	}
+	CHECK(zone_edit_new("X", &at) == ZONE_EDIT_OK && zone_edit_rename(0, "Mine") == ZONE_EDIT_OK);
+	CHECK(codeplug_zone(0, &z) && strcmp(z.name, "Mine") == 0);
+	uint16_t kept = z.count;
+	channel_t g = kind_of(20);
+	CHECK(codeplug_set_channel(20, &g) && zone_edit_join_all((const uint16_t[]){ 20 }, 1) == ZONE_EDIT_NO_ZONE);
+	CHECK(codeplug_zone(0, &z) && z.count == kept && zone_list_find(&z, 20) < 0);
+}
+
 /* A codeplug with the old 16-channel zone records (layout byte past 4): All channels holds 16, then it is full */
 static void test_legacy16(void)
 {
@@ -282,6 +339,7 @@ int main(void)
 	test_zone_grows();
 	test_drop_channel();
 	test_new_joins();
+	test_find_and_import_join();
 	test_legacy16();
 	test_copy_into_all();
 	printf("Plus zone capacity and Delete channel: %s\n", failures ? "FAILED" : "all passed");
