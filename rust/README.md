@@ -43,6 +43,42 @@ navigates or opens folders and links, never starts a radio step; no page is left
 panel or the search log holds the port; the same gate sits in `navigate()` (`App.menu-radio-locked`, `tests/menu.rs`). It is hidden on the first-start
 language screen. Menu bar: ui/menubar.slint.
 
+At the bar's right end the **cable control** ("Kablo: COM14 (otomatik) [Değiştir]" / "Cable: COM14 (auto) [Change]")
+shows the port a radio step will use and opens the cable picker: **Auto (CH340)** (the default: the lowest-numbered
+CH340 / CH341 cable, VID 1A86 PID 7523 / 5523, as before), each CH340 cable found, and under **Advanced** every other
+serial port the OS lists (com0com / tty0tty virtual pairs marked "not a radio", last) with the warning "not a CH340
+cable, only if you know your cable". The choice is kept in `settings.json` (`port`, `port_auto`); when the saved port is
+gone the window falls back to Auto and says so (the saved choice stays and is used again when the port comes back).
+Ports come only from the OS's lists (`radio::portpick`, `radio::cable`: SetupAPI on Windows, `serialport`'s list in a
+`radio` build); the picker never opens a port to probe it. The list is read again on Rescan, when the picker opens and
+every 3 s (Slint 1.16 has no window-focus or device-change event, so a short poll covers both). The port in use is
+shown on Health, Live, Search log, Data packs, Backups (restore) and the update wizard's backup and install steps; the
+control is locked while a radio job, the live view or the search log holds the port. Tests: `tests/ports.rs`.
+
+## Versions and the update question
+
+The window's title and Home's bottom bar say "Program 3.0.0 · Radio firmware 1.0.1" ("Telsiz firmware" in Turkish);
+About lists both numbers separately. The radio's version is what the program knows from the newest verified backup
+(its program image's signed application); before the first backup it says "not read yet", and "unknown" for an image
+it does not recognise, never a guess. Home's firmware line compares that with the newest version the channel offers:
+"up to date (1.0.1)", "a new radio firmware is ready: 1.0.2 (the radio runs 1.0.1)", or only the newest when the
+radio's version is not known. Known limit: right after an install the newest backup still holds the old image, so Home
+shows the old version until the next backup.
+
+After the start-up check (Settings > "check at start") one dialog asks when something is newer: "Program 3.0.0 →
+3.1.0" and / or "Radio firmware 1.0.1 → 1.0.2" (only when the radio runs a listed DDM32 Plus older than the newest),
+each with **Update now**, and **Later** / **Skip this version** for both. Update now for the program runs the existing
+self-update (Windows: download, size and SHA-256 from the signed manifest, stage, helper, restart; Linux / macOS: the
+release page opens); for the firmware it opens the update wizard at its first step with that version selected and
+never starts a radio step: the backup and every step still start from the user's own click. Later asks again at the
+next start (not again in this session for the same versions); Skip stores `skip_program_version` /
+`skip_firmware_version` in `settings.json` (the versions list and Settings still allow that version by hand). The
+question waits while a radio job, the live view or the search log holds the port, and comes when the port is free.
+While the window stays open the list is checked again every 24 h. A failed check is no longer swallowed: it is
+appended to `logs/update-check.log` and shown as a small dismissable line on Home. The program update follows the
+firmware list's rule: on the default channel, while no stable program build has been published, the betas are offered.
+Tests: `tests/updates.rs`.
+
 ## Radio access
 
 A serial port exists only in a build with the **`radio` feature** (off by default). Without it no code path can open a
@@ -68,7 +104,7 @@ steps wait while it holds the port. Details: docs/plus.md "Search log on the PC"
 
 Inside it: `backups/` (every backup and every install log: the user never chooses another folder; updates and the
 uninstaller never delete it), `releases/` (downloaded releases), `updates/` (program updates), `packs/` (data
-packs), `settings.json`. On Windows the older programs' backup folders (`%LOCALAPPDATA%\DDM32Plus`, `DDM25Plus`, and the
+packs), `logs/` (search log CSVs, `update-check.log`), `settings.json`. On Windows the older programs' backup folders (`%LOCALAPPDATA%\DDM32Plus`, `DDM25Plus`, and the
 C# install folder when this program lives elsewhere) are found and read, never changed. `DDM32_DATA` overrides the
 folder (tests, screenshots).
 

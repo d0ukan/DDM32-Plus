@@ -105,6 +105,16 @@ install is locked and the page points to "Yedekler ve geri dönüş".
 - The CH340 missing-driver hint on Windows (SetupAPI / CfgMgr32 device list, no port opened).
 - The Windows setup builds with Inno Setup 7 into `rust/dist/`.
 
+### Done 2026-11-24 (v1.1.0 candidate; Rust becomes the only programmer)
+
+- The start-up update question (one dialog; Update now / Later / Skip this version; waits while the port is held;
+  24 h re-check), failed checks in `logs/update-check.log` and on Home, Home's firmware line against what the radio
+  runs, the program update's beta fallback (`src/updates.rs`, `tests/updates.rs`).
+- The cable picker in the menu bar (Auto (CH340), each CH340 cable, Advanced: every other OS port; `settings.json`
+  `port` / `port_auto`; fallback to Auto; `ddm32-core` `radio::portpick`, `tests/ports.rs`).
+- "Program 3.0.0 · Radio firmware 1.0.1" in the title bar and on Home; About lists both. README "Versions and the
+  update question". Host-tested only.
+
 ### Still to do in stage 2
 
 - Done 2026-11-21 (third run): keyboard order, Enter on the primary button, screen reader names, 150 % / 200 %

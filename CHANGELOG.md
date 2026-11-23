@@ -3,6 +3,31 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## v1.1.0 (candidate, not released yet)
+
+Programmer (Rust, `rust/`; the version numbers are not bumped yet). The Rust program becomes the only programmer for
+Windows, Linux and macOS; host-tested only (fakes, no serial port, no network), not yet run against a radio.
+
+- Start-up update question: after the start-up check one dialog asks when something is newer, "Program 3.0.0 → 3.1.0"
+  and / or "Radio firmware 1.0.1 → 1.0.2", with Update now / Later / Skip this version. Update now runs the existing
+  signed self-update on Windows (the release page opens on Linux / macOS); for the firmware it only opens the update
+  wizard with that version selected, never a radio step by itself. Skip is stored in `settings.json`
+  (`skip_program_version`, `skip_firmware_version`); Later asks again at the next start. The question waits while a
+  radio job, the live view or the search log holds the port. Re-checked every 24 h while the window stays open.
+- A failed update check is no longer swallowed: `logs/update-check.log` and a dismissable line on Home. The Check
+  button no longer stays at "Checking…" after a failure.
+- Home's firmware line compares the newest version with what the radio runs (by the newest verified backup): "up to
+  date" instead of "a new version is ready" when they are equal.
+- The program update gets the firmware list's beta fallback: on the default channel, while no stable program build
+  exists, the betas are offered.
+- Cable picker in the menu bar ("Cable: COM14 (auto) [Change]"): Auto (CH340, as before), each CH340 cable, and under
+  Advanced every other serial port the OS lists (com0com pairs marked, with a "not a CH340 cable" warning). Kept in
+  `settings.json` (`port`, `port_auto`); a saved port that is gone falls back to Auto and says so. Ports are only
+  listed, never opened to probe. The port in use is shown on Health, Live, Search log, Data packs, Backups and the
+  wizard's radio steps.
+- One version line in the title bar and on Home: "Program 3.0.0 · Radio firmware 1.0.1" ("Telsiz firmware" in
+  Turkish; "not read yet" / "unknown" when the program does not know); About lists both separately.
+
 ## v1.0.1 (2026-11-24)
 
 - Home stopped at channel 26 of 33 (owner's report 2026-11-23, v1.0.0). Cause, besides channels made before beta.7 that

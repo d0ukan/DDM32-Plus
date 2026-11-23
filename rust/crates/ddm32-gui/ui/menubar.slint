@@ -70,10 +70,64 @@ component MenuHead inherits Rectangle {
     }
 }
 
+// the cable control at the bar's right end: "Cable: COM14 (auto)" and its Change button (opens the picker)
+component CableHead inherits HorizontalLayout {
+    in property <string> text;
+    in property <bool> enabled;
+    callback clicked;
+    spacing: 8px;
+    padding-right: 4px;
+    alignment: end;
+    Text {
+        text: root.text;
+        color: Theme.text-muted;
+        font-size: Theme.font-small;
+        vertical-alignment: center;
+        overflow: elide;
+        horizontal-stretch: 1;
+        min-width: 60px;
+    }
+    Rectangle {
+        min-height: 32px;
+        min-width: max(64px, cl.preferred-width + 20px);
+        horizontal-stretch: 0;
+        border-radius: Theme.radius;
+        border-width: cfs.has-focus ? 2px : 1px;
+        border-color: cfs.has-focus ? Theme.focus : Theme.border;
+        background: !root.enabled ? Theme.disabled : cta.has-hover ? Theme.button-hover : Theme.button;
+        accessible-role: button;
+        accessible-label: Tr.t(Tr.lang, "b_change") + " — " + root.text;
+        accessible-enabled: root.enabled;
+        accessible-action-default => { if root.enabled { root.clicked(); } }
+        cfs := FocusScope {
+            enabled: root.enabled;
+            key-pressed(event) => {
+                if (event.text == " " || event.text == "\n") && root.enabled { root.clicked(); return accept; }
+                reject
+            }
+        }
+        cl := Text {
+            text: Tr.t(Tr.lang, "b_change");
+            color: root.enabled ? Theme.button-text : Theme.disabled-text;
+            font-size: Theme.font-small;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        cta := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => { root.clicked(); }
+        }
+    }
+}
+
 export component MenuBar inherits Rectangle {
     // locked: a radio step, the live panel or the search log holds the port (or an install / backup / update runs):
     // no page is left and the window is not closed until it has stopped
     in property <bool> radio-locked;
+    // the cable picker's header text; Change opens the picker (not while the port is held)
+    in property <string> cable-text;
+    callback cable-clicked;
     callback action(string);
     background: Theme.surface;
     min-height: 33px;
@@ -82,7 +136,7 @@ export component MenuBar inherits Rectangle {
     HorizontalLayout {
         padding-left: 4px;
         padding-bottom: 1px;
-        alignment: start;
+        alignment: stretch;
         MenuHead {
             text: Tr.t(Tr.lang, "m_file");
             entries: [
@@ -124,6 +178,12 @@ export component MenuBar inherits Rectangle {
                 { text: Tr.t(Tr.lang, "home_about"), action: "page:5", enabled: !root.radio-locked },
             ];
             chosen(a) => { root.action(a); }
+        }
+        if root.cable-text != "" : CableHead {
+            horizontal-stretch: 1;
+            text: root.cable-text;
+            enabled: !root.radio-locked;
+            clicked => { root.cable-clicked(); }
         }
     }
     Rectangle {

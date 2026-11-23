@@ -123,6 +123,9 @@ fn every_screen_in_both_themes() {
         ("first-start", 6, 0, 0, ""),
         ("home", 0, 0, 0, ""),
         ("home-cable-no-driver", 0, 0, 0, "nodriver"),
+        ("home-update-prompt", 0, 0, 0, "prompt"),
+        ("home-cable-picker", 0, 0, 0, "picker"),
+        ("home-check-error", 0, 0, 0, "check-error"),
         ("update-1-version", 1, 0, 0, ""),
         ("update-2-backup-choice", 1, 1, 0, ""),
         ("update-2-no-backup-warning", 1, 1, 2, "understood"),
@@ -181,13 +184,30 @@ fn every_screen_in_both_themes() {
                     app.set_radio_text(t.into());
                     app.set_radio_kind(k.into());
                 }
+                match *extra {
+                    "prompt" => {
+                        let offer = ddm32_gui::UpdateOffer {
+                            program: Some(("3.0.0".into(), "3.1.0".into())),
+                            firmware: Some(("1.0.0".into(), "1.0.1".into())),
+                        };
+                        ddm32_gui::show_prompt(&ui, lang, &offer);
+                    }
+                    "picker" => {
+                        ui.global::<ddm32_gui::Radio>().set_picker_open(true);
+                        ui.global::<ddm32_gui::Radio>().set_picker_advanced(true);
+                    }
+                    "check-error" => app
+                        .set_check_error(i18n::tf(lang, "check_failed", "NetError: api.github.com: timed out").into()),
+                    _ => {}
+                }
                 // switch the theme live on this very page
                 theme.set_dark(dark);
                 let buf = render(&window);
                 // the window background follows the theme at once (Home's bottom corner is its facts bar, a surface)
                 let bg = if *page == 0 { theme.get_surface() } else { theme.get_window() };
                 let corner = buf[(H as usize - 2) * W as usize + 2];
-                if *extra != "confirm" {
+                let modal = matches!(*extra, "confirm" | "prompt" | "picker");
+                if !modal {
                     assert_eq!(
                         (bg.red(), bg.green(), bg.blue()),
                         (corner.r, corner.g, corner.b),
@@ -195,12 +215,21 @@ fn every_screen_in_both_themes() {
                     );
                 }
                 // the header row is a surface bar across the top on every page
-                if !matches!(*name, "first-start") && *extra != "confirm" {
+                if !matches!(*name, "first-start") && !modal {
                     let s = theme.get_surface();
                     let top = buf[2 * W as usize + W as usize / 2];
                     assert_eq!((s.red(), s.green(), s.blue()), (top.r, top.g, top.b), "{name} {dark}: no header row");
                 }
-                if lang == "tr" || matches!(*name, "home" | "update-2-backup-choice" | "update-3-backup-power") {
+                if lang == "tr"
+                    || matches!(
+                        *name,
+                        "home"
+                            | "update-2-backup-choice"
+                            | "update-3-backup-power"
+                            | "home-update-prompt"
+                            | "home-cable-picker"
+                    )
+                {
                     let file = format!("{name}-{}-{lang}.png", if dark { "dark" } else { "light" });
                     save_png(&dir.join(file), &buf);
                 }

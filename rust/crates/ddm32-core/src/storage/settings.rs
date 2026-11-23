@@ -11,6 +11,12 @@ pub const INCLUDE_BETA_KEY: &str = "include_beta";
 pub const DISCLAIMER_KEY: &str = "disclaimer";
 pub const THEME_KEY: &str = "theme";
 pub const BACKUP_FOLDERS_KEY: &str = "backup_folders";
+/// The serial port the user chose in the cable picker, and whether the automatic choice (the CH340 cable) is used.
+pub const PORT_KEY: &str = "port";
+pub const PORT_AUTO_KEY: &str = "port_auto";
+/// A version the start-up update question was told to skip ("Skip this version"); it can still be chosen by hand.
+pub const SKIP_PROGRAM_KEY: &str = "skip_program_version";
+pub const SKIP_FIRMWARE_KEY: &str = "skip_firmware_version";
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -125,6 +131,42 @@ impl Settings {
         }
         list.push(folder.to_string_lossy().into_owned());
         self.save(BACKUP_FOLDERS_KEY, Value::Array(list.into_iter().map(Value::String).collect()))
+    }
+
+    /// The cable picker's choice: automatic (the CH340 cable, the default) or one port by name.
+    pub fn port_pref(&self) -> crate::radio::portpick::PortPref {
+        let s = self.load();
+        let port = s.get(PORT_KEY).and_then(Value::as_str).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string);
+        let auto = s.get(PORT_AUTO_KEY).and_then(Value::as_bool).unwrap_or(true);
+        crate::radio::portpick::PortPref { auto: auto || port.is_none(), port }
+    }
+
+    pub fn set_port_pref(&self, pref: &crate::radio::portpick::PortPref) -> std::io::Result<()> {
+        let mut s = self.load();
+        s.insert(PORT_AUTO_KEY.into(), Value::Bool(pref.auto));
+        match &pref.port {
+            Some(p) => s.insert(PORT_KEY.into(), Value::String(p.clone())),
+            None => s.remove(PORT_KEY),
+        };
+        self.write(&s)
+    }
+
+    /// The program version the start-up question skips (None: ask for every newer one).
+    pub fn skip_program_version(&self) -> Option<String> {
+        self.get_string(SKIP_PROGRAM_KEY).filter(|v| !v.is_empty())
+    }
+
+    pub fn set_skip_program_version(&self, version: &str) -> std::io::Result<()> {
+        self.save(SKIP_PROGRAM_KEY, Value::String(version.into()))
+    }
+
+    /// The radio firmware version the start-up question skips.
+    pub fn skip_firmware_version(&self) -> Option<String> {
+        self.get_string(SKIP_FIRMWARE_KEY).filter(|v| !v.is_empty())
+    }
+
+    pub fn set_skip_firmware_version(&self, version: &str) -> std::io::Result<()> {
+        self.save(SKIP_FIRMWARE_KEY, Value::String(version.into()))
     }
 
     /// The disclaimer was accepted for this text version.

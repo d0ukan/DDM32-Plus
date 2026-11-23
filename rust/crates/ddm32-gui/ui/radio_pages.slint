@@ -6,6 +6,7 @@ import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Choice, Progres
 
 export struct Fact { label: string, value: string }
 export struct TableRow { cells: [string] }
+export struct PortRow { name: string, detail: string }
 
 export global Radio {
     // health
@@ -41,6 +42,18 @@ export global Radio {
     in property <string> message-kind: "info";
     in property <bool> busy;
     in-out property <bool> show-raw;
+    // the cable picker (lib.rs scan_ports / show_ports): the header's text, the port a radio page uses, the lists.
+    // Ports come only from the OS's list; none is opened to choose.
+    in property <string> port-head;
+    in property <string> port-line;
+    in property <string> port-note;
+    in property <bool> port-auto: true;
+    in property <string> port-selected;
+    in property <string> port-auto-detail;
+    in property <[PortRow]> port-cables;
+    in property <[PortRow]> port-others;
+    in-out property <bool> picker-open;
+    in-out property <bool> picker-advanced;
 
     callback read-health();
     callback live-start();
@@ -53,11 +66,16 @@ export global Radio {
     callback search-changed(string);
     callback export-csv();
     callback navigate-home();
+    // "" = Auto (CH340)
+    callback port-choose(string);
+    callback port-rescan();
 }
 
 // a radio page: the header row across the window (home stays closed while the live reader runs), then the content
 component Screen inherits VerticalLayout {
     in property <string> heading;
+    // the port this page's radio step uses (my channels reads a backup only)
+    in property <bool> show-port: true;
     padding: 0;
     spacing: 0;
     PageHeader {
@@ -70,6 +88,7 @@ component Screen inherits VerticalLayout {
         padding: Theme.pad;
         spacing: Theme.gap;
         vertical-stretch: 1;
+        if root.show-port : Muted { text: Radio.port-line; }
         @children
     }
 }
@@ -214,6 +233,7 @@ export component ChannelsPage inherits Screen {
     // the columns' share of the table's width (fractions from the controller, one per column)
     property <length> cols-w: self.width - 2 * Theme.pad - 16px - 16px - 8px * 4 - 14px;
     heading: Tr.t(Tr.lang, "home_channels");
+    show-port: false;
     Muted { text: Radio.channels-source; }
     HorizontalLayout {
         spacing: 8px;

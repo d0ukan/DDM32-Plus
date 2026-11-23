@@ -5,8 +5,8 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, Progress, PageHeader } from "widgets.slint";
 import { MenuBar } from "menubar.slint";
-import { Radio, Fact, TableRow, HealthPage, LivePage, ChannelsPage, SearchLogPage } from "radio_pages.slint";
-export { Theme, Tr, Radio, Fact, TableRow }
+import { Radio, Fact, TableRow, PortRow, HealthPage, LivePage, ChannelsPage, SearchLogPage } from "radio_pages.slint";
+export { Theme, Tr, Radio, Fact, TableRow, PortRow }
 
 export struct VersionRow { version: string, label: string, notes: string, local: bool }
 export struct BackupRow { name: string, detail: string, origin: string, kind: string }
@@ -20,6 +20,22 @@ export global App {
     in property <string> update-text;
     in property <string> backups-text;
     in property <string> installed-text;
+    // "Program 3.0.0 · Radio firmware 1.0.1" (Home and the title bar); the radio's part only as the program knows it
+    in property <string> version-line;
+    in property <string> title-text: "DDM32 Plus - TA2DOU";
+    // a failed update check (written to logs/update-check.log too); dismissable
+    in property <string> check-error;
+    callback dismiss-check-error();
+    // the one question after the start-up check: "Program 3.0.0 -> 3.1.0" and / or "Radio firmware 1.0.1 -> 1.0.2"
+    in-out property <bool> prompt-open;
+    in property <string> prompt-program;
+    in property <string> prompt-program-detail;
+    in property <string> prompt-firmware;
+    in property <string> prompt-firmware-detail;
+    callback prompt-update-program();
+    callback prompt-update-firmware();
+    callback prompt-later();
+    callback prompt-skip();
     // the wizard: 0 version, 1 backup choice, 2 backup, 3 check, 4 install, 5 done
     in-out property <int> step: 0;
     in property <[VersionRow]> versions;
@@ -52,8 +68,9 @@ export global App {
     // settings
     in-out property <int> channel: 0;   // 0 Latest, 1 Beta, 2 Test / Alpha
     in-out property <bool> auto-check: true;
-    // about
+    // about: the program's version and what the radio runs (as the program knows it), each on its own line
     in property <string> version;
+    in property <string> installed-firmware;
     in property <string> data-folder;
     in property <string> key-id;
 
@@ -109,12 +126,12 @@ component Page inherits VerticalLayout {
 component Home inherits VerticalLayout {
     padding: 0;
     spacing: 0;
-    // the header row: the program's name, its version and the owner's mark (in the theme's own variant)
+    // the header row: the program's name and the owner's mark (in the theme's own variant); the versions are in the
+    // facts bar ("Program 3.0.0 · Radio firmware 1.0.1")
     PageHeader {
         heading: "DDM32 Plus";
         back: false;
         logo: Theme.dark ? @image-url("logo-dark.png") : @image-url("logo-light.png");
-        Muted { text: App.version; vertical-alignment: center; horizontal-stretch: 0; }
     }
     VerticalLayout {
         padding: Theme.pad;
@@ -123,6 +140,12 @@ component Home inherits VerticalLayout {
         // the cable and the version on offer
         Notice { text: App.radio-text; kind: App.radio-kind; }
         if App.update-text != "" : Muted { text: App.update-text; font-size: Theme.font; }
+        // a failed update check: one small line, dismissable
+        if App.check-error != "" : HorizontalLayout {
+            spacing: Theme.gap;
+            Muted { text: App.check-error; vertical-alignment: center; horizontal-stretch: 1; }
+            Button { text: Tr.t(Tr.lang, "b_dismiss"); horizontal-stretch: 0; clicked => { App.dismiss-check-error(); } }
+        }
         // the main action
         HorizontalLayout {
             padding-top: 6px;
@@ -167,7 +190,7 @@ component Home inherits VerticalLayout {
             VerticalLayout {
                 alignment: center;
                 spacing: 2px;
-                Label { text: App.installed-text; font-size: Theme.font-small; }
+                Label { text: App.version-line; font-size: Theme.font-small; }
                 Muted { text: App.backups-text + "  " + App.backups-folder; }
             }
             VerticalLayout {
@@ -267,6 +290,7 @@ component Wizard inherits Page {
             if App.step == 2 : VerticalLayout {
                 spacing: Theme.gap;
                 alignment: start;
+                Muted { text: Radio.port-line; }
                 Notice { text: App.power-prompt; kind: "warning"; big: true; }
                 HorizontalLayout {
                     alignment: start;
@@ -287,6 +311,7 @@ component Wizard inherits Page {
             if App.step == 4 : VerticalLayout {
                 spacing: Theme.gap;
                 alignment: start;
+                Muted { text: Radio.port-line; }
                 Notice { text: App.power-prompt; kind: "warning"; big: true; }
                 HorizontalLayout {
                     alignment: start;
@@ -353,6 +378,7 @@ component Wizard inherits Page {
 component Backups inherits Page {
     heading: Tr.t(Tr.lang, "home_backups");
     Muted { text: Tr.t(Tr.lang, "backups_where") + " " + App.backups-folder; }
+    Muted { text: Radio.port-line; }
     ScrollView {
         vertical-stretch: 1;
         VerticalLayout {
@@ -389,6 +415,7 @@ component Backups inherits Page {
 component Packs inherits Page {
     heading: Tr.t(Tr.lang, "home_packs");
     Label { text: Tr.t(Tr.lang, "packs_intro"); }
+    Muted { text: Radio.port-line; }
     HorizontalLayout {
         spacing: Theme.gap;
         alignment: start;
@@ -482,8 +509,11 @@ component About inherits Page {
                 min-height: av.preferred-height;
                 av := VerticalLayout {
                     padding: Theme.pad; spacing: 8px;
-                    Heading { text: "DDM32 Plus " + App.version; font-size: Theme.font-big; }
+                    Heading { text: "DDM32 Plus"; font-size: Theme.font-big; }
                     Label { text: Tr.t(Tr.lang, "about_text"); }
+                    Label { text: Tr.t(Tr.lang, "ab_program") + " " + App.version; }
+                    Label { text: Tr.t(Tr.lang, "ab_firmware") + " " + App.installed-firmware; }
+                    Muted { text: Tr.t(Tr.lang, "ver_source"); }
                     Muted { text: Tr.t(Tr.lang, "about_data") + " " + App.data-folder; }
                     Muted { text: Tr.t(Tr.lang, "about_key") + " " + App.key-id; }
                     Muted { text: "d0ukan · TA2DOU — github.com/d0ukan/DDM32-Plus"; }
@@ -512,7 +542,7 @@ component FirstStart inherits VerticalLayout {
 }
 
 export component AppWindow inherits Window {
-    title: "DDM32 Plus - TA2DOU";
+    title: App.title-text;
     // the title bar and taskbar icon (the program's logo, as the setup's shortcuts)
     icon: @image-url("../../../packaging/art/ddm32plus.png");
     preferred-width: 900px;
@@ -527,7 +557,9 @@ export component AppWindow inherits Window {
         spacing: 0;
         if App.page != 6 : MenuBar {
             radio-locked: App.menu-radio-locked || App.confirm-open;
+            cable-text: Radio.port-head;
             action(a) => { App.menu-action(a); }
+            cable-clicked => { Radio.picker-open = true; Radio.port-rescan(); }
         }
         Rectangle {
             vertical-stretch: 1;
@@ -542,6 +574,102 @@ export component AppWindow inherits Window {
         if App.page == 8 : LivePage {}
         if App.page == 9 : ChannelsPage {}
         if App.page == 10 : SearchLogPage { app-busy: App.busy; }
+        }
+    }
+
+    // the one update question after the start-up check (never while a radio job holds the port; lib.rs consider_prompt).
+    // A firmware update only opens the wizard: every radio step still starts from the user's own click.
+    if App.prompt-open : Rectangle {
+        background: Theme.scrim;
+        TouchArea {}
+        Card {
+            width: min(parent.width - 48px, 600px);
+            height: min(pv.preferred-height, parent.height - 32px);
+            pv := VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap;
+                Title { text: Tr.t(Tr.lang, "prompt_title"); }
+                if App.prompt-program != "" : VerticalLayout {
+                    spacing: 6px;
+                    Heading { text: App.prompt-program; }
+                    Muted { text: App.prompt-program-detail; }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button { text: Tr.t(Tr.lang, "b_update_now"); kind: "primary"; default-focus: true; clicked => { App.prompt-update-program(); } }
+                    }
+                }
+                if App.prompt-firmware != "" : VerticalLayout {
+                    spacing: 6px;
+                    Heading { text: App.prompt-firmware; }
+                    Muted { text: App.prompt-firmware-detail; }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button { text: Tr.t(Tr.lang, "b_update_now"); kind: "primary"; default-focus: App.prompt-program == ""; clicked => { App.prompt-update-firmware(); } }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    Button { text: Tr.t(Tr.lang, "b_skip_version"); clicked => { App.prompt-skip(); } }
+                    Button { text: Tr.t(Tr.lang, "b_later"); clicked => { App.prompt-later(); } }
+                }
+            }
+        }
+    }
+
+    // the cable picker: Auto (CH340), each CH340 cable, and under Advanced every other port the OS lists
+    if Radio.picker-open : Rectangle {
+        background: Theme.scrim;
+        TouchArea {}
+        Card {
+            width: min(parent.width - 48px, 600px);
+            height: min(kv.preferred-height, parent.height - 32px);
+            kv := VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap;
+                Title { text: Tr.t(Tr.lang, "port_title"); }
+                Muted { text: Tr.t(Tr.lang, "port_intro"); }
+                ScrollView {
+                    vertical-stretch: 1;
+                    min-height: min(pl.preferred-height, 120px);
+                    preferred-height: pl.preferred-height;
+                    pl := VerticalLayout {
+                        spacing: 8px;
+                        padding-right: 8px;
+                        alignment: start;
+                        Choice {
+                            title: Tr.t(Tr.lang, "port_auto"); detail: Radio.port-auto-detail;
+                            selected: Radio.port-auto;
+                            clicked => { Radio.port-choose(""); }
+                        }
+                        for p in Radio.port-cables : Choice {
+                            title: p.name; detail: p.detail;
+                            selected: !Radio.port-auto && Radio.port-selected == p.name;
+                            clicked => { Radio.port-choose(p.name); }
+                        }
+                        HorizontalLayout {
+                            alignment: start;
+                            Button {
+                                text: (Radio.picker-advanced ? "− " : "+ ") + Tr.t(Tr.lang, "port_advanced");
+                                clicked => { Radio.picker-advanced = !Radio.picker-advanced; }
+                            }
+                        }
+                        if Radio.picker-advanced : Notice { text: Tr.t(Tr.lang, "port_advanced_warn"); kind: "warning"; }
+                        if Radio.picker-advanced : VerticalLayout {
+                            spacing: 8px;
+                            for p in Radio.port-others : Choice {
+                                title: p.name; detail: p.detail;
+                                selected: !Radio.port-auto && Radio.port-selected == p.name;
+                                clicked => { Radio.port-choose(p.name); }
+                            }
+                            if Radio.port-others.length == 0 : Muted { text: Tr.t(Tr.lang, "port_none_other"); }
+                        }
+                    }
+                }
+                if Radio.port-note != "" : Notice { text: Radio.port-note; kind: "warning"; }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    Button { text: Tr.t(Tr.lang, "b_rescan"); clicked => { Radio.port-rescan(); } }
+                    Button { text: Tr.t(Tr.lang, "b_close"); kind: "primary"; default-focus: true; clicked => { Radio.picker-open = false; } }
+                }
+            }
         }
     }
 

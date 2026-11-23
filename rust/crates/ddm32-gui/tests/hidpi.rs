@@ -84,8 +84,16 @@ fn scaled_150_and_200_percent() {
     let app = ui.global::<App>();
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/screenshots");
     std::fs::create_dir_all(&dir).unwrap();
-    // (name, page, wizard step)
-    let screens = [("home", 0, 0), ("update-1-version", 1, 0), ("update-2-backup-choice", 1, 1), ("settings", 4, 0)];
+    // (name, page, wizard step, dialog); a dialog is checked over an empty page (the page under its shade is not
+    // reachable while it is open)
+    let screens = [
+        ("home", 0, 0, ""),
+        ("update-1-version", 1, 0, ""),
+        ("update-2-backup-choice", 1, 1, ""),
+        ("settings", 4, 0, ""),
+        ("update-prompt", -1, 0, "prompt"),
+        ("cable-picker", -1, 0, "picker"),
+    ];
     for lang in ["tr", "en"] {
         ui.global::<Tr>().set_lang(lang.into());
         for (scale, tag) in [(1.5f32, "150"), (2.0, "200")] {
@@ -93,7 +101,7 @@ fn scaled_150_and_200_percent() {
             for (lw, lh) in [(900u32, 720u32), (640, 560)] {
                 let (w, h) = ((lw as f32 * scale) as u32, (lh as f32 * scale) as u32);
                 window.set_size(slint::PhysicalSize::new(w, h));
-                for (name, page, step) in screens {
+                for (name, page, step, dialog) in screens {
                     for dark in [false, true] {
                         ui.global::<Theme>().set_dark(dark);
                         ddm32_gui::demo(&ui);
@@ -103,6 +111,17 @@ fn scaled_150_and_200_percent() {
                         app.set_step(step);
                         app.set_backup_choice(0);
                         app.set_busy(false);
+                        if dialog == "prompt" {
+                            let offer = ddm32_gui::UpdateOffer {
+                                program: Some(("3.0.0".into(), "3.1.0".into())),
+                                firmware: Some(("1.0.0".into(), "1.0.1".into())),
+                            };
+                            ddm32_gui::show_prompt(&ui, lang, &offer);
+                        }
+                        if dialog == "picker" {
+                            ui.global::<ddm32_gui::Radio>().set_picker_open(true);
+                            ui.global::<ddm32_gui::Radio>().set_picker_advanced(true);
+                        }
                         let buf = render(&window, w, h);
                         let ls = ui.window().size().to_logical(scale);
                         assert!(

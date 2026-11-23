@@ -14,6 +14,7 @@ pub mod live;
 pub mod monitor;
 pub mod plan;
 pub mod port;
+pub mod portpick;
 pub mod progress;
 pub mod searchlog;
 pub mod tools;

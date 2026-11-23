@@ -7,6 +7,7 @@
 
 pub mod i18n;
 pub mod radio_pages;
+pub mod updates;
 
 slint::include_modules!();
 
@@ -14,7 +15,8 @@ use ddm32_core::datapacks::files::{self as packs, BuiltPack};
 use ddm32_core::pyjson::{self, Py};
 use ddm32_core::radio::codec::Codec;
 use ddm32_core::radio::flow::{FileSteps, Installable, RestoreFlow, StepResult, Wizard};
-use ddm32_core::radio::port::{cable_ports, RadioAccess, RawSerial, SystemClock};
+use ddm32_core::radio::port::{RadioAccess, RawSerial, SystemClock};
+use ddm32_core::radio::portpick::{self, PortOptions, PortPref, ResolvedPort};
 use ddm32_core::radio::progress::{ProgressEvent, ProgressView};
 use ddm32_core::radio::tools::ToolContext;
 use ddm32_core::radio::{cps, fast_install, tools, ToolError, ToolResult};
@@ -27,6 +29,7 @@ use ddm32_core::storage::{today, AppPaths, Os, Settings, Theme as SavedTheme};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+pub use updates::{newer_program, Installed, UpdateOffer};
 
 /// The controller's state (UI thread only).
 pub struct State {
@@ -63,6 +66,22 @@ pub struct State {
     pub slog_nofw: bool,
     /// The "CSV open in another program" message this page showed (cleared only while it is still the one shown)
     pub slog_lock_note: Option<String>,
+    /// The cable picker: the saved choice, what the OS lists now, the port a radio step uses now
+    pub port_pref: PortPref,
+    pub port_opts: PortOptions,
+    pub port_now: ResolvedPort,
+    /// What the radio runs as the program knows it (the newest verified backup)
+    pub installed: Installed,
+    /// The last failed update check (shown on Home until dismissed or a check succeeds)
+    pub check_error: Option<String>,
+    /// The start-up question: shown now, waiting for a radio job to end, answered "Later" in this session
+    pub prompt: Option<UpdateOffer>,
+    pub prompt_pending: bool,
+    pub prompt_later: Option<UpdateOffer>,
+    /// When the release list was last asked for (the 24 h re-check)
+    pub last_check: Option<std::time::Instant>,
+    /// The window's 3 s tick: port rescan, the waiting question, the 24 h re-check
+    pub tick: Option<slint::Timer>,
 }
 
 thread_local! {
@@ -107,24 +126,7 @@ pub fn label_in(lang: &str, l: ReleaseLabel) -> String {
 /// What the radio runs, read from a backup's program image: the DDM32 Plus release whose signed application is in it
 /// (with its label), or the kind of firmware.
 pub fn installed_line(program: &[u8], all: &[catalog::FirmwareVersion], lang: &str) -> String {
-    use ddm32_core::releases::signed_manifest::sha256_hex;
-    const START: usize = 0xC000;
-    for fv in all {
-        let n = fv.application_size() as usize;
-        if program.len() >= START + n && sha256_hex(&program[START..START + n]) == fv.application_sha256() {
-            return i18n::tf(lang, "installed", &format!("DDM32 Plus {}", version_line(fv, all, lang)));
-        }
-    }
-    let what = match ddm32_core::radio::unit_image::detect(program, Codec::dm32()) {
-        Ok(d) => match (d.str("layout"), d.str("firmware")) {
-            (Some("stock"), _) => i18n::tf(lang, "fw_stock", d.str("stock_version").unwrap_or("")),
-            (_, Some("ddm32")) => i18n::t(lang, "fw_ddm32_unlisted"),
-            (_, Some("classic")) => i18n::t(lang, "fw_classic"),
-            _ => i18n::t(lang, "fw_unknown"),
-        },
-        Err(_) => i18n::t(lang, "fw_unknown"),
-    };
-    i18n::tf(lang, "installed", &what)
+    updates::installed_text(&updates::installed_firmware(program, all, lang), lang)
 }
 
 /// A version as the home screen names it: the full version with its prerelease and its label,
@@ -181,8 +183,19 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             slog_started: None,
             slog_nofw: false,
             slog_lock_note: None,
+            port_pref: PortPref::default(),
+            port_opts: PortOptions::default(),
+            port_now: ResolvedPort::default(),
+            installed: Installed::NotRead,
+            check_error: None,
+            prompt: None,
+            prompt_pending: false,
+            prompt_later: None,
+            last_check: None,
+            tick: None,
         })
     });
+    with(|s| s.port_pref = s.settings.port_pref());
     wire(ui);
     radio_pages::wire(ui);
     refresh(ui);
@@ -207,8 +220,157 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
     }
     ddm32_core::update::self_update::cleanup(&updates, None);
     if fetch && auto {
-        load_catalog(ui.as_weak());
+        load_catalog(ui.as_weak(), true);
     }
+    if fetch {
+        start_tick(ui);
+    }
+}
+
+/// Every 3 s: the ports the OS lists (a cable plugged in or out, the window back in front; listing never opens a
+/// port), the update question that waited for a radio job, and the 24 h re-check while the window stays open.
+fn start_tick(ui: &AppWindow) {
+    let timer = slint::Timer::default();
+    let w = ui.as_weak();
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(3), move || {
+        let Some(ui) = w.upgrade() else { return };
+        scan_ports(&ui);
+        if with(|s| s.prompt_pending) {
+            consider_prompt(&ui);
+        }
+        let due = with(|s| {
+            s.settings.auto_check() && s.last_check.is_some_and(|t| t.elapsed().as_secs() >= updates::RECHECK_SECONDS)
+        });
+        if due && !port_held(&ui) {
+            load_catalog(ui.as_weak(), true);
+        }
+    });
+    with(|s| s.tick = Some(timer));
+}
+
+/// A radio job, the live view or the search log holds the port, or another dialog is open.
+fn port_held(ui: &AppWindow) -> bool {
+    let app = ui.global::<App>();
+    app.get_menu_radio_locked() || app.get_confirm_open() || ui.global::<Radio>().get_picker_open()
+}
+
+/// The OS's serial ports and the cable check, read without opening any port.
+fn list_ports() -> (ddm32_core::radio::cable::CableStatus, PortOptions) {
+    let status = ddm32_core::radio::cable::check();
+    let opts = portpick::options(&portpick::list_serial_ports_with(&status), Os::current());
+    (status, opts)
+}
+
+/// Reads the OS's port list (never opening a port) and shows what changed: the header, the port line of the radio
+/// pages, the picker's lists, Home's cable line.
+pub(crate) fn scan_ports(ui: &AppWindow) {
+    let (status, opts) = list_ports();
+    let changed = with(|s| {
+        let now = portpick::resolve(&s.port_pref, &opts, None);
+        let changed = s.port_opts != opts || s.port_now != now;
+        s.port_opts = opts.clone();
+        s.port_now = now;
+        changed
+    });
+    let app = ui.global::<App>();
+    if !RadioAccess::ENABLED {
+        app.set_radio_text(tr("radio_disabled").into());
+        app.set_radio_kind("warning".into());
+    } else {
+        let (text, kind) = with(|s| cable_text(&s.lang, &status, &opts.cables));
+        app.set_radio_text(text.into());
+        app.set_radio_kind(kind.into());
+    }
+    if changed || ui.global::<Radio>().get_port_head().is_empty() {
+        show_ports(ui);
+    }
+}
+
+/// The picker's texts and lists from the state (in the window's language).
+fn show_ports(ui: &AppWindow) {
+    let (lang, pref, opts, now) =
+        with(|s| (s.lang.clone(), s.port_pref.clone(), s.port_opts.clone(), s.port_now.clone()));
+    let v = port_view(&lang, &opts, &now);
+    let r = ui.global::<Radio>();
+    r.set_port_head(v.head.into());
+    r.set_port_line(v.line.into());
+    r.set_port_note(v.note.into());
+    r.set_port_auto(pref.auto || now.missing.is_some());
+    r.set_port_selected(now.port.clone().unwrap_or_default().into());
+    r.set_port_auto_detail(v.auto_detail.into());
+    set_port_rows(&r, v.cables, v.others);
+}
+
+fn set_port_rows(r: &Radio<'_>, cables: Vec<(String, String)>, others: Vec<(String, String)>) {
+    let rows = |list: Vec<(String, String)>| {
+        ModelRc::new(VecModel::from(
+            list.into_iter().map(|(n, d)| PortRow { name: n.into(), detail: d.into() }).collect::<Vec<_>>(),
+        ))
+    };
+    r.set_port_cables(rows(cables));
+    r.set_port_others(rows(others));
+}
+
+/// What the cable picker shows (tests/ports.rs).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PortView {
+    /// The header: "Cable: COM14 (auto)"
+    pub head: String,
+    /// The radio pages: "Port used: COM14 (auto)", with the fallback said
+    pub line: String,
+    /// The saved port is gone: "The saved port COM5 is not there; using Auto."
+    pub note: String,
+    /// Under "Auto (CH340)": the port Auto picks now
+    pub auto_detail: String,
+    /// (name, detail) of the CH340 cables and of every other port ("Advanced")
+    pub cables: Vec<(String, String)>,
+    pub others: Vec<(String, String)>,
+}
+
+pub fn port_view(lang: &str, opts: &PortOptions, now: &ResolvedPort) -> PortView {
+    let mut name = now.port.clone().unwrap_or_else(|| i18n::t(lang, "cable_none"));
+    if now.not_ch340 {
+        name = i18n::tf(lang, "port_not_ch340", &name);
+    }
+    if now.auto && now.port.is_some() {
+        name = i18n::tf(lang, "cable_auto", &name);
+    }
+    let note = now.missing.as_deref().map(|m| i18n::tf(lang, "port_missing", m)).unwrap_or_default();
+    let mut line = i18n::tf(lang, "port_line", &name);
+    if !note.is_empty() {
+        line = format!("{line}. {note}");
+    }
+    let auto_now = portpick::resolve(&PortPref::default(), opts, None).port;
+    PortView {
+        head: i18n::tf(lang, "cable_head", &name),
+        line,
+        note,
+        auto_detail: match auto_now {
+            Some(p) => i18n::tf(lang, "port_auto_d", &p),
+            None => i18n::t(lang, "port_auto_none"),
+        },
+        cables: opts.cables.iter().map(|c| (c.clone(), i18n::t(lang, "port_cable_d"))).collect(),
+        others: opts
+            .others
+            .iter()
+            .map(|o| (o.name.clone(), i18n::t(lang, if o.virtual_port { "port_virtual_d" } else { "port_other_d" })))
+            .collect(),
+    }
+}
+
+/// The picker's choice: "" is Auto. Saved at once (settings.json `port`, `port_auto`); never while the port is held.
+fn choose_port(ui: &AppWindow, name: &str) {
+    if ui.global::<App>().get_menu_radio_locked() {
+        return;
+    }
+    let pref = if name.is_empty() { PortPref::default() } else { PortPref::fixed(name) };
+    with(|s| {
+        s.port_pref = pref.clone();
+        s.settings.set_port_pref(&pref)
+    })
+    .ok();
+    scan_ports(ui);
+    show_ports(ui);
 }
 
 fn wire(ui: &AppWindow) {
@@ -297,7 +459,7 @@ fn wire(ui: &AppWindow) {
     app.on_app_check(move || {
         let ui = w.unwrap();
         ui.global::<App>().set_app_update_text(tr("pu_checking").into());
-        load_catalog(ui.as_weak());
+        load_catalog(ui.as_weak(), false);
     });
     let w = ui.as_weak();
     app.on_app_update(move || app_update(&w.unwrap()));
@@ -307,6 +469,128 @@ fn wire(ui: &AppWindow) {
         let dir = with(|s| s.paths.backups());
         open_folder(&dir);
     });
+    let w = ui.as_weak();
+    app.on_dismiss_check_error(move || {
+        with(|s| s.check_error = None);
+        w.unwrap().global::<App>().set_check_error("".into());
+    });
+    let w = ui.as_weak();
+    app.on_prompt_later(move || {
+        let ui = w.unwrap();
+        with(|s| s.prompt_later = s.prompt.take());
+        ui.global::<App>().set_prompt_open(false);
+    });
+    let w = ui.as_weak();
+    app.on_prompt_skip(move || {
+        let ui = w.unwrap();
+        with(|s| {
+            if let Some(offer) = s.prompt.take() {
+                let (p, f) = updates::skip_versions(&offer);
+                if let Some(p) = p {
+                    let _ = s.settings.set_skip_program_version(&p);
+                }
+                if let Some(f) = f {
+                    let _ = s.settings.set_skip_firmware_version(&f);
+                }
+            }
+        });
+        ui.global::<App>().set_prompt_open(false);
+    });
+    let w = ui.as_weak();
+    app.on_prompt_update_program(move || {
+        let ui = w.unwrap();
+        with(|s| s.prompt_later = s.prompt.take());
+        ui.global::<App>().set_prompt_open(false);
+        // the program update card shows the download, the signature check and the restart (Windows); elsewhere the
+        // release page opens
+        navigate(&ui, 4);
+        app_update(&ui);
+    });
+    let w = ui.as_weak();
+    app.on_prompt_update_firmware(move || {
+        let ui = w.unwrap();
+        let version = with(|s| {
+            let v = s.prompt.as_ref().and_then(|o| o.firmware.as_ref().map(|f| f.1.clone()));
+            s.prompt_later = s.prompt.take();
+            v
+        });
+        ui.global::<App>().set_prompt_open(false);
+        open_wizard_at(&ui, version.as_deref());
+    });
+    let r = ui.global::<Radio>();
+    let w = ui.as_weak();
+    r.on_port_choose(move |name| choose_port(&w.unwrap(), &name));
+    let w = ui.as_weak();
+    r.on_port_rescan(move || {
+        let ui = w.unwrap();
+        scan_ports(&ui);
+        show_ports(&ui);
+    });
+}
+
+/// The update wizard at its first step with this version selected. It never starts a radio step: the backup and
+/// every step after it start only from the user's own click.
+pub fn open_wizard_at(ui: &AppWindow, version: Option<&str>) {
+    navigate(ui, 1);
+    if let Some(v) = version {
+        if let Some(i) = with(|s| s.shown.iter().position(|f| f.version() == v)) {
+            ui.global::<App>().set_selected_version(i as i32);
+        }
+    }
+}
+
+/// After a check: the one question when something is newer (or later, when a radio job holds the port).
+pub fn consider_prompt(ui: &AppWindow) {
+    let app = ui.global::<App>();
+    if app.get_prompt_open() {
+        return;
+    }
+    let offer = with(|s| {
+        let cat = s.catalog.clone().unwrap_or_default();
+        updates::update_offer(
+            &cat,
+            app.get_channel(),
+            ddm32_core::app_info::VERSION,
+            &s.installed,
+            s.settings.skip_program_version().as_deref(),
+            s.settings.skip_firmware_version().as_deref(),
+        )
+    });
+    let later = with(|s| s.prompt_later.clone());
+    match updates::prompt_decision(&offer, later.as_ref(), port_held(ui), app.get_page() == 6) {
+        updates::PromptDecision::No => with(|s| s.prompt_pending = false),
+        updates::PromptDecision::Wait => with(|s| s.prompt_pending = true),
+        updates::PromptDecision::Show => {
+            let lang = with(|s| s.lang.clone());
+            show_prompt(ui, &lang, &offer);
+            with(|s| {
+                s.prompt_pending = false;
+                s.prompt = Some(offer);
+            });
+        }
+    }
+}
+
+/// Fills the question's texts and opens it.
+pub fn show_prompt(ui: &AppWindow, lang: &str, offer: &UpdateOffer) {
+    let app = ui.global::<App>();
+    let two = |k: &str, a: &str, b: &str| i18n::t(lang, k).replacen("{}", a, 1).replacen("{}", b, 1);
+    let (p, pd) = match &offer.program {
+        Some((cur, new)) => (
+            two("prompt_program", cur, new),
+            i18n::t(lang, if cfg!(windows) { "prompt_program_d" } else { "prompt_program_d_web" }),
+        ),
+        None => (String::new(), String::new()),
+    };
+    let (f, fd) = match &offer.firmware {
+        Some((cur, new)) => (two("prompt_firmware", cur, new), i18n::t(lang, "prompt_firmware_d")),
+        None => (String::new(), String::new()),
+    };
+    app.set_prompt_program(p.into());
+    app.set_prompt_program_detail(pd.into());
+    app.set_prompt_firmware(f.into());
+    app.set_prompt_firmware_detail(fd.into());
+    app.set_prompt_open(true);
 }
 
 /// What an entry of the menu bar does (the strings the menu's `action` callback carries).
@@ -438,15 +722,9 @@ pub fn offered(cat: &Catalog, channel: i32) -> Vec<catalog::FirmwareVersion> {
 fn refresh(ui: &AppWindow) {
     let app = ui.global::<App>();
     let channel = app.get_channel();
-    // the cable (listing ports never opens one)
-    if !RadioAccess::ENABLED {
-        app.set_radio_text(tr("radio_disabled").into());
-        app.set_radio_kind("warning".into());
-    } else {
-        let (text, kind) = with(|s| cable_text(&s.lang, &ddm32_core::radio::cable::check(), &cable_ports()));
-        app.set_radio_text(text.into());
-        app.set_radio_kind(kind.into());
-    }
+    // the cable and the port in use (listing ports never opens one)
+    scan_ports(ui);
+    show_ports(ui);
     // versions
     let rows = with(|s| {
         let cat = s.catalog.clone().unwrap_or_default();
@@ -464,10 +742,6 @@ fn refresh(ui: &AppWindow) {
             local: f.is_local(),
         })
         .collect();
-    app.set_update_text(match rows.first() {
-        Some(f) => trf("update_available", &version_line(f, &all, &lang)).into(),
-        None => tr("update_none").into(),
-    });
     if app.get_selected_version() as usize >= model.len() {
         app.set_selected_version(0);
     }
@@ -481,13 +755,18 @@ fn refresh(ui: &AppWindow) {
         (s.found.clone(), s.quick.clone())
     });
     app.set_backups_text(trf("backups_found", &found.len().to_string()).into());
-    // what the radio runs, by the newest verified backup (files only)
-    let installed = found
-        .iter()
-        .find_map(|b| ddm32_core::radio::unit_image::saved_images(&b.folder).ok())
-        .map(|imgs| installed_line(&imgs["progmem-pass1.bin"], &all, &lang))
-        .unwrap_or_else(|| tr("installed_none"));
-    app.set_installed_text(installed.into());
+    // what the radio runs, by the newest verified backup (files only), and the newest version against it
+    let folders: Vec<PathBuf> = found.iter().map(|b| b.folder.clone()).collect();
+    let installed = updates::installed_from_backups(&folders, &all, &lang);
+    app.set_installed_text(updates::installed_text(&installed, &lang).into());
+    let program = ddm32_core::app_info::VERSION;
+    app.set_version_line(updates::version_text(&lang, program, &installed).into());
+    app.set_title_text(updates::title_text(&lang, program, &installed).into());
+    app.set_installed_firmware(updates::installed_short(&installed, &lang).into());
+    let status = updates::firmware_status(&installed, &rows);
+    app.set_update_text(updates::firmware_status_text(&lang, &status, &rows, &all).into());
+    with(|s| s.installed = installed);
+    app.set_check_error(with(|s| s.check_error.clone()).unwrap_or_default().into());
     // the program's own update
     let channel = app.get_channel();
     let (text, available) = with(|s| match &s.catalog {
@@ -518,11 +797,6 @@ fn refresh(ui: &AppWindow) {
         })
         .collect();
     app.set_backups(ModelRc::new(VecModel::from(brows)));
-}
-
-/// The newer build of this program for this platform that the channel offers (prereleases from Beta on).
-pub fn newer_program(cat: &Catalog, current: &str, channel: i32) -> Option<catalog::AppRelease> {
-    cat.newer_app(current, channel >= 1).cloned()
 }
 
 /// Downloads the new program (size and SHA-256 from the signed manifest), stages it, starts the staged program as
@@ -579,17 +853,45 @@ fn app_update(ui: &AppWindow) {
     });
 }
 
-fn load_catalog(w: Weak<AppWindow>) {
-    let releases = with(|s| s.paths.releases());
+/// Asks GitHub for the signed release list in the background. A failure is never swallowed: it is written to
+/// `logs/update-check.log` and shown on Home (dismissable). `ask`: the start-up / 24 h check, which may ask the one
+/// update question; the Check button only refreshes the texts.
+fn load_catalog(w: Weak<AppWindow>, ask: bool) {
+    let releases = with(|s| {
+        s.last_check = Some(std::time::Instant::now());
+        s.paths.releases()
+    });
     std::thread::spawn(move || {
         let r = client::load_catalog(&releases, &HttpReleaseNet::real(), None, None);
         let _ = slint::invoke_from_event_loop(move || {
-            if let (Ok(cat), Some(ui)) = (r, w.upgrade()) {
-                with(|s| s.catalog = Some(cat));
-                refresh(&ui);
-            }
+            let Some(ui) = w.upgrade() else { return };
+            catalog_loaded(&ui, r.map_err(|e| e.0), ask);
         });
     });
+}
+
+/// The end of a release-list check (also driven by tests with a made-up result): the list replaces the cached one
+/// and, for the start-up check, the one question is considered; a failure goes to logs/update-check.log and Home.
+pub fn catalog_loaded(ui: &AppWindow, r: Result<Catalog, String>, ask: bool) {
+    match r {
+        Ok(cat) => {
+            with(|s| {
+                s.catalog = Some(cat);
+                s.check_error = None;
+            });
+            refresh(ui);
+            if ask {
+                consider_prompt(ui);
+            }
+        }
+        Err(e) => {
+            let logs = with(|s| s.paths.logs());
+            let _ = updates::log_check_error(&logs, &client::now_utc(), &e);
+            let text = trf("check_failed", &e);
+            with(|s| s.check_error = Some(text));
+            refresh(ui);
+        }
+    }
 }
 
 fn set_step(ui: &AppWindow, step: i32) {
@@ -608,8 +910,15 @@ fn set_step(ui: &AppWindow, step: i32) {
     set_message(ui, "", "info");
 }
 
+/// The port a radio step uses: the picker's choice while the OS lists it, else the CH340 cable (Auto). Read fresh
+/// from the OS's list (never by opening a port).
 pub(crate) fn port() -> Option<String> {
-    ddm32_core::radio::cable::check().port.or_else(|| cable_ports().into_iter().next())
+    let (_, opts) = list_ports();
+    with(|s| {
+        s.port_now = portpick::resolve(&s.port_pref, &opts, None);
+        s.port_opts = opts;
+        s.port_now.port.clone()
+    })
 }
 
 /// What Home says about the cable: Windows' device list (a missing CH340 driver is found without opening a port),
@@ -1077,10 +1386,18 @@ pub fn demo(ui: &AppWindow) {
     app.set_radio_text(i18n::tf(&lang, "radio_ready", "COM14").into());
     app.set_radio_kind("success".into());
     app.set_radio_access(true);
-    app.set_update_text(i18n::tf(&lang, "update_available", "1.0.0-beta.5 (Beta)").into());
+    let installed = Installed::Plus { version: "1.0.0".into(), label: i18n::t(&lang, "label_stable") };
+    let st = updates::FirmwareStatus::Newer { installed: "1.0.0".into(), newest: "1.0.1".into() };
+    app.set_update_text(updates::firmware_status_text(&lang, &st, &[], &[]).into());
     app.set_backups_text(i18n::tf(&lang, "backups_found", "3").into());
-    app.set_installed_text(i18n::tf(&lang, "installed", "DDM32 Plus 1.0.0-beta.4 (Beta)").into());
-    app.set_app_update_text(i18n::tf(&lang, "pu_available", "3.0.0-beta.1").into());
+    app.set_installed_text(updates::installed_text(&installed, &lang).into());
+    app.set_version_line(updates::version_text(&lang, ddm32_core::app_info::VERSION, &installed).into());
+    app.set_title_text(updates::title_text(&lang, ddm32_core::app_info::VERSION, &installed).into());
+    app.set_installed_firmware(updates::installed_short(&installed, &lang).into());
+    app.set_check_error("".into());
+    app.set_prompt_open(false);
+    demo_ports(ui, &lang);
+    app.set_app_update_text(i18n::tf(&lang, "pu_available", "3.1.0").into());
     app.set_app_update_available(true);
     radio_pages::demo(ui, &lang);
     app.set_versions(ModelRc::new(VecModel::from(vec![
@@ -1123,4 +1440,29 @@ pub fn demo(ui: &AppWindow) {
     app.set_version(ddm32_core::app_info::VERSION.into());
     app.set_key_id(ddm32_core::releases::PUBLIC_KEY_ID.into());
     app.set_data_folder("C:\\Users\\…\\AppData\\Local\\Programs\\DDM32 Plus".into());
+}
+
+/// Example cable picker contents (screenshots, demo): two CH340 cables, Auto on COM14, a USB serial adapter and a
+/// com0com pair under Advanced.
+pub fn demo_ports(ui: &AppWindow, lang: &str) {
+    let entries = [
+        portpick::SerialPortEntry::new("COM14", true, false),
+        portpick::SerialPortEntry::new("COM15", true, false),
+        portpick::SerialPortEntry::new("COM3", false, false),
+        portpick::SerialPortEntry::new("COM12", false, true),
+        portpick::SerialPortEntry::new("COM13", false, true),
+    ];
+    let opts = portpick::options(&entries, Os::Windows);
+    let now = portpick::resolve(&PortPref::default(), &opts, None);
+    let v = port_view(lang, &opts, &now);
+    let r = ui.global::<Radio>();
+    r.set_port_head(v.head.into());
+    r.set_port_line(v.line.into());
+    r.set_port_note(v.note.into());
+    r.set_port_auto(true);
+    r.set_port_selected(now.port.unwrap_or_default().into());
+    r.set_port_auto_detail(v.auto_detail.into());
+    set_port_rows(&r, v.cables, v.others);
+    r.set_picker_open(false);
+    r.set_picker_advanced(false);
 }

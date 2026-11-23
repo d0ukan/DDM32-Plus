@@ -69,7 +69,20 @@ pub fn evaluate(devices: &[PnpDevice]) -> CableStatus {
 pub fn list_devices() -> Vec<PnpDevice> {
     #[cfg(windows)]
     {
-        windows::usb_devices().into_iter().filter(|d| d.device_id.to_uppercase().contains("VID_1A86")).collect()
+        windows::devices("USB").into_iter().filter(|d| d.device_id.to_uppercase().contains("VID_1A86")).collect()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// The COM ports of com0com's virtual port pairs (Windows: devices of the "COM0COM" enumerator, e.g. "com0com - serial
+/// port emulator CNCA0 (COM12)"). Only reads the device list, opens no port. Empty on other operating systems.
+pub fn virtual_ports() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        windows::devices("COM0COM").iter().filter_map(port_of).collect()
     }
     #[cfg(not(windows))]
     {
@@ -101,10 +114,10 @@ mod windows {
         String::from_utf16_lossy(&b[..n])
     }
 
-    /// Every present USB device: instance ID, name, problem code (0 = working).
-    pub fn usb_devices() -> Vec<PnpDevice> {
+    /// Every present device of an enumerator ("USB", "COM0COM"): instance ID, name, problem code (0 = working).
+    pub fn devices(enumerator: &str) -> Vec<PnpDevice> {
         let mut out = Vec::new();
-        let usb = wide("USB");
+        let usb = wide(enumerator);
         // SAFETY: plain SetupAPI calls with buffers sized here; the list handle is destroyed at the end.
         unsafe {
             let set = SetupDiGetClassDevsW(
