@@ -9,7 +9,7 @@ public static class AppInfo
     public const string ExeFile = ExeName + ".exe";
 
     /// <summary>The Windows (.NET) program's version; Directory.Build.props carries the same value.</summary>
-    public const string Version = "2.0.0-beta.5";
+    public const string Version = "2.0.0";
 
     public const string Author = "d0ukan · TA2DOU";
     public const string RepoUrl = "https://github.com/d0ukan/DDM32-Plus";

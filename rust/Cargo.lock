@@ -1103,14 +1103,14 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "ddm32-cli"
-version = "3.0.0-alpha.4"
+version = "3.0.0"
 dependencies = [
  "ddm32-core",
 ]
 
 [[package]]
 name = "ddm32-core"
-version = "3.0.0-alpha.4"
+version = "3.0.0"
 dependencies = [
  "base64",
  "chrono",
@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "ddm32-gui"
-version = "3.0.0-alpha.4"
+version = "3.0.0"
 dependencies = [
  "base64",
  "ddm32-core",

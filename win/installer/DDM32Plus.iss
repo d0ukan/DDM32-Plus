@@ -16,7 +16,7 @@
 ; Uninstall: Settings > Apps (per-user entry, HKCU).
 
 #define AppName "DDM32 Plus"
-#define AppVersion "2.0.0-beta.5"
+#define AppVersion "2.0.0"
 #define AppNumericVersion "2.0.0.0"
 #define AppExe "DDM32Plus.exe"
 #define AppPublisher "d0ukan · TA2DOU"
