@@ -11,7 +11,7 @@ Licence: GPL-3.0-or-later (dependencies: [THIRD_PARTY.md](THIRD_PARTY.md)).
 
 ```
 rust/
-  Cargo.toml                 workspace (version 3.0.0-alpha.3)
+  Cargo.toml                 workspace (version 3.0.0-alpha.4)
   crates/ddm32-core/         everything that is not the window
     src/crypto/ed25519.rs        Ed25519 verify (a port of the RFC 8032 reference code, as the C# and Python ones)
     src/releases/                signed manifest checks, version order and labels, release list, downloads, local folder

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ddm32-core", "crates/ddm32-cli", "crates/ddm32-gui"]
 
 [workspace.package]
-version = "3.0.0-alpha.3"
+version = "3.0.0-alpha.4"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/d0ukan/DDM32-Plus"

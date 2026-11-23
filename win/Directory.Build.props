@@ -1,7 +1,7 @@
 <Project>
   <!-- Shared settings for every project in win/: one version, zero warnings (warnings are errors). -->
   <PropertyGroup>
-    <Version>2.0.0-beta.4</Version>
+    <Version>2.0.0-beta.5</Version>
     <Authors>d0ukan</Authors>
     <Company>d0ukan · TA2DOU</Company>
     <Product>DDM32 Plus</Product>
