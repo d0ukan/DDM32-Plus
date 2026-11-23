@@ -3,7 +3,7 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## v1.0.0-beta.10 (candidate, not released yet)
+## v1.0.0 (2026-11-23, first stable release)
 
 - Tools > ISS: a row "Show orbit" (Turkish "Yörüngeyi göster") under "Auto track" opens the sky plot with OK, exactly
   as key `2` does (key 2 stays as a shortcut). Owner's report on the radio (beta.9): the "2 sky" hint could not be
