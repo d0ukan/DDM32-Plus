@@ -31,6 +31,7 @@ static int beeps_soon, beeps_aos;
 static uint8_t iss, so50, ao91, po101;
 static bool fake_pos = true;	/* the sky plot's fake service: a position (else the points fail) */
 static int fsky_wait;		/* ... asks answered "still working" before the points are there */
+static bool fake_frozen;	/* the prediction clock not running (no GPS time): now stays 0 */
 
 static int32_t fake_now(void)
 {
@@ -42,7 +43,7 @@ static int32_t fake_now(void)
 void sat_view(sat_view_t *out)
 {
 	*out = fv;
-	out->now = fake_now();
+	out->now = fake_frozen ? 0 : fake_now();
 	out->live = focus_seen;
 	out->live_ok = focus_seen < sat_count;
 }
@@ -190,6 +191,7 @@ static void fake_reset(bool clock)
 	sky_idx = SAT_NONE;
 	fake_pos = true;
 	fsky_wait = 0;
+	fake_frozen = false;
 	ui_svc_setting_set(UI_SET_SAT_NOTE, 0);
 	ui_svc_setting_set(UI_SET_SAT_AUTO, 0);
 }
@@ -411,6 +413,7 @@ static void prep_up(void)
 	fv.rate_ms = -4000;
 }
 static void prep_no_clock(void) { fv.clock = SAT_CLOCK_NONE; }
+static void prep_frozen(void) { fv.clock = SAT_CLOCK_NONE; fake_frozen = true; }
 static void prep_aprs(void) { iss_aprs = true; }
 static void prep_busy(void) { refuse = SAT_NO_BUSY; }
 static void prep_em(void) { ui_svc_emergency(true); }
@@ -440,9 +443,9 @@ static int iss_checks(void)
 	bad += iss_flow("ISS page", ISSP, NULL, "",
 			T("screen=iss shows=AOS_in_5:00__47 shows=AOS_ shows=LOS_ shows=145.800_voice_/_SSTV "
 			  "shows=145.825_APRS shows=Before_AOS shows=Auto_track shows=Every_pass hides=For "
-			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80 shows=2_sky",
+			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80 shows=Show_orbit hides=2_sky",
 			  "screen=iss shows=AOS'a_5:00 shows=AOS_ shows=145.800_ses_/_SSTV shows=145.825_APRS "
-			  "shows=OK_takip__#_APRS__1_frek shows=2_g"), true);
+			  "shows=OK_takip__#_APRS__1_frek shows=ster"), true);
 	/* OK within 10 min of AOS: the held track on 145.800 */
 	bad += iss_flow(n = "ISS OK tracks", ISSP, NULL, "ok", "toast=none banner=none", false);
 	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
@@ -489,7 +492,7 @@ static int iss_checks(void)
 	bad += iss_flow(n = "ISS every pass off", ISSP, NULL, "down down right left", "screen=iss", false);
 	ISS_CHECK(fv.alarm.target == SAT_NONE && ui_svc_setting_get(UI_SET_SAT_NOTE) == 0, n);
 	/* Auto track (Up from Before AOS wraps to it): On, stored */
-	bad += iss_flow(n = "ISS auto track row", ISSP, NULL, "up right", "screen=iss", false);
+	bad += iss_flow(n = "ISS auto track row", ISSP, NULL, "up up right", "screen=iss", false);
 	ISS_CHECK(ui_svc_setting_get(UI_SET_SAT_AUTO) == SAT_AUTO_DOWN, n);
 	/* #: APRS via ISS, its gates (below the horizon here) */
 	bad += iss_flow("ISS # below the horizon", ISSP, NULL, "ctx",
@@ -788,13 +791,53 @@ static int sky_checks(void)
 			T("shows=Pos:_typed shows=Max_", "shows=Konum:_elle shows=Maks_"), true);
 	bad += iss_flow(n = "Position source: GPS, sky plot", ISSP, prep_real, "2 wait:1200",
 			T("shows=Pos:_GPS", "shows=Konum:_GPS"), true);
-	/* hints alternate every 3 s so ^v pick, <> UTC and 2 sky are all named */
-	bad += iss_flow(n = "Satellites hints rotate", SATS, prep_real, "wait:200",
-			T("shows=OK_track__#_APRS_via_ISS hides=2_sky__^v", "shows=OK_takip"), false);
-	bad += iss_flow(n = "Satellites hints rotate: the sky key", SATS, prep_real, "wait:3200 right left",
-			T("shows=2_sky__^v_pick shows=<>_UTC hides=OK_track", "shows=2_g hides=OK_takip"), false);
-	bad += iss_flow(n = "ISS hint rotates: the sky key", ISSP, prep_real, "wait:3200 down up",
-			T("shows=#_APRS__1_freq hides=OK_track", "shows=#_APRS__1_frek hides=OK_takip"), false);
+	/* the hints are fixed: no clock drives them, the same at any time and with no GPS time (frozen prediction clock) */
+	bad += iss_flow(n = "Satellites hint (ISS) names the sky key", SATS, prep_real, "wait:200",
+			T("shows=OK_track__#_APRS__2_sky", "shows=OK_takip shows=2_g"), true);
+	bad += iss_flow(n = "Satellites hint (ISS), later", SATS, prep_real, "wait:3200 right left",
+			T("shows=OK_track__#_APRS__2_sky", "shows=OK_takip shows=2_g"), true);
+	bad += iss_flow(n = "Satellites hint names the sky key and UTC", SATS, prep_real, "down wait:200",
+			T("shows=OK_alarm__2_sky__<>_UTC", "shows=OK_alarm shows=2_g shows=<>_UTC"), true);
+	bad += iss_flow(n = "Satellites hint, later", SATS, prep_real, "down wait:3200 right left",
+			T("shows=OK_alarm__2_sky__<>_UTC", "shows=OK_alarm shows=2_g shows=<>_UTC"), true);
+	bad += iss_flow(n = "Satellites hint, clock not running", SATS, prep_frozen, "wait:3200 right left",
+			T("shows=OK_alarm shows=2_sky shows=Back shows=Needs_a_GPS_fix shows=typed_position", "shows=2_g"), true);
+	bad += iss_flow(n = "ISS page, clock not running: the Show orbit row", ISSP, prep_frozen, "wait:3200 down up",
+			T("shows=Show_orbit shows=Auto_track shows=Waiting_for_the_GPS_time shows=OK_track__#_APRS__1_freq",
+			  "shows=ster shows=OK_takip"), true);
+	/* on Show orbit the status line does not promise a track (OK opens the plot there) */
+	bad += iss_flow(n = "ISS Show orbit: no 'OK: track' line", ISSP, prep_real, "up wait:300",
+			T("shows=OK_orbit hides=OK:_track", "shows=OK_y hides=OK:_VFO"), true);
+	/* Show orbit: down to the row under Auto track, OK opens the plot (as key 2), Back returns to the page */
+	bad += iss_flow(n = "ISS Show orbit: OK opens the plot", ISSP, prep_real, "down down down down wait:300",
+			T("shows=Show_orbit shows=OK_orbit", "shows=ster shows=OK_y"), true);
+	bad += iss_flow(n = "ISS Show orbit: OK opens the plot", ISSP, prep_real, "down down down down ok wait:1200",
+			T("screen=iss shows=Sky shows=Max_ hides=Show_orbit", "screen=iss shows=Maks_ hides=ster"), true);
+	ISS_SKY_CHECK(sky_page && sky_n >= 2 && starts == 0 && cancels == 0, n);
+	bad += iss_flow(n = "ISS Show orbit: key 2 too", ISSP, prep_real, "2 wait:1200",
+			T("screen=iss shows=Sky shows=Max_", "screen=iss shows=Maks_"), true);
+	ISS_SKY_CHECK(sky_page && sky_n >= 2, n);
+	bad += iss_flow(n = "ISS Show orbit: Back returns to the page", ISSP, prep_real, "down down down down ok wait:300 back wait:300",
+			T("screen=iss shows=Show_orbit shows=OK_orbit hides=Max_", "screen=iss shows=ster hides=Maks_"), false);
+	ISS_SKY_CHECK(!sky_page && sky_closes == 1 && starts == 0, n);
+	/* up from the first row wraps to Show orbit, and Left / Right on it change nothing */
+	bad += iss_flow(n = "ISS Show orbit: wraps, no value", ISSP, prep_real, "up right left wait:300",
+			T("shows=OK_orbit hides=Max_ shows=Auto_track", "shows=ster"), false);
+	ISS_SKY_CHECK(!sky_page && alarm_calls == 0, n);
+	/* no GPS time: the row opens the plot's own waiting message; Back returns */
+	bad += iss_flow(n = "ISS Show orbit: no GPS time", ISSP, prep_frozen, "down down down down ok wait:1200",
+			T("screen=iss shows=Waiting_for_the_GPS_time shows=Needs_a_GPS_fix hides=Max_", "screen=iss hides=Maks_"), true);
+	bad += iss_flow(n = "ISS Show orbit: no GPS time, Back", ISSP, prep_frozen,
+			"down down down down ok wait:300 back wait:300",
+			T("screen=iss shows=Show_orbit shows=Waiting_for_the_GPS_time", "screen=iss shows=ster"), false);
+	/* a held track: OK on the row opens the plot and does not end the track; Back returns to the page, track still held */
+	bad += iss_flow(n = "ISS Show orbit under a held track", ISSP, prep_real_held, "down down down down ok wait:1200",
+			T("screen=iss shows=Sky shows=Max_", "screen=iss shows=Maks_"), true);
+	ISS_SKY_CHECK(cancels == 0 && fv.track == iss && fake_auto && track_calls == 0, n);
+	bad += iss_flow(n = "ISS Show orbit under a held track: Back", ISSP, prep_real_held,
+			"down down down down ok wait:300 back wait:300",
+			T("screen=iss shows=Show_orbit shows=OK_orbit hides=Max_", "screen=iss shows=ster hides=Maks_"), false);
+	ISS_SKY_CHECK(cancels == 0 && fv.track == iss && fake_auto && track_calls == 0 && sky_closes == 1, n);
 	/* the plot closing tells the service */
 	bad += iss_flow(n = "Sky: Back tells the service", ISSP, prep_real, "2 wait:300 back wait:300", "screen=iss", false);
 	ISS_SKY_CHECK(sky_closes == 1, n);
@@ -841,13 +884,19 @@ int main(int argc, char **argv)
 		char err[300];
 		fake_reset(true);
 		sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_M);
+		if (argc > 3 && strstr(argv[3], "large")) {
+			ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
+			sim_run("reboot", err, sizeof err);
+		}
+		if (argc > 3 && strstr(argv[3], "tr"))
+			lang_set(lang_find('t' << 8 | 'r'));
 		if (argc > 3 && !strcmp(argv[3], "high"))
 			real_min_el = 60;
-		if (argc > 3 && (!strcmp(argv[3], "real") || !strcmp(argv[3], "high")))
+		if (argc > 3 && (strstr(argv[3], "real") || !strcmp(argv[3], "high")))
 			prep_real();	/* the real passes (a third into the ISS's) */
-		if (argc > 3 && !strcmp(argv[3], "nopos"))
+		if (argc > 3 && strstr(argv[3], "nopos"))
 			prep_no_pos();
-		if (argc > 3 && !strcmp(argv[3], "noclock"))
+		if (argc > 3 && strstr(argv[3], "noclock"))
 			prep_no_clock();
 		if (argc > 3 && !strcmp(argv[3], "nopass"))
 			prep_no_pass();
@@ -863,7 +912,7 @@ int main(int argc, char **argv)
 	}
 	const sat_flow_t checks[] = {
 		{ { "Sat list: soonest first, the ISS can be tracked", SATS, "",
-		    "screen=satellites shows=ISS shows=SO-50 shows=AO-91 shows=OK_track__#_APRS_via_ISS", 0, false },
+		    "screen=satellites shows=ISS shows=SO-50 shows=AO-91 shows=OK_track__#_APRS__2_sky", 0, false },
 		  true, SAT_NONE, SAT_NONE, 0, 0, -1, -1 },
 		{ { "Sat live lines: Az/El, range rate, Doppler in kHz", SATS, "",
 		    "shows=Az_123 shows=El_-1.2 shows=2345_km__-5.43_km/s shows=+7.9_kHz shows=OK:_track_in_the_VFO", 0, false },
@@ -874,7 +923,7 @@ int main(int argc, char **argv)
 		  true, 0, -1, 0, 0, -1, -1 },
 		{ { "Sat stop tracking", SATS, "ok ok", "toast=Tracking_off:_VFO_stays", 2, false },
 		  true, SAT_NONE, -1, 0, 0, -1, -1 },
-		{ { "Sat nothing to track: OK alarm", SATS, "down", "shows=^v_pick__OK_alarm", 1, false },
+		{ { "Sat nothing to track: OK alarm", SATS, "down", "shows=OK_alarm__2_sky__<>_UTC", 1, false },
 		  true, SAT_NONE, SAT_NONE, 0, 0, -1, -1 },
 		{ { "Sat alarm page", SATS, "down ok",
 		    "screen=satellites shows=Pass_alarm shows=For shows=SO-50 shows=Before_AOS shows=5_min "

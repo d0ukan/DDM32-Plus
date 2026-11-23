@@ -4833,32 +4833,32 @@ msgid " d"
 msgstr " g"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  # arm tone  <> UTC"
-msgstr "OK durdur  # akt. ton  <> UTC"
+msgid "OK stop  # arm tone  2 sky"
+msgstr "OK durdur  # akt. ton  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  # APRS via ISS"
-msgstr "OK durdur  # ISS'ten APRS"
+msgid "OK stop  # APRS  2 sky"
+msgstr "OK durdur  # APRS  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK track  # APRS via ISS"
-msgstr "OK takip  # ISS'ten APRS"
+msgid "OK track  # APRS  2 sky"
+msgstr "OK takip  # APRS  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK alarm  # APRS via ISS"
-msgstr "OK alarm  # ISS'ten APRS"
+msgid "OK alarm  # APRS  2 sky"
+msgstr "OK alarm  # APRS  2 gök"
 
 #: core/ui/ui_sat.c
-msgid "OK stop  ^v pick  <> UTC"
-msgstr "OK durdur  ^v seç  <> UTC"
+msgid "OK stop  2 sky  <> UTC"
+msgstr "OK durdur  2 gök  <> UTC"
 
 #: core/ui/ui_sat.c
-msgid "^v pick  OK track  <> UTC"
-msgstr "^v seç  OK takip  <> UTC"
+msgid "OK track  2 sky  <> UTC"
+msgstr "OK takip  2 gök  <> UTC"
 
 #: core/ui/ui_sat.c
-msgid "^v pick  OK alarm  <> UTC"
-msgstr "^v seç  OK alarm  <> UTC"
+msgid "OK alarm  2 sky  <> UTC"
+msgstr "OK alarm  2 gök  <> UTC"
 
 #: core/ui/ui_sat.c
 msgid "Tracking off: VFO stays"
@@ -4877,8 +4877,8 @@ msgid "Uplink tone: arming"
 msgstr "Uplink tonu: aktivasyon"
 
 #: core/ui/ui_sat.c
-msgid "OK alarm  Back"
-msgstr "OK alarm  Geri"
+msgid "OK alarm  2 sky  Back"
+msgstr "OK alarm  2 gök  Geri"
 
 #: core/ui/ui_sat.c
 msgid " overhead, max "
@@ -4913,6 +4913,14 @@ msgid "OK track  # APRS  1 freq"
 msgstr "OK takip  # APRS  1 frek"
 
 #: core/ui/ui_sat.c
+msgid "OK orbit  # APRS  1 freq"
+msgstr "OK yörünge  # APRS  1 frek"
+
+#: core/ui/ui_sat.c
+msgid "Show orbit"
+msgstr "Yörüngeyi göster"
+
+#: core/ui/ui_sat.c
 msgid "OK track  Back"
 msgstr "OK takip  Geri"
 
@@ -4937,24 +4945,12 @@ msgid "Every ISS pass: other alarm off"
 msgstr "Her ISS geçişi: diğer alarm kapalı"
 
 #: core/ui/ui_sat.c
-msgid "2 sky  ^v pick  <> UTC"
-msgstr "2 gök  ^v seç  <> UTC"
-
-#: core/ui/ui_sat.c
-msgid "# APRS  1 freq  2 sky"
-msgstr "# APRS  1 frek  2 gök"
-
-#: core/ui/ui_sat.c
 msgid "Pos: GPS"
 msgstr "Konum: GPS"
 
 #: core/ui/ui_sat.c
 msgid "Pos: typed"
 msgstr "Konum: elle"
-
-#: core/ui/ui_sat.c
-msgid "2 sky"
-msgstr "2 gök"
 
 #: core/ui/ui_sat.c
 msgid "Max "

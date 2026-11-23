@@ -3,6 +3,19 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## v1.0.0-beta.10 (candidate, not released yet)
+
+- Tools > ISS: a row "Show orbit" (Turkish "Yörüngeyi göster") under "Auto track" opens the sky plot with OK, exactly
+  as key `2` does (key 2 stays as a shortcut). Owner's report on the radio (beta.9): the "2 sky" hint could not be
+  seen. Cause: the hints alternated every 3 s by the satellite service's prediction clock, which does not run without
+  GPS time (indoors), and the "2 sky" label on the "145.825 APRS" line was only drawn when there was GPS time, so the
+  key was undiscoverable indoors. The alternating hints are gone on both pages. The row works without GPS time too (the
+  plot then says "Waiting for the GPS time"), and under a held auto track OK on it opens the plot without ending the
+  track (Back returns to the page). Tools > Satellites has no room for a row, so its fixed bottom hint now names key 2
+  in every state ("OK track  2 sky  <> UTC", "OK alarm  2 sky  <> UTC", ...; "^v pick" was dropped to make room, with
+  the ISS in focus "OK track  # APRS  2 sky"). Also: the Satellites page's "Needs a GPS fix or a typed position" line,
+  cut at the screen edge without GPS time, now wraps. Host-tested only (rows SK-8..SK-11; render images/ddm32/iss-show-orbit.png); FLASH +80 B (880,380 B, 97.70 %), RAM +0 B (2,072 B free), stacks unchanged (--stack-check passed).
+
 ## v1.0.0-beta.9 (2026-11-23, beta: the new parts not yet confirmed on the radio)
 
 - Sky plot (owner's request 2026-11-22; host-tested, not yet checked on the radio, rows SK-1..SK-6): key `2` on Tools >

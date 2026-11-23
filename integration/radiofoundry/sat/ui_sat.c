@@ -50,6 +50,7 @@ static uint8_t a_row, a_for, a_lead = 1, a_el, a_auto;
 static const uint8_t lead_min[] = { 2, 5, 10 };
 static const uint8_t min_el[] = { 0, 10, 20, 30, 45 };
 #define A_ROWS	5
+#define ISS_ROWS	6	/* Tools > ISS: the alarm rows from Before AOS on, then Show orbit (the sky plot) */
 /* Tools > ISS: the downlink it tracks is 145.825 (else 145.800); the AOS pop-up's satellite (SAT_NONE: none; bit 7:
  * its banner not made longer yet) and its title (the banner's, to know it is still up) */
 static bool iss_aprs;
@@ -424,7 +425,7 @@ static int __attribute__((noinline)) alarm_rows(int y, uint8_t first, const font
 {
 	char buf[24];
 	sbuf_t b;
-	int w = gfx_width(), rh = m->h + 4;
+	int w = gfx_width(), rh = m->h + (first ? 3 : 4);	/* Tools > ISS (first > 0): a pixel tighter, Show orbit needs the row */
 	static const char *const labels[A_ROWS] = { TRN("For"), TRN("Before AOS"), TRN("Min. elevation"),
 						    TRN("Every pass"), TRN("Auto track") };
 	for (uint8_t r = first; r < A_ROWS; r++) {
@@ -917,10 +918,10 @@ static void sat_draw(void)
 		return;
 	}
 	if (v.clock != SAT_CLOCK_OK) {
-		gfx_text(s, 0, y, v.clock == SAT_CLOCK_NONE ? TR("Waiting for the GPS time") : TR("Waiting for a GPS position"),
-			 ui_col.warn);
-		gfx_text(s, 0, y + s->h + 2, TR("Needs a GPS fix or a typed position"), ui_col.dim);
-		ui_draw_bottom(&ui_st, TR("OK alarm  Back"));	/* OK opens the alarm page here too (sat_key) */
+		y = sky_row(s, y, v.clock == SAT_CLOCK_NONE ? TR("Waiting for the GPS time") : TR("Waiting for a GPS position"),
+			    ui_col.warn);
+		sky_row(s, y, TR("Needs a GPS fix or a typed position"), ui_col.dim);	/* wrapped: it is wider than the screen */
+		ui_draw_bottom(&ui_st, TR("OK alarm  2 sky  Back"));	/* OK opens the alarm page here too (sat_key) */
 		ui_draw_banner(&ui_st);
 		return;
 	}
@@ -967,19 +968,14 @@ static void sat_draw(void)
 	}
 	gfx_hline(0, y + 2, gfx_width(), ui_col.line);
 	bool can = can_track(&v, sel);
-	/* The hints alternate every 3 s with one that names key 2 (the sky plot): room for both ^v pick / <> UTC and 2 sky
-	 * does not exist in one row */
-	if ((v.now / 3) & 1)
-		ui_draw_bottom(&ui_st, TR("2 sky  ^v pick  <> UTC"));
-	else
 	ui_draw_bottom(&ui_st, v.track == sel && sat_table[sel].arm10 ?
-		       TR("OK stop  # arm tone  <> UTC")
-		       : is_iss(sel) ? (v.track == sel ? TR("OK stop  # APRS via ISS")
-					: can ? TR("OK track  # APRS via ISS")
-					: TR("OK alarm  # APRS via ISS"))
-		       : v.track == sel ? TR("OK stop  ^v pick  <> UTC")
-		       : can ? TR("^v pick  OK track  <> UTC")
-		       : TR("^v pick  OK alarm  <> UTC"));
+		       TR("OK stop  # arm tone  2 sky")
+		       : is_iss(sel) ? (v.track == sel ? TR("OK stop  # APRS  2 sky")
+					: can ? TR("OK track  # APRS  2 sky")
+					: TR("OK alarm  # APRS  2 sky"))
+		       : v.track == sel ? TR("OK stop  2 sky  <> UTC")
+		       : can ? TR("OK track  2 sky  <> UTC")
+		       : TR("OK alarm  2 sky  <> UTC"));
 	live(y + 5, &v);
 	ui_draw_banner(&ui_st);
 }
@@ -1063,6 +1059,19 @@ const ui_scr_def_t ui_sat_screen = {
 
 /* --- Tools > ISS --- */
 
+/* The row under Auto track: OK opens the sky plot (key 2 does too) */
+static int iss_orbit_row(int y, const font_t *f)
+{
+	bool focus = a_row == ISS_ROWS - 1;
+	int w = gfx_width(), rh = f->h + 3;
+	if (focus)
+		gfx_fill(0, y, w, rh, ui_col.focus);
+	int ty = y + (rh - f->h) / 2;
+	gfx_text(f, 2, ty, TR("Show orbit"), focus ? ui_col.focus_fg : ui_col.dim);
+	gfx_text(f, w - gfx_text_width(f, ">") - 2, ty, ">", focus ? ui_col.focus_fg : ui_col.fg);
+	return y + rh;
+}
+
 /* The pass and the live lines: "AOS in 1h05  47°" (or "LOS in 5:12  47°" under way), "AOS 14:27  LOS 14:38" (or
  * "Above now, max 47°"), azimuth and elevation, the two downlinks (the one in use marked) and its Doppler */
 static int __attribute__((noinline)) iss_pass(int y, const sat_view_t *v, uint8_t i)
@@ -1115,7 +1124,6 @@ static int __attribute__((noinline)) iss_pass(int y, const sat_view_t *v, uint8_
 	gfx_text(s, 2 * s->w, y, TR("145.800 voice / SSTV"), iss_aprs ? ui_col.dim : ui_col.fg);
 	y += s->h + 1;
 	gfx_text(s, 0, y, iss_aprs ? "> 145.825 APRS" : "  145.825 APRS", iss_aprs ? ui_col.fg : ui_col.dim);
-	gfx_text(s, gfx_width() - gfx_text_width(s, TR("2 sky")) - 2, y, TR("2 sky"), ui_col.dim);	/* the sky plot's key */
 	y += s->h + 1;
 	if (live) {
 		uint32_t hz = iss_aprs ? SAT_ISS_APRS_HZ : SAT_ISS_VOICE_HZ;
@@ -1150,7 +1158,7 @@ static void iss_draw(void)
 	}
 	y = iss_pass(y, &v, i);
 	gfx_hline(0, y + 1, gfx_width(), ui_col.line);
-	y = alarm_rows(y + 3, 1, s) + 2;
+	y = iss_orbit_row(alarm_rows(y + 3, 1, s), s) + 2;
 	/* What OK does now, or the alarm */
 	sb_init(&b, buf, sizeof buf);
 	color_t c = ui_col.dim;
@@ -1163,16 +1171,15 @@ static void iss_draw(void)
 		sb_str(&b, v.alarm.target < sat_count ? sat_table[v.alarm.target].name : TR("Any satellite"));
 		sb_str(&b, TR(" armed"));
 	} else if (i != SAT_NONE && can_track(&v, i)) {
-		sb_str(&b, TR("OK: track in the VFO"));
+		if (a_row != ISS_ROWS - 1)	/* on Show orbit OK opens the plot: the hint says so */
+			sb_str(&b, TR("OK: track in the VFO"));
 		c = ui_col.fg;
 	} else if (!sb_alarm(&b, &v)) {
 		sb_str(&b, TR("Track from AOS-10 min"));
 	}
 	gfx_text(s, 0, y, buf, c);
-	if ((v.now / 3) & 1)
-		ui_draw_bottom(&ui_st, TR("# APRS  1 freq  2 sky"));
-	else
-		ui_draw_bottom(&ui_st, v.track != SAT_NONE ? TR("OK stop  # APRS  1 freq") : TR("OK track  # APRS  1 freq"));
+	ui_draw_bottom(&ui_st, a_row == ISS_ROWS - 1 ? TR("OK orbit  # APRS  1 freq") :
+		       v.track != SAT_NONE ? TR("OK stop  # APRS  1 freq") : TR("OK track  # APRS  1 freq"));
 	ui_draw_banner(&ui_st);
 }
 
@@ -1202,11 +1209,13 @@ static bool iss_key(const input_event_t *ev)
 		return true;
 	}
 	if (press && (ev->action == ACT_NAV_UP || ev->action == ACT_NAV_DOWN)) {
-		a_row = (uint8_t)(1u + (a_row - 1u + (ev->action == ACT_NAV_DOWN ? 1u : A_ROWS - 2u)) % (A_ROWS - 1u));
+		a_row = (uint8_t)(1u + (a_row - 1u + (ev->action == ACT_NAV_DOWN ? 1u : ISS_ROWS - 2u)) % (ISS_ROWS - 1u));
 		ui_dirty();
 		return true;
 	}
 	if ((press && (ev->action == ACT_NAV_LEFT || ev->action == ACT_NAV_RIGHT)) || ev->action == ACT_ENC_STEP) {
+		if (a_row == ISS_ROWS - 1)
+			return true;	/* Show orbit has no value to change */
 		sat_view(&v);
 		alarm_change(ev->action == ACT_ENC_STEP ? ev->value > 0 : ev->action == ACT_NAV_RIGHT);
 		bool mine = v.alarm.target == i;	/* this page edits the ISS's alarm alone */
@@ -1225,6 +1234,10 @@ static bool iss_key(const input_event_t *ev)
 	}
 	if (ev->gesture != GESTURE_PRESS)
 		return false;
+	if (ev->action == ACT_SELECT && a_row == ISS_ROWS - 1) {
+		sky_open(i);	/* like key 2: a held track goes on (the keys here are the page's) */
+		return true;
+	}
 	if (ev->action == ACT_SELECT || ev->action == ACT_CONTEXT) {
 		sat_view(&v);
 		if (ev->action == ACT_SELECT)

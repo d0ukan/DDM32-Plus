@@ -1538,10 +1538,27 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   Key `2` on Tools > ISS (the ISS) and on Tools > Satellites (the satellite in focus) opens a polar plot of that
   satellite's next pass, or the one under way, from your location; Back returns to the page. Key 2 was free on both pages
   (Satellites: 0 is the alarm page, # APRS via the ISS, OK, arrows and UTC; Tools > ISS: 1 the downlink, # APRS, OK, the
-  alarm rows), so the same key does it on both. The hint row is too narrow for everything, so the hints alternate every 3 s (by the
-  prediction clock, redrawn with the live values): Satellites shows its usual hint, then "2 sky  ^v pick  <> UTC"
-  ("2 gök  ^v seç  <> UTC"); Tools > ISS its usual hint, then "# APRS  1 freq  2 sky"; "2 sky" also stays at the right of
-  the "145.825 APRS" line.
+  alarm rows), so the same key does it on both. **beta.10 (owner's report on the radio: the "2 sky" hint was not
+  visible):** the beta.9 hint rows alternated every 3 s by the satellite service's prediction clock (`v.now / 3`),
+  and "2 sky" at the right of the "145.825 APRS" line was drawn by the pass block, which Tools > ISS skips while the
+  GPS time is missing. Indoors there is no GPS time, so the clock stayed at 0, the hint never rotated and the label was
+  not drawn at all: the key was undiscoverable exactly where it was tried first (the host tests had a running clock).
+  Now nothing is clock-driven. Tools > ISS has a row "Show orbit" (Turkish "Yörüngeyi göster", value ">") under
+  "Auto track", reached with the arrows like the rows above it; OK on it opens the plot exactly as key 2 does (key 2
+  stays a shortcut), with or without GPS time (the plot then says "Waiting for the GPS time"). While that row is in
+  focus the bottom hint reads "OK orbit  # APRS  1 freq" ("OK yörünge ..."); Left / Right on it do nothing. OK on it
+  under a held auto track opens the plot and does not end the track (OK on the other rows still stops it); Back
+  returns to the page. The row needed a pixel less per row on this page (rows are the small font + 3 px instead of + 4:
+  the full page, the live lines and the status line above the hint, was exactly full and the new row would have put
+  the status line under the hint). The Large text setting does not change these two pages (only Home and the dual
+  screens use it), so there is no second layout. Tools > Satellites has no room for a row: its fixed hint now names
+  key 2 in every state: "OK track  2 sky  <> UTC", "OK alarm  2 sky  <> UTC", "OK stop  2 sky  <> UTC" (Turkish "OK
+  takip  2 gök  <> UTC"), with the ISS in focus "OK track  # APRS  2 sky" (was "... via ISS"), a track with an uplink
+  tone "OK stop  # arm tone  2 sky", and without GPS time "OK alarm  2 sky  Back". The line is about 25 characters
+  wide, so something had to go: "^v pick" left the hint (picking a satellite in a visible list needs no words), while
+  "OK ..." stays because it is the only place that says what OK does there (the alarm page behind "OK alarm" is
+  otherwise undiscoverable), and "<> UTC" stays on the rows that never had other room. The Satellites page's own "Needs
+  a GPS fix or a typed position" line, wider than the screen without GPS time, now wraps (it was cut at the right edge).
   - **What is drawn** (nothing but lines, no map bitmap): a circle, the horizon (elevation 0 at the edge, the zenith in
     the centre, so the radius is proportional to 90 - elevation), rings at 30 and 60 degrees, a cross, N / E / S / W
     outside it (Turkish K / D / G / B), north up and east to the right: a map-style plot (a view down on the compass, like Gpredict),
