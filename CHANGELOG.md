@@ -3,7 +3,7 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## v1.0.1 (candidate, not released yet)
+## v1.0.1 (2026-11-24)
 
 - Home stopped at channel 26 of 33 (owner's report 2026-11-23, v1.0.0). Cause, besides channels made before beta.7 that
   were never repaired: two channel-making paths still wrote their channels into their own zone only, never into "All
