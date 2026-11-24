@@ -204,6 +204,7 @@ def prepare(transform, install):
     __import__((__package__ + "." if __package__ else "") + "plus_txsafe", fromlist=["x"]).prepare_txsafe(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_rfports", fromlist=["x"]).prepare_rfports(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_fastscan", fromlist=["x"]).prepare_fastscan(transform, install)
+    __import__((__package__ + "." if __package__ else "") + "plus_vfostep", fromlist=["x"]).prepare_vfostep(transform, install)
 
 
 def prepare_large_scale(transform):

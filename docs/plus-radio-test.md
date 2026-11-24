@@ -898,3 +898,15 @@ TS-1..TS-4, TS-6 and TS-7 expect **nothing transmitted**: watch the red LED and 
 | RA-2 | Press `*` again on the same repeater; then on a DMR repeater; then on a C4FM entry | "Already in ZONE: ch N", no second channel; the DMR one is added receive only with its colour code and slot (RX list All TGs); the C4FM one: "Info only: not a mode of this radio" |
 | RA-3 | With Home's zone at 80 channels, `*` on a repeater; with a DMR data send running, `*` on a repeater | "Zone full: max 80 channels", nothing written; "Can't add while transmitting" |
 | RA-4 | In the VFO (Home on the VFO), `*` on a repeater; on the first (province) level of Tools > Repeaters press `*`, then `#` on a list | the channel goes only into "All channels"; on the province level `*` opens quick settings as before; `#` still opens the nearest repeater's details |
+
+## VFO step key (branch `vfostep`, docs/plus.md "VFO step key", v1.0.2 candidate)
+
+Receive only: nothing is transmitted. English menus. SK2 is the lower of the two side keys below PTT (the A/B key).
+
+| # | Do | Expect |
+|---|---|---|
+| VS-1 | Home on the VFO (Zones > VFO, or the VFO key), look at the bottom row and the top-right of the top row | the bottom row ends "SK2 step" (e.g. "0-9 freq  * Quick  SK2 step"); the top row says "Step 12.5k" or "Step 25k" on the right |
+| VS-2 | Press SK2 briefly, one press at a time, 11 times | each press a toast "Step 2.5 kHz", "5", "6.25", "8.33", "10", "12.5", "20", "25", "50", "100 kHz", then "Step Auto"; the top row's Step follows; the frequency never moves by itself |
+| VS-3 | Set a step with SK2 (say 5 kHz), then press Up three times; then Settings > Talk > VFO step; then switch the radio off and on, back to the VFO | Up moves the frequency 5 kHz a press; the menu row shows 5 kHz; after the power cycle the step is still 5 kHz |
+| VS-4 | On a channel (not the VFO): look at the bottom row; press SK2 briefly; then press SK2 held | no "SK2 step"; short SK2 starts dual watch as before (Back ends it); held SK2 as before |
+| VS-5 | VFO on Home: hold SK2 (dual watch starts, the VFO is a letter); press SK2 briefly twice; Back; in the VFO type "4 3 3" and press SK2; start a scan (SK2 is not the scan key: use the scan key) and press SK2 | in dual watch short SK2 selects the other letter, the step does not change; typing and scanning: SK2 does not step |
