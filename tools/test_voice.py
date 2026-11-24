@@ -44,6 +44,18 @@ def main():
     run(["clang", "-std=c11", *flags, "-c", "tests/test_voice.c", "-o", OUT / "test_voice.o"])
     run(["clang++", *flags, OUT / "test_voice.o", *objects, CODEC / "libdm32_imbe.a", "-o", OUT / "test_voice"])
     run([OUT / "test_voice"])
+    # DDM32 Plus P25 RX group list (tools/plus_p25rxgl.py): the same suite with the list in the admission (every
+    # object that sees p25_voice built with it)
+    rxgl = [*flags, "-DCONFIG_P25_RXGL=1"]
+    own = []
+    for name in ("p25", "voice", "phy_stream", "selftest"):
+        obj = OUT / (name + "-rxgl.o")
+        run(["clang", "-std=c11", *rxgl, "-c", ROOT / "src/p25" / (name + ".c"), "-o", obj])
+        own.append(obj)
+    run(["clang", "-std=c11", *rxgl, "-c", "tests/test_voice.c", "-o", OUT / "test_voice-rxgl.o"])
+    run(["clang++", *rxgl, OUT / "test_voice-rxgl.o", *own, *objects[4:], CODEC / "libdm32_imbe.a",
+         "-o", OUT / "test_voice_rxgl"])
+    run([OUT / "test_voice_rxgl"])
 
 
 if __name__ == "__main__":

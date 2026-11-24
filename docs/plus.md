@@ -5031,3 +5031,29 @@ Host tests (`tests/plus/test_ui_vfostep.c`, `tools/test_vfostep.py`, EN + TR, no
 the new step, a step set in the menu going on from there (and one outside the list going to Auto), no hint and no step on
 a channel, dual watch's selection, a scan and a typed frequency leaving the step alone, SK2 reassigned hiding the hint.
 Host-tested only; not run on the radio (docs/plus-radio-test.md, VS-1 to VS-5).
+
+## P25 RX group list (`CONFIG_P25_RXGL`, branch `rxgl`)
+
+A P25 channel can name one of the codeplug's 76 RX group lists, as a DMR channel does: the channel editor shows the
+"RX list" row on P25 channels too (the existing picker: None, "Any: all TGs", the lists by name). With a list the
+channel's own talkgroup and every P25 talkgroup of the list play (the list's group contacts with IDs 1-65535; private
+contacts, All Call and DMR talkgroups above 65535 are skipped; All Call always plays); with Any every group plays (as
+the Normal squelch); with None the channel's squelch decides as before. A channel talkgroup of Any (0) still hears
+every group. The VFO has no lists. Picking None / Any on a P25 channel says "None: the channel's squelch" / "Any: every
+TG" (Turkish in `tr.po`).
+
+Stored in the channel record's own RX group byte (Any: the colour code byte's 0x20 bit, as on DMR), written by the
+channel editor's existing save; the RFKV P25 block keeps the talkgroup explicit and no longer clears the list (Classic
+r13 and the upstream CPS read the explicit talkgroup and ignore the list, as before). The lists and contacts are only
+read (edit them in the CPS or a DOTA pack); an on-radio editor for the lists themselves needs the owner's decision
+(docs/rx-group-list-budget.md section 4). At a P25 channel take the radio task reads the list and up to 32 contacts
+(`integration/radiofoundry/p25rxgl/p25_rxgl.c`) and hands the talkgroups to the P25 worker (`p25_lab_set_groups`,
+cleared by every `p25_lab_set_channel`: search, trunk following and YSF never see a channel's list); the admission in
+`src/p25/voice.c` (`group_wanted`) takes the filter's talkgroup, All Call or a listed one. Build hooks in
+`tools/plus_p25rxgl.py`.
+
+Host tests: `tests/test_voice.c` with `CONFIG_P25_RXGL=1` (`tools/test_voice.py`: a listed talkgroup plays on a
+channel filtering another, an unlisted one stays muted, the count bounds the list, no filter hears all);
+`tests/plus/test_p25rxgl.c` (`tools/test_p25rxgl.py` in `classic-test`: the real codeplug over a simulated flash, list
+/ Any / None and the talkgroup over a save and a reboot, the record byte, the filter rule, the talkgroups taken, the
+worker hand-over faked). Host-tested only; not run on the radio. Budget and design: `docs/rx-group-list-budget.md`.

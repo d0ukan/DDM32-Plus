@@ -16,6 +16,12 @@ void p25_lab_live_key(void);
 #if CONFIG_P25_CHANNELS
 /* Worker input snapshot; changed only after the previous worker has stopped. */
 int p25_lab_set_channel(uint16_t rx_nac, uint16_t tx_nac, uint16_t talkgroup, uint32_t radio_id, int selective);
+#if CONFIG_P25_RXGL
+/* DDM32 Plus P25 RX group list: after p25_lab_set_channel (which clears it), the talkgroups that play besides the
+ * channel's own when it is Selective; at most P25_LAB_GROUPS are kept (copied). Refused while the worker runs */
+#define P25_LAB_GROUPS 32u
+int p25_lab_set_groups(const uint16_t *talkgroups, uint8_t count);
+#endif
 void p25_lab_channel_stop(void);
 int p25_lab_channel_receiving(void);
 #if CONFIG_P25_TRUNK
