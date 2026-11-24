@@ -1214,7 +1214,7 @@ void __attribute__((noinline)) ui_sat_home_iss(void)
 
 static bool iss_key(const input_event_t *ev)
 {
-	bool press =ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
+	bool press = ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
 	sat_view_t v;
 	uint8_t i = iss_index();
 	if (sky_page)
