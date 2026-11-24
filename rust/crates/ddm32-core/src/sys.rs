@@ -1,18 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The two operating system calls of the search log (SearchLogPage.xaml.cs KeepAwake, SearchLog.cs ListSeparator):
-//! keep Windows awake while it logs all night, and Windows' list separator for the CSV. Elsewhere both are no-ops
-//! (None: the caller's default).
+//! keep the PC awake while it logs all night (Windows call; a systemd-inhibit / caffeinate helper process on Linux /
+//! macOS), and Windows' list separator for the CSV (None elsewhere: the caller's default).
 
-/// Keeps the PC from sleeping while it lives (Windows: SetThreadExecutionState with ES_SYSTEM_REQUIRED |
-/// ES_CONTINUOUS on the thread that made it, given back on drop; the screen may still go off). Make it on the thread
-/// that runs the whole log and drop it on the same thread.
-pub struct KeepAwake(());
+/// Keeps the PC from sleeping while it lives (the screen may still go off). Windows: SetThreadExecutionState with
+/// ES_SYSTEM_REQUIRED | ES_CONTINUOUS on the thread that made it, given back on drop; make it on the thread that runs
+/// the whole log and drop it on the same thread. Linux: a `systemd-inhibit --what=sleep:idle` child process; macOS: a
+/// `caffeinate -i` child process (see [`inhibit_command`]); the child is ended on drop, and it also ends by itself when
+/// this program ends (it waits for this process). Where the tool is missing nothing happens (the PC may sleep as
+/// before; the search log reconnects after a sleep).
+pub struct KeepAwake {
+    child: Option<std::process::Child>,
+}
 
 impl KeepAwake {
     pub fn new() -> Self {
         #[cfg(windows)]
-        win::execution_state(win::ES_CONTINUOUS | win::ES_SYSTEM_REQUIRED);
-        KeepAwake(())
+        {
+            win::execution_state(win::ES_CONTINUOUS | win::ES_SYSTEM_REQUIRED);
+            KeepAwake { child: None }
+        }
+        #[cfg(not(windows))]
+        {
+            let child = inhibit_command(std::env::consts::OS, std::process::id()).and_then(|(prog, args)| {
+                std::process::Command::new(prog)
+                    .args(args)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .ok()
+            });
+            KeepAwake { child }
+        }
+    }
+
+    /// Whether something keeps the PC awake now (Windows: always; elsewhere: the helper process started).
+    pub fn active(&self) -> bool {
+        cfg!(windows) || self.child.is_some()
     }
 }
 
@@ -26,6 +51,35 @@ impl Drop for KeepAwake {
     fn drop(&mut self) {
         #[cfg(windows)]
         win::execution_state(win::ES_CONTINUOUS);
+        if let Some(mut c) = self.child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+/// The helper process that keeps a Linux or macOS PC awake while this process (`pid`) runs: (program, arguments), or
+/// None on another OS. Both helpers end by themselves when `pid` ends, so a crash never leaves the PC awake for ever.
+/// Linux: systemd-inhibit (systemd's own tool; a "block" lock on sleep and idle needs no root) holding the lock while
+///   `tail --pid=PID -f /dev/null` waits for this process.
+/// macOS: caffeinate -i (no idle sleep) -w PID (until that process ends).
+pub fn inhibit_command(os: &str, pid: u32) -> Option<(&'static str, Vec<String>)> {
+    match os {
+        "linux" => Some((
+            "systemd-inhibit",
+            vec![
+                "--what=sleep:idle".into(),
+                "--who=DDM32 Plus".into(),
+                "--why=Search log running".into(),
+                "--mode=block".into(),
+                "tail".into(),
+                format!("--pid={pid}"),
+                "-f".into(),
+                "/dev/null".into(),
+            ],
+        )),
+        "macos" => Some(("caffeinate", vec!["-i".into(), "-w".into(), pid.to_string()])),
+        _ => None,
     }
 }
 

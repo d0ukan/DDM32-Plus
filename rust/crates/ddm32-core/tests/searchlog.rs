@@ -828,3 +828,36 @@ fn stats_do_not_change_the_log_itself() {
         (with.total_calls(), with.missed(), with.restarts)
     );
 }
+
+#[test]
+fn keep_awake_helper_on_linux_and_macos() {
+    use ddm32_core::sys::inhibit_command;
+    // Linux: systemd-inhibit holds a sleep / idle lock while tail waits for this process (it ends with it)
+    let (prog, args) = inhibit_command("linux", 4242).unwrap();
+    assert_eq!("systemd-inhibit", prog);
+    assert_eq!(
+        vec![
+            "--what=sleep:idle",
+            "--who=DDM32 Plus",
+            "--why=Search log running",
+            "--mode=block",
+            "tail",
+            "--pid=4242",
+            "-f",
+            "/dev/null"
+        ],
+        args
+    );
+    // macOS: caffeinate keeps the system from idle sleep until the process ends
+    let (prog, args) = inhibit_command("macos", 7).unwrap();
+    assert_eq!(("caffeinate", vec!["-i".to_string(), "-w".into(), "7".into()]), (prog, args));
+    // Windows uses its own call; any other OS: nothing
+    assert!(inhibit_command("windows", 1).is_none());
+    assert!(inhibit_command("freebsd", 1).is_none());
+    // made and dropped at once: never panics, whatever the OS has (Windows: the thread's state is given back)
+    let k = ddm32_core::sys::KeepAwake::new();
+    if cfg!(windows) {
+        assert!(k.active());
+    }
+    drop(k);
+}

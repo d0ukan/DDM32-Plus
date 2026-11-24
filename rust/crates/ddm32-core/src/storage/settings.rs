@@ -19,9 +19,11 @@ pub const SKIP_PROGRAM_KEY: &str = "skip_program_version";
 pub const SKIP_FIRMWARE_KEY: &str = "skip_firmware_version";
 /// The release channel this program offers (0 Latest, 1 Beta, 2 Test / Alpha); the C# program used `include_beta`.
 pub const CHANNEL_KEY: &str = "channel";
-/// Keys only the C# program writes (this program keeps them but never writes them): a settings file holding one of
-/// them came from a C# install, whose `include_beta` default (true) showed the betas. Not `installed_firmware` /
-/// `installed_sha256`: this program writes those too after an install (the C# install record).
+/// Keys the C# program writes: a settings file holding one of them and no `channel` came from a C# install, whose
+/// `include_beta` default (true) showed the betas. Since v1.1.0 this program writes them too (the window's place, the
+/// last check, the restore shortcuts, the data pack names), which is safe because its own `channel` is decided and
+/// saved at its first start (`settle_channel`), before any of them is written. Not `installed_firmware` /
+/// `installed_sha256`: this program wrote those already (the C# install record).
 pub const NET_ONLY_KEYS: [&str; 7] = [
     "window",
     "last_check_utc",
