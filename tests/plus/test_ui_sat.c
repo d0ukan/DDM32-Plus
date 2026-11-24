@@ -575,6 +575,11 @@ static int iss_checks(void)
 			"dual=1 shows=4_ISS", true);
 	bad += iss_flow(n = "Dual watch hold 4 tracks the ISS", "quick 7 ctx 3 5 ok", NULL, "long:4", "dual=1", false);
 	ISS_CHECK(starts == 1 && start_sat == iss, n);
+	bad += iss_flow("Dual watch on the VFO letter: no 4 ISS", "ok 4 up ok quick 7 ctx 3 5 ok", NULL, "wait:300",
+			"dual=1 hides=4_ISS", true);
+	bad += iss_flow(n = "Dual watch on the VFO letter: a held 4 types the digit", "ok 4 up ok quick 7 ctx 3 5 ok", NULL,
+			"long:4", "dual=1", false);
+	ISS_CHECK(starts == 0 && ui_view()->vfo && ui_st.entry, n);
 	bad += iss_flow("VFO hint has no 4 ISS (a held 4 types a digit there)", "ok 4 up ok ", NULL, "wait:300", "hides=4_ISS", false);
 	iss_map = SIM_MAP_F;	/* a board without digit keys: no hold-4, no hint for it */
 	bad += iss_flow(n = "Few-key board: no 4 ISS in the hint", "", NULL, "wait:300",

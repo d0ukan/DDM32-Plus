@@ -325,6 +325,15 @@ def prepare_iss_tool(transform):
          '\t}\n'
          '\tchar row[sizeof home_hint];\n'
          '\tsize_t nl = strlen(name);\n'
+         '\tif (nl > 0) {\t// the name cut at 11 bytes: a character left incomplete goes\n'
+         '\t\tsize_t k = nl - 1;\n'
+         '\t\twhile (k > 0 && ((unsigned char)name[k] & 0xC0) == 0x80)\n'
+         '\t\t\tk--;\n'
+         '\t\tunsigned char c0 = (unsigned char)name[k];\n'
+         '\t\tsize_t len = c0 >= 0xF0 ? 4 : c0 >= 0xE0 ? 3 : c0 >= 0xC0 ? 2 : 1;\n'
+         '\t\tif (k + len > nl)\n'
+         '\t\t\tname[nl = k] = 0;\n'
+         '\t}\n'
          '\tfor (size_t n = nl;; n--) {\n'
          '\t\tif (n > 0 && n < nl && ((unsigned char)name[n] & 0xC0) == 0x80)\n'
          '\t\t\tcontinue;\t// not inside a multi-byte character\n'
@@ -372,7 +381,7 @@ def prepare_iss_tool(transform):
          'static const char *dual_hint(const radio_view_t *v, const ui_state_t *s)\n{\n'),
         ('\treturn TR("# options  Back stop");\n}',
          '#if CONFIG_SATELLITES\n'
-         '\tif (ui_has_action(ACT_DIGIT_4))\t// a keypad: a board without digit keys has no hold-4\n'
+         '\tif (ui_has_action(ACT_DIGIT_4) && !v->vfo)\t// a keypad; on a VFO letter a held 4 types the digit\n'
          '\t\treturn TR(TEXT_ALT_OPEN "# options  4 ISS  Back stop" TEXT_ALT_NEXT "# more  4 ISS  Back stop" TEXT_ALT_CLOSE);\n'
          '#endif\n'
          '\treturn TR("# options  Back stop");\n}'),
