@@ -192,6 +192,16 @@ void fs_radio_cost(uint32_t gap_ms, uint32_t step_ms)
 		cur_step = (uint8_t)(s > 255u ? 255u : s);
 }
 
+void fs_dip(void)
+{
+	st.dips++;
+}
+
+void fs_dip_hold(void)
+{
+	st.dip_holds++;
+}
+
 void fs_view(uint32_t now_ms, fs_stats_t *out)
 {
 	*out = st;	/* a torn copy only mixes two moments' counts: the PC reads again next second */

@@ -43,6 +43,23 @@
 				 * held back could be the last before the dwell's end (an FM channel without a tone that
 				 * opens the squelch at once could be stepped past on its first open) */
 #define FS_TICK_MS	10u	/* the radio task's tick (RADIO_TICK_MS): a tick gap over it is the task's time elsewhere */
+/* v1.0.3 (docs/scan-slow-2026-11-25.md): the receiver's false carrier right after a retune (the noise reading's dip) may
+ * last longer than the 20-25 ms the guards above allow (unmeasured; a VHF / UHF jump may take longer than a step in one
+ * band). On the host model a dip of 25 ms or more opened the squelch at a quiet stop's first poll and the scan held
+ * every quiet channel for its 2 s resume delay, classic and fast. With FS_DIP_GUARD (0: v1.0.2's behaviour, for the
+ * host test's before / after) the scan copes with a dip up to FS_DIP_MS:
+ *  - the squelch doesn't open until the retune is FS_DIP_MS old (at most the dwell less two polls, at least the
+ *    guards above);
+ *  - a hold whose squelch opened anyway while the retune was that young (a short dwell's shorter guard) and that heard
+ *    no carrier after the settle ends without the resume delay once the squelch closes (scanst.cost DIP_HOLDS);
+ *  - the fast rule: a reading that is not quiet while the retune is younger than FS_DIP_MS restarts the quiet span and
+ *    the span then counts only readings from FS_DIP_MS on; a reading that is not quiet after that hands the stop to the
+ *    classic rules as before (scanst.cost DIPS counts the stops this happened at) */
+#ifndef FS_DIP_GUARD
+#define FS_DIP_GUARD	1
+#endif
+#define FS_DIP_MS	50u	/* SCAN_SETTLE_MS: the classic scan ignores readings this young anyway */
+#define FS_SPAN_DIP_MS	30u	/* the quiet span after a dip reading (FM and the native modes): four readings 50-80 ms */
 
 enum { FS_M_FM, FS_M_DMR, FS_M_P25, FS_M_OTHER, FS_MODES };	/* P25 counts YSF (the native receiver's modes) */
 enum { FS_WAIT, FS_QUIET, FS_CLASSIC };				/* fs_feed's verdict */
@@ -89,6 +106,13 @@ typedef struct {
 	 * the tick's own step) */
 	uint16_t bands, am_stops;
 	uint8_t fb_why, slow_step;
+	/* v1.0.3: stops whose first readings were not quiet while the retune was younger than FS_DIP_MS (the dip, or a
+	 * carrier: the readings after it tell which). About every stop with nothing on the air: this radio's dip is longer
+	 * than FS_SETTLE_RETUNE_MS */
+	uint16_t dips;
+	/* ... and holds that began with a squelch opened while the retune was younger than FS_DIP_MS and heard no carrier
+	 * after the settle: the scan moved on without the resume delay (the false carrier after a retune) */
+	uint16_t dip_holds;
 } fs_stats_t;
 
 /* FS_WHY_* bits; bits 4-6 the fall-back's FS_FB_* reason */
@@ -125,6 +149,10 @@ void fs_fallback_reading(uint8_t mode, uint8_t why, uint8_t noise, uint8_t line,
 /* The radio task's timing: the gap since its last tick, the time a step on the tick took (ms); both counted to the
  * current stop's step time too */
 void fs_radio_cost(uint32_t gap_ms, uint32_t step_ms);
+/* v1.0.3: the current stop's first not-quiet reading came while the retune was younger than FS_DIP_MS (counted once a
+ * stop) */
+void fs_dip(void);
+void fs_dip_hold(void);				/* v1.0.3: a hold on the false carrier, its resume delay skipped */
 
 /* The PC (the debug link task): a copy of the counters (running: mark_ms = now) */
 void fs_view(uint32_t now_ms, fs_stats_t *out);

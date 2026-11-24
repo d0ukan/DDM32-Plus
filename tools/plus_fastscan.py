@@ -115,6 +115,13 @@ def prepare_fastscan(transform, install):
          '#if CONFIG_SCAN_FAST\n'
          '\tbool fsc_hush = fsc_guard(sm, now_ms);\t// DDM32 Plus faster scan: the squelch waits after the tick\'s retune\n'
          '#endif\n#endif\n'),
+        # v1.0.3 (docs/scan-slow-2026-11-25.md): a hold of an FM-path stop whose squelch the false carrier after the
+        # retune opened (early, no carrier heard after the settle) doesn't wait the resume delay (fsc_active)
+        ('\t\tactive = sm->view.state == RS_RX && (sm->view.squelch != 0 || carrier);\n\t}\n',
+         '\t\tactive = sm->view.state == RS_RX && (sm->view.squelch != 0 || carrier);\n'
+         '#if CONFIG_SCAN_FAST\n'
+         '\t\tactive = fsc_active(sm, active, now_ms);\t// DDM32 Plus: no resume delay after a retune\'s false carrier\n'
+         '#endif\n\t}\n'),
         ('\tbool opens = (listening || (sm->view.tone_ok && (sq == 0 || st.noise < open_below))) && !dual_peeking(sm);\n',
          '\tbool opens = (listening || (sm->view.tone_ok && (sq == 0 || st.noise < open_below))) && !dual_peeking(sm);\n'
          '#if CONFIG_SCAN_FAST\n'

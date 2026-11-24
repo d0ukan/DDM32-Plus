@@ -15,7 +15,9 @@ a build (python3 tools/test_fastscan.py [engine|suites|upstream|model]):
 - model: the radio core's zone scan on a model of the receiver, classic -> fast (tests/plus/test_fastscan_radio.inc),
   the table printed for docs/plus.md and its checks;
 - zones (v1.0.2): a zone made on the radio against the stored "All channels" on the same model, with the codeplug's
-  channel reads counted and charged a time on the radio task (tests/plus/test_zonescan_radio.inc)."""
+  channel reads counted and charged a time on the radio task (tests/plus/test_zonescan_radio.inc); v1.0.3: the same
+  model with the receiver's false carrier after a retune longer than 15 ms, built as v1.0.2 (before) and with the fix
+  (after)."""
 import os
 import re
 import shlex
@@ -164,9 +166,13 @@ def zones(ROOT, APP, OUT, host):
                        '"\n#undef main\n#define main fastscan_model_main\n#include "' +
                        str(ROOT / 'tests/plus/test_fastscan_radio.inc') + '"\n#undef main\n#include "' +
                        str(ROOT / 'tests/plus/test_zonescan_radio.inc') + '"\n')
-    argv = radio_argv(ROOT, APP, OUT, host, wrapper, 'test_radio_zonescan')
-    run([*argv, '-DCONFIG_SCAN_PRIO=1', '-lm'], cwd=host)
-    run([OUT / 'test_radio_zonescan'], cwd=host)
+    # v1.0.3 (docs/scan-slow-2026-11-25.md): first v1.0.2's scan (FS_DIP_GUARD 0, the dip rows only: before), then the
+    # fix (after) with every check
+    for guard in (0, 1):
+        name = f'test_radio_zonescan_{guard}'
+        argv = radio_argv(ROOT, APP, OUT, host, wrapper, name)
+        run([*argv, '-DCONFIG_SCAN_PRIO=1', f'-DFS_DIP_GUARD={guard}', '-lm'], cwd=host)
+        run([OUT / name], cwd=host)
 
 
 def main(ROOT, APP, OUT, flags, host, only=None):

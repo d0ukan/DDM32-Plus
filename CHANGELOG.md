@@ -3,6 +3,18 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased (v1.0.3 candidate)
+
+Firmware. Host-tested only; not yet run on the radio.
+
+- Channel scan "extremely slow" (owner's report on 1.0.2): not a regression from 1.0.1 in the code. On the host model
+  the scan holds every quiet channel for the 2 s resume delay when the receiver's false carrier right after a retune
+  lasts 25 ms or more (unmeasured on the radio); longer after a VHF / UHF jump, a zone that mixes bands gets much slower
+  than All channels. Zone and VFO scans, fast and classic, now cope with up to 50 ms of it: the squelch waits up to
+  50 ms after a retune, the fast rule tolerates early readings, and a hold on such an early squelch that heard no
+  carrier moves on without the resume delay. Model: 152 ms a stop classic, 53-94 ms fast with a 25-45 ms dip (before
+  600-2000 ms); unchanged with a short dip. `scanst.cost` gains DIPS and DIP_HOLDS. See docs/scan-slow-2026-11-25.md.
+
 ## v1.0.2 (2026-11-25)
 
 Firmware. Host-tested only (simulator flows in English and Turkish, normal and Large text); not yet run on the radio.

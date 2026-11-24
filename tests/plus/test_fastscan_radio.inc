@@ -24,6 +24,11 @@
 
 enum { FX_NONE, FX_FM, FX_FM_EDGE, FX_DMR, FX_P25 };
 enum { FX_DIP_MS = 15, FX_FLOOR_DBM = -125, FX_OVERS = 96 };
+/* The dip's length (tests/plus/test_zonescan_radio.inc tries others), and (not 0) its length after a retune of more than
+ * 100 MHz (a VHF / UHF jump) */
+static uint32_t fx_dip_ms = FX_DIP_MS, fx_dip_band_ms;
+static uint32_t fx_last_hz;	/* the frequency before the last retune */
+static bool fx_jumped;		/* the last retune was a VHF / UHF jump */
 #define FX_BASE_HZ	446006250u
 #define FX_STEP_HZ	12500u
 
@@ -117,7 +122,7 @@ static void fx_status(void)
 		noise = 120 - (int)fx_rand(6);			/* deaf: the noise stays at its idle value */
 	if (here && fx.kind == FX_FM_EDGE)
 		noise = 44 + (int)fx_rand(24);			/* around the squelch line */
-	if (now - fx.tuned_at < FX_DIP_MS)
+	if (now - fx.tuned_at < (fx_jumped && fx_dip_band_ms != 0 ? fx_dip_band_ms : fx_dip_ms))
 		noise = 30;
 	else if (fx.njit != 0)
 		noise += (int)fx_rand(2u * fx.njit + 1u) - fx.njit;
@@ -135,6 +140,8 @@ static void fx_ms(void)
 	if (hw.rx_calls != fx.rx_calls) {
 		fx.rx_calls = hw.rx_calls;
 		fx.tuned_at = now;
+		fx_jumped = (hw.rx_hz > fx_last_hz ? hw.rx_hz - fx_last_hz : fx_last_hz - hw.rx_hz) > 100000000u;
+		fx_last_hz = hw.rx_hz;
 	}
 	double target = FX_FLOOR_DBM - 2 + (double)fx_rand(5);
 	int k = fx_over_now();
@@ -220,6 +227,8 @@ static void fx_begin_scan(void)
 	req(RREQ_SCAN, RSCAN_ZONE);
 	fx.rx_calls = hw.rx_calls;
 	fx.tuned_at = now;
+	fx_last_hz = hw.rx_hz;
+	fx_jumped = false;
 	fx.next_tick = now + 1u + fx_rand(RADIO_TICK_MS);
 	fx.next_poll = now + RADIO_POLL_MS;
 	fx.tick_late = fx.poll_late = 0;

@@ -742,6 +742,8 @@ __pycache__/
 !/tests/plus/test_fbsafe_gallery.c
 !/tests/plus/test_fbsafe_st7789.c
 !/tests/plus/test_zonescan_radio.inc
+# branch scanslow: the scan held on the false carrier after a retune
+!/docs/scan-slow-2026-11-25.md
 # branch rxgl: P25 RX group list (tools/plus_p25rxgl.py, docs/rx-group-list-budget.md)
 !/tools/plus_p25rxgl.py
 !/tools/test_p25rxgl.py

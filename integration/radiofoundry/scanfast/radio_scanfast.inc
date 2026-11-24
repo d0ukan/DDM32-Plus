@@ -37,6 +37,14 @@ static uint32_t fsc_retune_ms;
 static uint16_t fsc_zone;	// the zone scanned (a stop elsewhere is a priority channel's)
 static uint32_t fsc_tick_ms;	// the last tick while a stop listened (the radio task's gaps, fs_radio_cost)
 static bool fsc_tick_listen;
+#if FS_DIP_GUARD
+static uint32_t fsc_dip_tag;	// v1.0.3: the stop (its tuned_ms) whose readings met a young not-quiet one (fsc_tick)
+static bool fsc_dip_seen;
+static uint32_t fsc_idle_tag;	// ... the stop whose squelch a poll last saw closed (fsc_guard), and the retune's age then
+static uint8_t fsc_idle_age;
+static uint32_t fsc_hold_tag;	// ... the stop whose hold began with a squelch opened early (fsc_active)
+static bool fsc_hold_early;
+#endif
 
 static uint8_t fsc_mode_of(const radio_sm_t *sm)
 {
@@ -188,7 +196,29 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 		why = fsc_not_quiet(sm, &st);
 	}
 	bool quiet = why == 0;
-	uint8_t v = fs_feed(s, now_ms, quiet, fsc_mode == FS_M_DMR ? FS_SPAN_DMR_MS : FS_SPAN_MS);
+#if FS_DIP_GUARD
+	// v1.0.3: a reading that is not quiet while the retune is young may be the receiver's false carrier after it (or
+	// the last frequency's strength): the span starts again and from then on counts only readings from FS_DIP_MS. AM
+	// and broadcast are never read quiet: handed over at once as before
+	if (why != FS_FB_AM && (int32_t)(now_ms - fsc_retuned(sc)) < (int32_t)FS_DIP_MS) {
+		if (!quiet) {
+			if (fsc_dip_tag != sc->tuned_ms || !fsc_dip_seen)
+				fs_dip();
+			fsc_dip_tag = sc->tuned_ms;
+			fsc_dip_seen = true;
+			s->first_ms = s->last_ms = s->tuned_ms;	// no span (fs_feed)
+			return;
+		}
+		if (fsc_dip_seen && fsc_dip_tag == sc->tuned_ms)
+			return;		// after a dip reading: not counted before FS_DIP_MS
+	}
+#endif
+	uint32_t span = fsc_mode == FS_M_DMR ? FS_SPAN_DMR_MS : FS_SPAN_MS;
+#if FS_DIP_GUARD
+	if (fsc_dip_seen && fsc_dip_tag == sc->tuned_ms && span < FS_SPAN_DIP_MS)
+		span = FS_SPAN_DIP_MS;	// after a dip reading: one reading more (a carrier near the line gets another chance)
+#endif
+	uint8_t v = fs_feed(s, now_ms, quiet, span);
 	if (v == FS_WAIT)
 		return;
 	fs_count(v);
@@ -222,14 +252,56 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 // or polls off their grid. Not with a scan dwell under FS_RETUNE_GUARD_DWELL_MS: there a poll the guard held back could
 // be the last before the dwell's end, and a channel that opens the squelch at once (FM, no tone) be stepped past on
 // its first open; those dwells keep v1.0.1's squelch exactly
+// v1.0.3 (FS_DIP_GUARD): the guard lasts until the retune is FS_DIP_MS old, cut to the dwell less two polls (a signal
+// that opens the squelch at the first poll after it still holds the scan at the next one, before the dwell's end), and
+// never shorter than v1.0.2's
 static bool fsc_guard(const radio_sm_t *sm, uint32_t now_ms)
 {
 	const scan_t *sc = &sm->scan;
 	if (!scan_on(sc) || !fsc_kind(sm) || sm->view.state != RS_IDLE)
 		return false;
 	int32_t age = (int32_t)(now_ms - fsc_retuned(sc));
+#if FS_DIP_GUARD
+	// The squelch is closed at this poll of the stop (called before the poll's squelch): a squelch open later opened
+	// at this age or after (fsc_active)
+	fsc_idle_tag = sc->tuned_ms;
+	fsc_idle_age = (uint8_t)(age < 0 ? 0 : age > 255 ? 255 : age);
+	uint32_t dwell = sc->cfg.dwell_ms, win = dwell > 2u * RADIO_POLL_MS ? dwell - 2u * RADIO_POLL_MS : 0u;
+	if (win > FS_DIP_MS)
+		win = FS_DIP_MS;
+#else
+	uint32_t win = 0;
+#endif
 	if (fsc_stepped && sc->tuned_ms == fsc_stepped_ms)
-		return age < (int32_t)FS_POLL_GUARD_MS;
+		return age < (int32_t)(win > FS_POLL_GUARD_MS ? win : FS_POLL_GUARD_MS);
 	return sc->tuned_ms == fsc_retune_tag && sc->cfg.dwell_ms >= FS_RETUNE_GUARD_DWELL_MS &&
-	       age < (int32_t)FS_RETUNE_GUARD_MS;
+	       age < (int32_t)(win > FS_RETUNE_GUARD_MS ? win : FS_RETUNE_GUARD_MS);
+}
+
+// radio_sm_poll's scan service, an FM-path stop (FM, AM, NXDN, dPMR, and P25 / YSF before their own rule), before
+// scan_poll; returns active as it is. v1.0.3 (FS_DIP_GUARD): a hold whose squelch opened while the retune was younger
+// than FS_DIP_MS (a short dwell's guard is shorter; or the squelch was never seen closed at this stop) and that never
+// heard a carrier after the settle (scan_t.heard: the noise reading under the line) was the receiver's false carrier
+// after the retune: when the squelch has closed, the scan moves on at once instead of waiting the resume delay (2 s by
+// default). The hold itself is kept (a weak station that opened the squelch early is still held, and hears its carrier).
+// Broadcast FM: as before
+static bool fsc_active(radio_sm_t *sm, bool active, uint32_t now_ms)
+{
+#if FS_DIP_GUARD
+	scan_t *sc = &sm->scan;
+	if (!fsc_kind(sm) || sm->view.bcast)
+		return active;
+	if (active && (sc->phase == SCAN_PH_LISTEN || sc->phase == SCAN_PH_PROBE)) {
+		fsc_hold_tag = sc->tuned_ms;	// a hold starts at this poll: did its squelch open early?
+		fsc_hold_early = fsc_idle_tag != sc->tuned_ms || fsc_idle_age < FS_DIP_MS;
+	} else if (!active && sc->phase == SCAN_PH_RESUME && !sc->heard && fsc_hold_early &&
+		   fsc_hold_tag == sc->tuned_ms && (uint32_t)(now_ms - sc->phase_ms) < sc->cfg.delay_ms) {
+		sc->phase_ms = now_ms - sc->cfg.delay_ms;	// scan_poll: the wait is over
+		fs_dip_hold();
+	}
+#else
+	(void)sm;
+	(void)now_ms;
+#endif
+	return active;
 }

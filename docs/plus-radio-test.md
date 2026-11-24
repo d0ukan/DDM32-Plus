@@ -864,6 +864,16 @@ Receive only: our radio keys nothing. Reading the counters opens the serial port
 | ZS-4 | A priority channel set from All channels (Zones > the channel > # > Set as priority), not in the zone you made; scan the made zone 30 s | one short stop on it about every 2 s (`scanst.cost` OTHER_ZONE about 15 in 30 s), the zone's own channels as fast as in ZS-2 |
 | ZS-5 | The other radio FM on a channel of the made zone, overs of 3-5 s; then DMR direct mode on a DMR channel of it | both stop and play as in SF-3 / SF-5; `scanst.slow` names that channel with WHY 3 (heard, held) or 7 (fast handed it to classic first); `scanst.fb` its channel and a noise under the line |
 
+## Scan held on the false carrier after a retune (branch `scanslow`, docs/scan-slow-2026-11-25.md, v1.0.3 candidate)
+
+Receive only; nothing keyed. Host-tested only until these rows run.
+
+| Row | Do | Expect |
+|---|---|---|
+| SS-1 | **On 1.0.2 first (the evidence).** The scan that is slow, nothing on air, 30 s fast then 30 s classic (held 0); `python pc/radiotools/plus_live.py --port COM14 --count 1 --scan-stats` after each | the mechanism if NOTICED / HELD is close to STOPS and PASS_MS / PASS_STOPS is near 2000 ms; `scanst.slow` CAUSE held / open / noise. Send the lines |
+| SS-2 | The `scanslow` build: SS-1 again | NOTICED / HELD about 0; PASS_MS / PASS_STOPS about 55-95 ms fast, 150 ms classic; `scanst.cost` DIPS (7th field): close to STOPS = the radio's dip is longer than 30 ms, near 0 = it is not (then send everything); DIP_HOLDS (8th) small |
+| SS-3 | The other radio weak FM (just over the squelch) on one channel of the zone, overs of 3-5 s, both algorithms | stops and plays as before (SF-4); a strong station too |
+
 ## Upstream RadioFoundry fixes (branch `rfports`, docs/plus.md "Upstream RadioFoundry fixes")
 
 Each step that opens the serial port, installs, restarts or transmits needs the owner's approval in chat first.

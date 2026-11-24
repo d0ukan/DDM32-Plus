@@ -25,12 +25,16 @@ typedef struct {
 } zn_res_t;
 
 static bool zn_vhf;	/* every other channel on 2 m (the band counter's case) */
+static bool zn_split;	/* channels 9-16 on 2 m: All channels jumps band twice a pass, Mine at 8 of its 12 stops */
+static uint16_t zn_dwell;	/* not 0: the scan dwell setting for zn_run */
 
 /* fx_codeplug's 16 channels (zone 0, renamed "All channels"), then zone 1 "Mine" */
 static void zn_codeplug(void)
 {
 	fx_codeplug();
 	for (uint16_t n = 2; zn_vhf && n <= 16; n += 2)
+		chans[n].rx_hz = chans[n].tx_hz = 145000000u + 12500u * n;
+	for (uint16_t n = 9; zn_split && n <= 16; n++)
 		chans[n].rx_hz = chans[n].tx_hz = 145000000u + 12500u * n;
 	strcpy(zones[0].name, "All channels");
 	memset(&zones[1], 0, sizeof zones[1]);
@@ -58,6 +62,8 @@ static zn_res_t zn_run(bool fast, uint16_t zone, uint32_t prio, uint32_t cost_us
 	if (zone != 0)
 		req(RREQ_ZONE, zone);
 	CHECK(sm.view.zone_index == zone);
+	if (zn_dwell != 0)
+		sm.set.scan_dwell_ms = zn_dwell;
 	radio_scan_prio_set(prio);
 	zn_cost_us = cost_us;
 	fx_begin_scan();
@@ -250,9 +256,111 @@ static void test_zonescan_short_dwell(void)
 	CHECK(caught == overs);
 }
 
+/* v1.0.3 (docs/scan-slow-2026-11-25.md): the receiver's false carrier right after a retune (the noise reading's dip)
+ * longer than the model's 15 ms; nobody has measured it on the radio. Built twice by tools/test_fastscan.py zones:
+ * FS_DIP_GUARD 0 is v1.0.2's scan (the "before" rows, and their check that a dip of 25 ms or more holds quiet
+ * channels), 1 the fix (the "after" rows: quick, nothing held). Each row prints ms a stop, holds and scanst's DIPS */
+static zn_res_t zn_dip_run(bool fast, uint16_t zone, uint32_t dip, uint32_t band_dip, uint32_t cost_us, uint16_t dwell)
+{
+	fx_dip_ms = dip;
+	fx_dip_band_ms = band_dip;
+	zn_dwell = dwell;
+	fx_setup(16, true, FX_NONE, 0, 0, 0, 0);
+	zn_res_t r = zn_run(fast, zone, 0, cost_us, 5, 20000);
+	fx_dip_ms = FX_DIP_MS;
+	fx_dip_band_ms = 0;
+	zn_dwell = 0;
+	return r;
+}
+
+static void zn_dip_print(const char *what, bool fast, const zn_res_t *r)
+{
+	printf("Dip %s, %s (FS_DIP_GUARD %d): %.1f ms a stop, %u stops, held %u, fall-back %u, dips %u\n", what,
+	       fast ? "fast" : "classic", FS_DIP_GUARD, r->ms_per_stop, r->stops, (unsigned)r->st.held,
+	       (unsigned)r->st.fallback, (unsigned)r->st.dips);
+}
+
+static void test_zonescan_dip(void)
+{
+	static const uint32_t dips[] = { 15, 25, 35, 45 };
+	char what[64];
+	/* A quiet zone (Mine, 12 FM channels in one band), the dip the same after every retune, a read 0 or 3 ms */
+	for (unsigned d = 0; d < 4; d++)
+		for (unsigned c = 0; c < 2; c++)
+			for (unsigned f = 0; f < 2; f++) {
+				zn_res_t r = zn_dip_run(f != 0, 1, dips[d], 0, c * 3000u, 0);
+				snprintf(what, sizeof what, "%u ms, channel read %u ms", (unsigned)dips[d], c * 3u);
+				zn_dip_print(what, f != 0, &r);
+				CHECK(r.stops > 5);
+				if (FS_DIP_GUARD) {
+					CHECK(r.st.held == 0 && r.st.noticed == 0);
+					/* classic: its dwell; fast: three readings from 30 ms (no dip seen), or from FS_DIP_MS after
+					 * the retune (a slow read shifts that onto the next 10 ms tick) */
+					CHECK(f ? r.ms_per_stop <= (dips[d] < 30 ? 56.0 + c * 3.0 : 86.0 + c * 10.0) :
+						  r.ms_per_stop <= 156.0);
+					if (dips[d] >= 35)
+						CHECK(!f || r.st.dips + 2u >= r.stops);
+				} else if (dips[d] >= 25) {
+					CHECK(r.st.held > 0 && r.ms_per_stop > 500.0);	/* v1.0.2: quiet channels held */
+				}
+			}
+	/* A short dwell (75 ms: the guard window is 25 ms) and a 35 ms dip: the squelch the dip opens holds the stop until
+	 * it closes, then the scan moves on without the resume delay */
+	{
+		zn_res_t r = zn_dip_run(false, 1, 35, 0, 0, 75);
+		zn_dip_print("35 ms, scan dwell 75 ms", false, &r);
+		printf("  ... holds ended without the resume delay: %u\n", (unsigned)r.st.dip_holds);
+		if (FS_DIP_GUARD)
+			CHECK(r.ms_per_stop <= 135.0 && r.st.dip_holds + 2u >= r.st.held);
+		else
+			CHECK(r.ms_per_stop > 1000.0);
+	}
+	/* The owner's v1.0.1 report on the model: a dip of 15 ms in one band and 40 ms on a VHF / UHF jump; All
+	 * channels (1-8 UHF, 9-16 VHF) jumps twice a pass, Mine at 8 of its 12 stops */
+	zn_split = true;
+	for (unsigned f = 0; f < 2; f++) {
+		zn_res_t all = zn_dip_run(f != 0, 0, 15, 40, 0, 0);
+		zn_res_t mine = zn_dip_run(f != 0, 1, 15, 40, 0, 0);
+		zn_dip_print("15 ms, 40 ms on a band jump, All channels", f != 0, &all);
+		zn_dip_print("15 ms, 40 ms on a band jump, Mine", f != 0, &mine);
+		if (FS_DIP_GUARD) {
+			CHECK(all.st.held == 0 && mine.st.held == 0);
+			CHECK(mine.ms_per_stop <= (f ? 75.0 : 156.0) && all.ms_per_stop <= (f ? 62.0 : 156.0));
+		} else {
+			CHECK(mine.ms_per_stop > 3.0 * all.ms_per_stop);	/* v1.0.2: the made zone far slower */
+		}
+	}
+	zn_split = false;
+	/* An FM station 3 dB over the squelch line in overs, the dip 35 ms: found as with the 15 ms dip, and the fast rule
+	 * ends no stop on it while it is on the air */
+	if (FS_DIP_GUARD) {
+		for (unsigned f = 0; f < 2; f++) {
+			unsigned overs = 0, caught = 0, missed = 0, quiet = 0;
+			for (uint32_t seed = 1; seed <= 4; seed++) {
+				fx_setup(16, true, FX_FM, 8, -105, 0, 0);
+				fx_dip_ms = 35;
+				fx_res_t r = fx_run(f != 0, seed, 40000);
+				fx_dip_ms = FX_DIP_MS;
+				overs += r.overs;
+				caught += r.caught;
+				missed += r.missed;
+				quiet += r.holds_quiet;
+			}
+			printf("Dip 35 ms, FM -105 dBm in overs, %s: %u of %u overs caught, false quiet %u\n",
+			       f ? "fast" : "classic", caught, overs, missed);
+			CHECK(missed == 0 && caught * 10u >= overs * 9u);
+		}
+	}
+}
+
 int main(void)
 {
 	int before = failures;
+	test_zonescan_dip();
+	if (!FS_DIP_GUARD) {	/* the "before" build: v1.0.2's rows only */
+		printf("Zone scan dip rows, v1.0.2 (FS_DIP_GUARD 0): %d checks, %d failures\n", checks, failures - before);
+		return failures != before;
+	}
 	test_zonescan_same();
 	test_zonescan_priority();
 	test_zonescan_figures();
