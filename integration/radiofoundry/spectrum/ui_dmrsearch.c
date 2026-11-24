@@ -153,6 +153,73 @@ static void req_search(uint32_t lo, uint32_t hi)
 	radio_req_dmr_search(lo, hi);
 }
 
+/* Fitting a line to the safe area (DDM32 Plus srchfix): build(b, arg, form) writes the line in a shorter form for each
+ * form number (0 = the full one); its text alternates (sb_age: "13m ago" / "13m") count as shorter forms of the same
+ * form. The first that is not wider than w is drawn; if even the last is, it is shortened with an ellipsis, never
+ * clipped at the edge */
+typedef void (*line_fn)(sbuf_t *b, const void *arg, int form);
+
+static void fit_line(const font_t *f, int w, char *out, size_t cap, line_fn build, const void *arg, int forms)
+{
+	char src[56];
+	sbuf_t b;
+	for (int form = 0; form < forms; form++) {
+		sb_init(&b, src, sizeof src);
+		build(&b, arg, form);
+		bool more = true;
+		for (int lvl = 0; more; lvl++) {
+			gfx_text_alt(src, lvl, out, cap, &more);
+			if (gfx_text_width(f, out) <= w)
+				return;
+		}
+	}
+	gfx_text_fit(f, src, w, out, cap);
+}
+
+static const char *skip_sp(const char *s)
+{
+	while (*s == ' ')
+		s++;
+	return s;
+}
+
+/* "Pass 72  hits 193  floor -84", then one space apart, then "Pass 72 hits 193 -84dBm" (the words kept: it fits up
+ * to six digits of pass and hits), then "P72 h193 fl-84" (4-digit pass and hits and a 3-digit floor still fit the
+ * 220 px of the DM-32's safe area) */
+static void pass_line(sbuf_t *b, const void *arg, int form)
+{
+	const dmrs_view_t *v = arg;
+	if (form >= 3) {
+		sb_str(b, TR("P"));
+		sb_u32(b, v->sweeps + 1u, 1);
+		sb_str(b, TR(" h"));
+		sb_u32(b, v->hits, 1);
+		sb_str(b, TR(" fl"));
+		sb_i32(b, v->floor_dbm);
+		return;
+	}
+	sb_str(b, TR("Pass "));
+	sb_u32(b, v->sweeps + 1u, 1);
+	if (form == 0) {
+		sb_str(b, TR("  hits "));
+	} else {
+		sb_chr(b, ' ');
+		sb_str(b, skip_sp(TR("  hits ")));
+	}
+	sb_u32(b, v->hits, 1);
+	if (form == 0) {
+		sb_str(b, TR("  floor "));
+	} else if (form == 1) {
+		sb_chr(b, ' ');
+		sb_str(b, skip_sp(TR("  floor ")));
+	} else {
+		sb_chr(b, ' ');
+	}
+	sb_i32(b, v->floor_dbm);
+	if (form == 2)
+		sb_str(b, "dBm");
+}
+
 #if CONFIG_ALL_SEARCH
 static void sb_hex3(sbuf_t *b, uint16_t v)
 {
@@ -162,7 +229,7 @@ static void sb_hex3(sbuf_t *b, uint16_t v)
 
 /* The all digital search's first line after the frequency: "P25 NAC $1C8/456", "YSF DG 0", "NXDN RAN 1" (DMR: as the DMR
  * search's) */
-static bool all_line(sbuf_t *b, const dmrs_found_t *f)
+static bool all_line(sbuf_t *b, const dmrs_found_t *f, int form)
 {
 	if (!all || f->mode == DMRS_MODE_DMR) {
 		if (all)
@@ -172,15 +239,18 @@ static bool all_line(sbuf_t *b, const dmrs_found_t *f)
 	sb_chr(b, ' ');
 	sb_str(b, dmrs_mode_name(f->mode));
 	if (f->cc != DMRS_CC_NONE) {
-		sb_str(b, f->mode == DMRS_MODE_P25 ? " NAC " : f->mode == DMRS_MODE_YSF ? " DG " : " RAN ");
+		/* a form on, the P25 line's "NAC " goes (the mode is named already), a form later the decimal NAC too */
+		sb_str(b, f->mode == DMRS_MODE_P25 ? (form >= 1 ? " " : " NAC ") : f->mode == DMRS_MODE_YSF ? " DG " : " RAN ");
 		if (f->mode == DMRS_MODE_P25) {
 #if CONFIG_NAC_DEC
 			sb_chr(b, '$');	// DM32 Plus: both forms, "$1C8/456"
 #endif
 			sb_hex3(b, f->cc);
 #if CONFIG_NAC_DEC
-			sb_chr(b, '/');
-			sb_u32(b, f->cc, 1);
+			if (form < 2) {
+				sb_chr(b, '/');
+				sb_u32(b, f->cc, 1);
+			}
 #endif
 		} else
 			sb_u32(b, f->cc, 1);
@@ -189,58 +259,78 @@ static bool all_line(sbuf_t *b, const dmrs_found_t *f)
 }
 #endif
 
-/* "433.5000 CC1 TS1+2 RPT 3m" (the all digital search: "433.5000 P25 NAC $1C8/456 3m", "438.7125 DMR CC1 TS2 RPT 3m") */
-static void found_line(sbuf_t *b, const dmrs_found_t *f)
+/* "433.5000 CC1 TS1+2 RPT 3m" (the all digital search: "433.5000 P25 NAC $1C8/456 3m", "438.7125 DMR CC1 TS2 RPT 3m").
+ * The safe area holds 24 small glyphs, so fit_line tries shorter forms: 0 as above (the age "13m ago" or "13m"), 1 the
+ * repeater / direct flags as letters ("R", "D"), 2 the slots as "T12" and the letters joined ("RD"), 3 no slots; the
+ * all digital P25 line drops "NAC " from form 1 on and the decimal NAC from form 2 */
+static void found_line(sbuf_t *b, const void *arg, int form)
 {
+	const dmrs_found_t *f = arg;
 	sb_mhz4(b, f->hz);
 #if CONFIG_ALL_SEARCH
-	if (!all_line(b, f))
+	if (!all_line(b, f, form))
 #endif
 	{
 		if (f->cc != DMRS_CC_NONE) {
 			sb_str(b, " CC");
 			sb_u32(b, f->cc, 1);
 		}
-		if (f->ts_mask & 3u) {
-			sb_str(b, " TS");
-			sb_str(b, (f->ts_mask & 3u) == 3u ? "1+2" : (f->ts_mask & 1u) ? "1" : "2");
+		unsigned ts = f->ts_mask & 3u;
+		if (ts != 0 && form < 3) {
+			sb_str(b, form < 2 ? " TS" : " T");
+			sb_str(b, ts == 3u ? (form < 2 ? "1+2" : "12") : ts == 1u ? "1" : "2");
 		}
-		if (f->sync_mask & DMRS_SYNC_BS)
-			sb_str(b, " RPT");
-		if (f->sync_mask & DMRS_SYNC_MS)
-			sb_str(b, " DIR");
+		bool rpt = (f->sync_mask & DMRS_SYNC_BS) != 0, dir = (f->sync_mask & DMRS_SYNC_MS) != 0;
+		if (form == 0) {
+			if (rpt)
+				sb_str(b, " RPT");
+			if (dir)
+				sb_str(b, " DIR");
+		} else if (rpt || dir) {
+			sb_chr(b, ' ');
+			if (rpt)
+				sb_chr(b, 'R');
+			if (dir && rpt && form == 1)
+				sb_chr(b, ' ');
+			if (dir)
+				sb_chr(b, 'D');
+		}
 	}
 	sb_chr(b, ' ');
 	sb_age(b, ui_st.now_ms - f->heard_ms);
 }
 
-/* The second line: "   TG 2620 from 2620123", "   from TA2DOU", "   Encrypted" */
-static void more_line(sbuf_t *b, const dmrs_found_t *f)
+/* The second line: "   TG 2620 from 2620123", "   from TA2DOU", "   Encrypted". Shorter: 1 has no indent and "Enc", 2 "<"
+ * for "from ", 3 no "TG " (fit_line) */
+static void more_line(sbuf_t *b, const void *arg, int form)
 {
-	sb_str(b, "   ");
+	const dmrs_found_t *f = arg;
+	if (form == 0)
+		sb_str(b, "   ");
 #if CONFIG_ALL_SEARCH
 	if (f->mode == DMRS_MODE_YSF) {
 		char call[11];
 		dmrs_call_unpack(f->dst, f->src, call);
 		if (call[0] != '\0') {
-			sb_str(b, TR("from "));
+			sb_str(b, form >= 2 ? "<" : TR("from "));
 			sb_str(b, call);
 		}
 		return;
 	}
 #endif
 	if (f->dst != 0) {
-		sb_str(b, f->group ? "TG " : "ID ");
+		if (form < 3)
+			sb_str(b, f->group ? "TG " : "ID ");
 		sb_u32(b, f->dst, 1);
 		sb_chr(b, ' ');
 	}
 	if (f->src != 0) {
-		sb_str(b, TR("from "));
+		sb_str(b, form >= 2 ? "<" : TR("from "));
 		sb_u32(b, f->src, 1);
 		sb_chr(b, ' ');
 	}
 	if (f->enc)
-		sb_str(b, TR("Encrypted"));
+		sb_str(b, form >= 1 ? TR("Enc") : TR("Encrypted"));
 }
 
 /* "DMR " or, on the all digital search's screen, the mode probed or played and a space */
@@ -309,23 +399,25 @@ static void dmrs_draw(void)
 		if (all)
 			sb_mode(&b);
 		sb_mhz4(&b, sv.at_hz);
+		if (gfx_text_width(m, buf) > gfx_width()) {	/* "Probe NXDN 438.7125" is 19 glyphs, the line has 18 */
+			sb_init(&b, buf, sizeof buf);
+			sb_str(&b, TR("Prb "));
+			sb_mode(&b);
+			sb_mhz4(&b, sv.at_hz);
+		}
 		c = ui_col.warn;
 	}
+	gfx_fill(0, y, gfx_width(), m->h + 2, ui_col.bg);	/* the whole line first: no pixel of the last text (Sweep, Probe, DMR) stays */
 	gfx_text(m, 0, y, buf, c);
 	y += m->h + 2;
+	gfx_fill(0, y, gfx_width(), s->h + 3, ui_col.bg);	/* ... and the line below it (Pass, the save line) */
 #if CONFIG_FIND_SAVE
 	if (!all && ui_findsave_line(buf, sizeof buf)) {
 		gfx_text(s, 0, y, buf, ui_col.warn);
 	} else
 #endif
 	if (have && sv.phase != DMRS_OFF) {
-		sb_init(&b, buf, sizeof buf);
-		sb_str(&b, TR("Pass "));
-		sb_u32(&b, sv.sweeps + 1u, 1);
-		sb_str(&b, TR("  hits "));
-		sb_u32(&b, sv.hits, 1);
-		sb_str(&b, TR("  floor "));
-		sb_i32(&b, sv.floor_dbm);
+		fit_line(s, gfx_width(), buf, sizeof buf, pass_line, &sv, 4);
 		gfx_text(s, 0, y, buf, ui_col.dim);
 	}
 	y += s->h + 4;
@@ -341,13 +433,11 @@ static void dmrs_draw(void)
 		int rows = more && y + 2 * (s->h + 1) <= ui_layout.hint_y ? 2 : 1;
 		if (picked)
 			gfx_fill(0, y - 1, gfx_width(), rows * (s->h + 1) + 1, ui_col.focus);
-		sb_init(&b, buf, sizeof buf);
-		found_line(&b, f);
+		fit_line(s, gfx_width(), buf, sizeof buf, found_line, f, 4);
 		gfx_text(s, 0, y, buf, picked ? ui_col.focus_fg : i == 0 && sv.playing ? ui_col.rx : ui_col.fg);
 		y += s->h + 1;
 		if (rows == 2) {
-			sb_init(&b, buf, sizeof buf);
-			more_line(&b, f);
+			fit_line(s, gfx_width(), buf, sizeof buf, more_line, f, 4);
 			gfx_text(s, 0, y, buf, picked ? ui_col.focus_fg : f->enc ? ui_col.warn : ui_col.dim);
 			y += s->h + 1;
 		}

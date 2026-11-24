@@ -80,6 +80,97 @@ static void hexnac(sbuf_t *b, uint16_t nac)
 		sb_chr(b, "0123456789ABCDEF"[(nac >> sh) & 15u]);
 }
 
+/* Fitting a line to the safe area (DDM32 Plus srchfix): build(b, arg, form) writes the line in a shorter form for each
+ * form number (0 = the full one); its text alternates (sb_age: "13m ago" / "13m") count as shorter forms of the same
+ * form. The first that is not wider than w is drawn; if even the last is, it is shortened with an ellipsis, never
+ * clipped at the edge */
+typedef void (*line_fn)(sbuf_t *b, const void *arg, int form);
+
+static void fit_line(const font_t *f, int w, char *out, size_t cap, line_fn build, const void *arg, int forms)
+{
+	char src[56];
+	sbuf_t b;
+	for (int form = 0; form < forms; form++) {
+		sb_init(&b, src, sizeof src);
+		build(&b, arg, form);
+		bool more = true;
+		for (int lvl = 0; more; lvl++) {
+			gfx_text_alt(src, lvl, out, cap, &more);
+			if (gfx_text_width(f, out) <= w)
+				return;
+		}
+	}
+	gfx_text_fit(f, src, w, out, cap);
+}
+
+static const char *skip_sp(const char *s)
+{
+	while (*s == ' ')
+		s++;
+	return s;
+}
+
+/* "Pass 72  hits 193  floor -84", then one space apart, then "Pass 72 hits 193 -84dBm" (the words kept: it fits up
+ * to six digits of pass and hits), then "P72 h193 fl-84" (4-digit pass and hits and a 3-digit floor still fit the
+ * 220 px of the DM-32's safe area) */
+static void pass_line(sbuf_t *b, const void *arg, int form)
+{
+	const p25s_view_t *v = arg;
+	if (form >= 3) {
+		sb_str(b, TR("P"));
+		sb_u32(b, v->sweeps + 1u, 1);
+		sb_str(b, TR(" h"));
+		sb_u32(b, v->hits, 1);
+		sb_str(b, TR(" fl"));
+		sb_i32(b, v->floor_dbm);
+		return;
+	}
+	sb_str(b, TR("Pass "));
+	sb_u32(b, v->sweeps + 1u, 1);
+	if (form == 0) {
+		sb_str(b, TR("  hits "));
+	} else {
+		sb_chr(b, ' ');
+		sb_str(b, skip_sp(TR("  hits ")));
+	}
+	sb_u32(b, v->hits, 1);
+	if (form == 0) {
+		sb_str(b, TR("  floor "));
+	} else if (form == 1) {
+		sb_chr(b, ' ');
+		sb_str(b, skip_sp(TR("  floor ")));
+	} else {
+		sb_chr(b, ' ');
+	}
+	sb_i32(b, v->floor_dbm);
+	if (form == 2)
+		sb_str(b, "dBm");
+}
+
+/* "158.0062 $40C/1036 TG612 13m ago": the safe area holds 24 small glyphs, so fit_line also tries the age as "13m" and
+ * then form 1 (no decimal NAC) and form 2 (no "$" either) */
+static void found_line(sbuf_t *b, const void *arg, int form)
+{
+	const p25s_found_t *f = arg;
+	sb_mhz4(b, f->hz);
+	sb_str(b, form < 2 ? " $" : " ");
+	hexnac(b, f->nac);
+#if CONFIG_NAC_DEC
+	if (form == 0) {
+		sb_chr(b, '/');
+		sb_u32(b, f->nac, 1);	// decimal too (some factory radios take the NAC so)
+	}
+#else
+	(void)form;
+#endif
+	if (f->tg) {
+		sb_str(b, " TG");
+		sb_u32(b, f->tg, 1);
+	}
+	sb_chr(b, ' ');
+	sb_age(b, ui_st.now_ms - f->heard_ms);
+}
+
 /* The search's state; while finds are being saved, the list as the save began (still in the buffer unless another
  * screen has taken it since: then the save stops, ui_p25search_find) */
 static bool snap(void)
@@ -187,21 +278,17 @@ static void p25s_draw(void)
 		sb_mhz4(&b, sv.at_hz);
 		c = ui_col.warn;
 	}
+	gfx_fill(0, y, gfx_width(), m->h + 2, ui_col.bg);	/* the whole line first: no pixel of the last text (Sweep, Probe, P25) stays */
 	gfx_text(m, 0, y, buf, c);
 	y += m->h + 2;
+	gfx_fill(0, y, gfx_width(), s->h + 3, ui_col.bg);	/* ... and the line below it (Pass, the save line) */
 #if CONFIG_FIND_SAVE
 	if (ui_findsave_line(buf, sizeof buf)) {
 		gfx_text(s, 0, y, buf, ui_col.warn);
 	} else
 #endif
 	if (have && sv.phase != P25S_OFF) {
-		sb_init(&b, buf, sizeof buf);
-		sb_str(&b, TR("Pass "));
-		sb_u32(&b, sv.sweeps + 1u, 1);
-		sb_str(&b, TR("  hits "));
-		sb_u32(&b, sv.hits, 1);
-		sb_str(&b, TR("  floor "));
-		sb_i32(&b, sv.floor_dbm);
+		fit_line(s, gfx_width(), buf, sizeof buf, pass_line, &sv, 4);
 		gfx_text(s, 0, y, buf, ui_col.dim);
 	}
 	y += s->h + 4;
@@ -217,20 +304,7 @@ static void p25s_draw(void)
 		int rows = f->src && y + 2 * s->h + 1 < ui_layout.hint_y ? 2 : 1;
 		if (picked)
 			gfx_fill(0, y - 1, gfx_width(), rows * (s->h + 1) + 1, ui_col.focus);
-		sb_init(&b, buf, sizeof buf);
-		sb_mhz4(&b, f->hz);
-		sb_str(&b, " $");
-		hexnac(&b, f->nac);
-#if CONFIG_NAC_DEC
-		sb_chr(&b, '/');
-		sb_u32(&b, f->nac, 1);	// decimal too (some factory radios take the NAC so)
-#endif
-		if (f->tg) {
-			sb_str(&b, " TG");
-			sb_u32(&b, f->tg, 1);
-		}
-		sb_chr(&b, ' ');
-		sb_age(&b, ui_st.now_ms - f->heard_ms);
+		fit_line(s, gfx_width(), buf, sizeof buf, found_line, f, 3);
 		gfx_text(s, 0, y, buf, picked ? ui_col.focus_fg : i == 0 && sv.playing ? ui_col.rx : ui_col.fg);
 		y += s->h + 1;
 		if (rows == 2) {

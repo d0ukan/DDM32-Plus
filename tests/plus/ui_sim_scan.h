@@ -19,5 +19,6 @@ typedef struct {
 extern sc_sim_t sc_sim;
 void sc_sim_clear(void);
 uint32_t sc_sim_freq(void);		/* the view's RX frequency */
+void sc_sim_changed(void);		/* the view changed: the screen on top draws again */
 
 #endif

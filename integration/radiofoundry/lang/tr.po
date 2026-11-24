@@ -1372,6 +1372,26 @@ msgstr "  bulgu "
 msgid "  floor "
 msgstr "  taban "
 
+#: core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
+msgid "P"
+msgstr "T"
+
+#: core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
+msgid " h"
+msgstr " b"
+
+#: core/ui/ui_dmrsearch.c core/ui/ui_p25search.c
+msgid " fl"
+msgstr " tb"
+
+#: core/ui/ui_dmrsearch.c
+msgid "Enc"
+msgstr "Şif"
+
+#: core/ui/ui_dmrsearch.c
+msgid "Prb "
+msgstr "Dene "
+
 #: core/ui/ui_dmrsearch.c
 msgid "No DMR found yet"
 msgstr "Henüz DMR bulunmadı"
