@@ -25,8 +25,10 @@ def prepare_p25rxgl(transform, install):
         ('$(error CHAN_EXTRAS needs ZONE_EDIT=y, CHANNEL_EDIT=y and DMR_ANY=y)\nendif\nendif\n',
          '$(error CHAN_EXTRAS needs ZONE_EDIT=y, CHANNEL_EDIT=y and DMR_ANY=y)\nendif\nendif\n'
          'CONFIG_P25_RXGL ?= n\nFEATURES += P25_RXGL\n'
-         'ifeq ($(CONFIG_P25_RXGL),y)\nifneq ($(CONFIG_P25_CHANNELS)$(CONFIG_CHAN_EXTRAS),yy)\n'
-         '$(error P25_RXGL needs P25_CHANNELS=y and CHAN_EXTRAS=y)\nendif\nendif\n'),
+         'ifeq ($(CONFIG_P25_RXGL),y)\n'
+         'ifneq ($(CONFIG_P25_CHANNELS)$(CONFIG_CHAN_EXTRAS)$(CONFIG_VFO_MODES)$(CONFIG_DEV_TX),yyyy)\n'
+         '$(error P25_RXGL needs P25_CHANNELS=y, CHAN_EXTRAS=y, VFO_MODES=y (ced_vfo) and DEV_TX=y (receive_run))\n'
+         'endif\nendif\n'),
     ])
     transform('core/config.h', [
         ('#ifndef CONFIG_CHAN_EXTRAS\n',
@@ -45,10 +47,12 @@ def prepare_p25rxgl(transform, install):
              '\t\t\tsb_list_any(&b, ch->timeslot);\n')),
         # the picker's line on what a P25 channel hears
         ('\t\t\tui_toast(raw ? TR("Any: every TG on this slot") : TR("None: only the TX contact\'s TG"));\n',
-         _if('\t\t\tif (ced_ch.mode == RADIO_MODE_P25)\n'
+         _if('\t\t{\n'
+             '\t\t\tif (ced_ch.mode == RADIO_MODE_P25)\n'
              '\t\t\t\tui_toast(raw ? TR("Any: every TG") : TR("None: the channel\'s squelch"));\n'
              '\t\t\telse\n'
-             '\t\t\t\tui_toast(raw ? TR("Any: every TG on this slot") : TR("None: only the TX contact\'s TG"));\n',
+             '\t\t\t\tui_toast(raw ? TR("Any: every TG on this slot") : TR("None: only the TX contact\'s TG"));\n'
+             '\t\t}\n',
              '\t\t\tui_toast(raw ? TR("Any: every TG on this slot") : TR("None: only the TX contact\'s TG"));\n')),
         # typing the talkgroup keeps the list (it only adds groups heard); the contact still goes
         ('\t\tif (ced_len) { c->p25_tg = (uint16_t)ced_val; c->contact=c->listen_list=0; }\n',
