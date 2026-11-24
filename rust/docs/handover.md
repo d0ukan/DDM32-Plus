@@ -67,8 +67,13 @@ The install folder, the data folder and `settings.json` are the same, so the use
   the same object, so a C# user who accepted is not asked again (`tests/disclaimer.rs`).
 - `channel` / `include_beta`: the Rust program uses `channel` when present, else the C# `include_beta`, else Beta
   when the file is a C# one (a C#-only key such as `window` is present; C#'s default showed betas), else Latest only for
-  a fresh install. Choosing a channel writes both keys (`Settings::channel`, `set_channel`).
-- `language`, `auto_check`, `port` are shared. C#-only keys (`window`, `installed_firmware`, ...) are kept unused.
+  a fresh install. The result is saved as `channel` at the first start (`Settings::settle_channel`), so nothing
+  written later can flip it; `installed_firmware` / `installed_sha256` do not count as C# keys (this program writes
+  them too). Choosing a channel writes both keys (`set_channel`).
+- `installed_sha256` / `installed_firmware`: read as the C# install record. A C# restore after a Rust install (sha
+  null, "stock" or "") supersedes the Rust `installed_record` (factory firmware or unknown, never the older install).
+- `port`: without `port_auto` (a C# file) it is the user's last chosen port and becomes the fixed choice.
+- `language`, `auto_check` are shared. C#-only keys (`window`, `last_check_utc`, `pack_*`, ...) are kept unused.
 
 ## Rollback
 
@@ -91,9 +96,15 @@ Nothing is required for the hand-over itself: C# 2.0.0 already reads `app_net` a
 the zip carries. A C# 2.0.1 would only be worth it for cosmetics, and is **not** recommended (it adds a release users
 must take first):
 
-- the Windows "Apps" entry keeps `DisplayVersion` 2.0.0 and the C# uninstaller log after a self-update (the
-  Rust setup, same AppId, fixes both the next time it runs); the C# uninstaller would leave `ddm32.exe` behind because
-  its log does not list it (harmless; the Rust setup lists it);
+- after a self-update the Windows "Apps" entry still says **`DisplayVersion` 2.0.0** and the C# uninstaller (and its
+  log) stays: a self-update only swaps program files, it never touches the uninstall entry (neither program's helper
+  does). Both are corrected the next time a Rust setup runs (same AppId, same folder). Until then the C# uninstaller
+  removes `DDM32Plus.exe` but leaves `ddm32.exe` behind (its log does not list it; harmless, one file). Since this
+  branch the Rust setup installs `ddm32.exe` as well and removes it on uninstall, so a setup install and a hand-over
+  install hold the same two programs;
+- the icon: the Rust `DDM32Plus.exe` carries the program icon as a Windows resource (build.rs links
+  `packaging/art/ddm32plus.ico` as a .res, no resource compiler), so Explorer, the taskbar and the C# setup's
+  shortcuts (which point at the exe and its `ddm32plus.ico`, which stays) show the right icon after a hand-over;
 - a C# user who switched betas off sees only a stable hand-over version (see 1. above).
 
 ## Release recipe (not done here)

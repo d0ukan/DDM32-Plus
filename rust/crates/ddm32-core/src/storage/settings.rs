@@ -20,12 +20,11 @@ pub const SKIP_FIRMWARE_KEY: &str = "skip_firmware_version";
 /// The release channel this program offers (0 Latest, 1 Beta, 2 Test / Alpha); the C# program used `include_beta`.
 pub const CHANNEL_KEY: &str = "channel";
 /// Keys only the C# program writes (this program keeps them but never writes them): a settings file holding one of
-/// them came from a C# install, whose `include_beta` default (true) showed the betas.
-pub const NET_ONLY_KEYS: [&str; 9] = [
+/// them came from a C# install, whose `include_beta` default (true) showed the betas. Not `installed_firmware` /
+/// `installed_sha256`: this program writes those too after an install (the C# install record).
+pub const NET_ONLY_KEYS: [&str; 7] = [
     "window",
     "last_check_utc",
-    "installed_firmware",
-    "installed_sha256",
     "stock_backups",
     "restore_previous_backup",
     "pack_countries",
@@ -135,6 +134,16 @@ impl Settings {
         }
     }
 
+    /// The channel at start-up, saved when this program has none yet: decided once (from the C# keys or as a fresh
+    /// install), so a key written later (an install record, a C# key) can never change it.
+    pub fn settle_channel(&self) -> std::io::Result<i32> {
+        let c = self.channel();
+        if !self.load().contains_key(CHANNEL_KEY) {
+            self.save(CHANNEL_KEY, Value::from(c))?;
+        }
+        Ok(c)
+    }
+
     /// Saves the channel and, for the C# program during the hand-over, `include_beta` (Beta and Test show betas).
     pub fn set_channel(&self, channel: i32) -> std::io::Result<()> {
         let channel = channel.clamp(0, 2);
@@ -186,7 +195,8 @@ impl Settings {
     pub fn port_pref(&self) -> crate::radio::portpick::PortPref {
         let s = self.load();
         let port = s.get(PORT_KEY).and_then(Value::as_str).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string);
-        let auto = s.get(PORT_AUTO_KEY).and_then(Value::as_bool).unwrap_or(true);
+        // no `port_auto`: a C# settings file, whose `port` was the port the user last chose (a fixed choice here)
+        let auto = s.get(PORT_AUTO_KEY).and_then(Value::as_bool).unwrap_or(port.is_none());
         crate::radio::portpick::PortPref { auto: auto || port.is_none(), port }
     }
 

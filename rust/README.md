@@ -74,13 +74,24 @@ controls under the shade take no focus or click and read as disabled (`widgets.s
 - **Close button** (X, Alt+F4, the OS closing the window): refused with a message while a backup, install, restore,
   pack write, health read or download runs; the live view and the search log are told to stop and the window closes
   when both have ended (10 s at most; their files are written in the window's thread, so none is left half written).
-  Menu Exit stays refused while anything holds the port. Not covered: a Windows shutdown or log-off (winit gives the
+  Menu Exit stays refused while anything holds the port. A second press within 5 s while a step that does **not**
+  write to the radio runs (a backup read, a download, a health read) asks "Close anyway?" (No by default); while an
+  install, restore or pack write runs it never does. Not covered: a Windows shutdown or log-off (winit gives the
   program no session-end event), which ends the process as it ended the C# one. Tests: `tests/close.rs`.
+- **Workers always report back**: every worker thread (radio tools, the debug-link readers, the port listing, the
+  release check, the program download) runs under `catch_unwind` (`src/worker.rs`); a panic ends as the step's error
+  line and the busy state is cleared, so the window can never stay "busy" for ever. Tests: `tests/worker.rs`.
+- **Port at a step's start**: the last port listing when it is younger than 3 s, else a fresh listing on a worker
+  (the radio buttons off meanwhile); never on the window's thread. A C# `port` without `port_auto` becomes the
+  first fixed choice.
 - **Test / alpha versions**: choosing one in the wizard asks Yes / No first ("Yes, I am sure" / "No", No has the
   focus); nothing is downloaded before Yes.
 - **Release channel** taken over from the C# program: `channel` when set, else its `include_beta`, else Beta for a
-  settings file the C# program wrote (its default showed betas), else Latest for a fresh install; a choice writes both
-  keys. Hand-over from C# 2.0.x through its self-update: `docs/handover.md`.
+  settings file the C# program wrote (its default showed betas), else Latest for a fresh install. Decided once and
+  saved at the first start (an install record written later never flips it); a choice writes both keys. A C# restore
+  after a Rust install (`installed_sha256` null, "stock" / "") supersedes the Rust install record. Hand-over from C#
+  2.0.x through its self-update: `docs/handover.md`.
+- **Backup age**: from the backup's manifest (`completed_utc`, else `started_utc`); the folder time only without them.
 
 ## Versions and the update question
 
@@ -178,7 +189,9 @@ cargo build --release -p ddm32-cli -p ddm32-gui --features ddm32-cli/radio,ddm32
 Linux: the window's font lookup links fontconfig, so a build needs `pkg-config` and `libfontconfig-dev`
 (`sudo apt install pkg-config libfontconfig-dev`); the window uses Wayland or X11 through winit (loaded at run time). The tests read their fixtures from `rust/tests/fixtures` (a copy of the C# program's, with the Python generators;
 `win/` can be deleted). Windows builds link the C runtime statically (`rust/.cargo/config.toml`), so the program needs
-no Visual C++ Redistributable.
+no Visual C++ Redistributable, and `DDM32Plus.exe` carries its icon as a resource (`build.rs` + `src/winres.rs` link
+`packaging/art/ddm32plus.ico`; no resource compiler). The Windows setup installs `DDM32Plus.exe` and `ddm32.exe`
+(the same two programs as the update zip) and takes its icon from `packaging/art`, nothing from `win/`.
 
 Command line: `ddm32 version | paths | backups | detect --backup DIR | plan ... | releases | download VERSION |
 pack radioid|air|info ... | tool backup|install_plus|restore_stock|fast_install|datapack ARGS` (`ddm32 --help`).

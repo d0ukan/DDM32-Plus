@@ -101,13 +101,31 @@ pub fn discover(roots: &[BackupRoot]) -> Vec<FoundBackup> {
             }
             seen.push(full);
             if is_verified_backup(&d) {
-                let modified = std::fs::metadata(&d).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+                let modified = backup_time(&d);
                 out.push(FoundBackup { folder: d, origin: root.origin, modified });
             }
         }
     }
     out.sort_by_key(|b| std::cmp::Reverse(b.modified));
     out
+}
+
+/// When a backup was taken: its manifest's `completed_utc` (else `started_utc`), written by the backup tool; the
+/// folder's last write time only when neither is there or readable (copying a folder changes its time, not these).
+pub fn backup_time(folder: &Path) -> SystemTime {
+    let stamp = std::fs::read(folder.join("backup-manifest.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|m| {
+            ["completed_utc", "started_utc"].iter().find_map(|k| {
+                let t = m.get(*k)?.as_str()?;
+                chrono::DateTime::parse_from_rfc3339(t).ok()
+            })
+        });
+    match stamp {
+        Some(t) if t.timestamp() > 0 => SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(t.timestamp() as u64),
+        _ => std::fs::metadata(folder).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH),
+    }
 }
 
 /// BackupFinder.Candidates: the verified backup folders under the given folders, newest first.

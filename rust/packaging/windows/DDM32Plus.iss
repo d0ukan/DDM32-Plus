@@ -5,12 +5,13 @@
 ;
 ; Saved as UTF-8 with BOM (LF): Inno Setup reads the Turkish texts correctly only with the BOM.
 ; Build (Inno Setup 6.3 or newer; 7.1 checked, https://jrsoftware.org/isinfo.php), after the publish step in win/README.md:
-;   cargo build --release -p ddm32-gui --features radio  (in rust/), then
+;   cargo build --release -p ddm32-cli -p ddm32-gui --features ddm32-cli/radio,ddm32-gui/radio  (in rust/), then
 ;   "C:\Program Files\Inno Setup 7\ISCC.exe" rust\packaging\windows\DDM32Plus.iss
 ; Output: rust\dist\DDM32Plus-Setup-<version>.exe (git-ignored)
 ;
 ; Where things go:
-;   {app} = %LOCALAPPDATA%\Programs\DDM32 Plus   DDM32Plus.exe (one file, no runtime needed)
+;   {app} = %LOCALAPPDATA%\Programs\DDM32 Plus   DDM32Plus.exe (the window, its icon inside, no runtime needed)
+;                                                and ddm32.exe (the command line): what the update zip carries
 ;   {app}\backups                               the radio's backups: made by the program, NEVER removed by the
 ;                                                uninstaller or by a program update; the uninstaller says where it is
 ;   {app}\settings.json, releases, updates    settings, downloaded versions, update staging: removed on uninstall
@@ -43,7 +44,7 @@ DisableProgramGroupPage=yes
 DefaultGroupName={#AppName}
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\ddm32plus.ico
-SetupIconFile=..\..\..\win\src\DDM32Plus\Assets\ddm32plus.ico
+SetupIconFile=..\art\ddm32plus.ico
 OutputDir=..\..\dist
 OutputBaseFilename=DDM32Plus-Setup-{#AppVersion}
 Compression=lzma2/max
@@ -75,8 +76,11 @@ Name: "{app}\backups"; Flags: uninsneveruninstall
 
 [Files]
 Source: "..\..\target\release\ddm32-gui.exe"; DestDir: "{app}"; DestName: "{#AppExe}"; Flags: ignoreversion
-; the shortcuts' and the Apps list's icon (the exe itself carries no icon resource; the window sets its own)
-Source: "..\..\..\win\src\DDM32Plus\Assets\ddm32plus.ico"; DestDir: "{app}"; Flags: ignoreversion
+; the command line: the same two programs as the self-update zip, so a setup install and an updated install match
+; (removed on uninstall like every file listed here)
+Source: "..\..\target\release\ddm32.exe"; DestDir: "{app}"; Flags: ignoreversion
+; the shortcuts' and the Apps list's icon (the exe carries the same icon as a resource too)
+Source: "..\art\ddm32plus.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\ddm32plus.ico"

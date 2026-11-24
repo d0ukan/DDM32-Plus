@@ -658,6 +658,7 @@ __pycache__/
 !/rust/packaging/**/*.desktop
 !/rust/packaging/**/*.plist
 !/rust/packaging/art/*.png
+!/rust/packaging/art/*.ico
 # the static C runtime on Windows (no VC++ redistributable needed) and the test fixtures copied from win/tests
 !/rust/.cargo/config.toml
 !/rust/tests/fixtures/README.md

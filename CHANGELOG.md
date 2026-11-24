@@ -52,6 +52,15 @@ Windows, Linux and macOS; host-tested only (fakes, no serial port, no network), 
   more (static C runtime), and the self-update start marker is written once the window's event loop runs, so a window
   that cannot come up is rolled back to the old program. The update helper no longer flashes console windows.
 - Tests read their fixtures from `rust/tests/fixtures` (copied from `win/`); `NET_VERSION` is the C# program's 2.0.0.
+- The release channel is decided once and saved at the first start: a fresh install no longer turns to Beta after its
+  first install (the install record writes `installed_*`, which had counted as a C# key). A C# restore after a Rust
+  install now supersedes the Rust install record ("Factory firmware" / unknown instead of the older install).
+- A panic in a worker thread can no longer leave the window busy: every worker reports back and the step shows an
+  error line. Pressing the close button twice within 5 s while a step that does not write to the radio runs asks
+  "Close anyway?" (No by default); never during an install, restore or pack write.
+- `DDM32Plus.exe` carries the program icon; the Windows setup installs `ddm32.exe` too and needs nothing from `win/`.
+- Backups are ordered by the time in their manifest, not the folder's (copying a backup no longer makes it "newest").
+- A radio step's start no longer lists the serial ports on the window's thread; a C# `port` setting is taken over.
 
 ## v1.0.1 (2026-11-24)
 

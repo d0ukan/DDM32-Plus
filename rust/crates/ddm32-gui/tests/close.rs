@@ -58,7 +58,10 @@ fn a_running_step_refuses_the_close_button() {
     let app = ui.global::<App>();
     let radio = ui.global::<Radio>();
     let refused = i18n::t("en", "busy_close");
-    // a backup, install, restore, pack write or download (App.busy); a health read (Radio.busy)
+    // a radio write marked running (install, restore, pack write): every press refused with the plain line (without a
+    // write the line also says how to close anyway; a_second_press_offers_close_anyway...)
+    ddm32_gui::with_state(|s| s.writing = true);
+    // App.busy (the write's own flag) and Radio.busy (a health read beside it)
     for which in 0..2 {
         app.set_message("".into());
         radio.set_message("".into());
@@ -226,5 +229,57 @@ fn the_channel_follows_the_csharp_include_beta() {
         assert_eq!(beta, s["include_beta"].as_bool().unwrap());
         assert_eq!("en", s["language"]);
     }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---- "Close anyway" -----------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_second_press_offers_close_anyway_but_never_during_a_radio_write() {
+    let root = root("force");
+    let ui = window(&root, json!({"language": "en"}));
+    let app = ui.global::<App>();
+    // a backup or a download (no radio write): the first press refuses and says how to close anyway
+    app.set_busy(true);
+    assert_eq!(CloseRequestResponse::KeepWindowShown, ddm32_gui::close_requested(&ui));
+    assert!(!app.get_force_close_open());
+    assert!(app.get_message().contains(&i18n::t("en", "busy_close_again")));
+    // the second press within 5 s: "Close anyway?" (No has the focus), the window still open
+    assert_eq!(CloseRequestResponse::KeepWindowShown, ddm32_gui::close_requested(&ui));
+    assert!(app.get_force_close_open());
+    app.set_force_close_open(false);
+    // a radio write (install, restore, pack write): never, however often it is pressed
+    ddm32_gui::with_state(|s| {
+        s.writing = true;
+        s.close_refused_at = None;
+    });
+    for _ in 0..3 {
+        assert_eq!(CloseRequestResponse::KeepWindowShown, ddm32_gui::close_requested(&ui));
+        assert!(!app.get_force_close_open());
+        assert_eq!(i18n::t("en", "busy_close"), app.get_message().as_str());
+    }
+    // and "Yes" itself checks again
+    assert!(!ddm32_gui::force_close(&ui));
+    let ui_src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/app.slint")).unwrap();
+    let dlg = &ui_src[ui_src.find("if App.force-close-open").unwrap()..];
+    assert!(dlg.contains(r#"Button { text: Tr.t(Tr.lang, "b_no"); in-dialog: true; default-focus: true;"#));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A tool whose worker panicked: the window is not busy any more, no write is marked running, the step gets an error
+/// with the panic's text (shown as its failure line).
+#[test]
+fn a_panicked_tool_clears_the_busy_state() {
+    let root = root("panic");
+    let ui = window(&root, json!({"language": "en"}));
+    let app = ui.global::<App>();
+    app.set_busy(true);
+    ddm32_gui::with_state(|s| s.writing = true);
+    let r = ddm32_gui::worker::caught(|| -> ddm32_core::radio::ToolResult<()> { panic!("boom in the tool") });
+    let err = ddm32_gui::tool_ended(&ui, r).expect("an error");
+    assert!(err.record().contains("boom in the tool"), "{}", err.record());
+    assert!(!app.get_busy());
+    assert!(!ddm32_gui::with_state(|s| s.writing));
+    assert_eq!(CloseRequestResponse::HideWindow, ddm32_gui::close_requested(&ui), "closing works again");
     let _ = std::fs::remove_dir_all(&root);
 }

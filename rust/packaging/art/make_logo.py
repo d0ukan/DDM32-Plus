@@ -44,8 +44,9 @@ def make(theme):
 
 def make_icon():
     """The Linux / macOS application icon (rust/packaging/art/ddm32plus.png, 256x256): the C# program's icon, its
-    largest frame, so all three systems show the same picture."""
-    ico = Image.open(REPO / 'win' / 'src' / 'DDM32Plus' / 'Assets' / 'ddm32plus.ico')
+    largest frame, so all three systems show the same picture (ddm32plus.ico here is a copy of it; build.rs puts it
+    into DDM32Plus.exe)."""
+    ico = Image.open(Path(__file__).resolve().parent / 'ddm32plus.ico')
     ico.size = (256, 256)
     icon = ico.convert('RGBA')
     icon.save(Path(__file__).resolve().parent / 'ddm32plus.png', optimize=True)

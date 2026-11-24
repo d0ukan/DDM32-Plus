@@ -3,7 +3,9 @@
 //! the newest verified backup). Health and live talk to the running firmware through the debug link's read-only guard
 //! (ddm32_core::radio::debug), one button each; my channels reads a backup file only.
 
-use crate::{i18n, port, radio_allowed, reader_ended, tr, trf, with, App, AppWindow, Fact, Radio, TableRow};
+use crate::{
+    i18n, radio_allowed, reader_ended, tr, trf, with, with_port, worker, App, AppWindow, Fact, Radio, TableRow,
+};
 use ddm32_core::codeplug::{self, Codeplug, Table};
 use ddm32_core::radio::codec::Codec;
 use ddm32_core::radio::debug::{health_tool, live_tool, searchlog_tool, SEARCHLOG_WAITING};
@@ -153,39 +155,47 @@ fn run_debug(
 ) {
     let w = ui.as_weak();
     let line = Arc::new(line);
-    std::thread::spawn(move || {
-        let clock = SystemClock::default();
-        let w2 = w.clone();
-        let line2 = line.clone();
-        let print = move |text: &str| {
-            for l in text.split('\n') {
-                let l = l.to_string();
-                let w3 = w2.clone();
-                let f = line2.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = w3.upgrade() {
-                        f(&ui, l);
-                    }
-                });
+    let w2 = w.clone();
+    worker::spawn(
+        move || {
+            let clock = SystemClock::default();
+            let line2 = line.clone();
+            let print = move |text: &str| {
+                for l in text.split('\n') {
+                    let l = l.to_string();
+                    let w3 = w2.clone();
+                    let f = line2.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = w3.upgrade() {
+                            f(&ui, l);
+                        }
+                    });
+                }
+            };
+            // read-only tools: the read factory (a port only in a build with the radio feature)
+            let serial = |p: &str| -> ToolResult<Box<dyn RawSerial>> { RadioAccess::factory(p) };
+            let ctx = ToolContext {
+                print: &print,
+                clock: &clock,
+                serial: &serial,
+                release_key_hex: None,
+                codec: Codec::dm32(),
+            };
+            // the search log runs all night: the PC stays awake while this thread runs it (dropped at its end)
+            let _awake = (tool == "searchlog").then(ddm32_core::sys::KeepAwake::new);
+            match tool {
+                "health" => health_tool(&argv, &ctx),
+                "searchlog" => searchlog_tool(&argv, &ctx, &cancel),
+                _ => live_tool(&argv, &ctx, &cancel),
             }
-        };
-        // read-only tools: the read factory (a port only in a build with the radio feature)
-        let serial = |p: &str| -> ToolResult<Box<dyn RawSerial>> { RadioAccess::factory(p) };
-        let ctx =
-            ToolContext { print: &print, clock: &clock, serial: &serial, release_key_hex: None, codec: Codec::dm32() };
-        // the search log runs all night: the PC stays awake while this thread runs it (dropped at its end)
-        let _awake = (tool == "searchlog").then(ddm32_core::sys::KeepAwake::new);
-        let r = match tool {
-            "health" => health_tool(&argv, &ctx),
-            "searchlog" => searchlog_tool(&argv, &ctx, &cancel),
-            _ => live_tool(&argv, &ctx, &cancel),
-        };
-        let _ = slint::invoke_from_event_loop(move || {
+        },
+        move |r| {
+            // a panic in the reader ends it too: its done callback clears the busy / running state and shows the line
             if let Some(ui) = w.upgrade() {
-                done(&ui, r.err());
+                done(&ui, r.unwrap_or_else(|p| Err(worker::panic_error(&p))).err());
             }
-        });
-    });
+        },
+    );
 }
 
 /// Whether the search log holds the port now (Live, Health and the radio steps wait for it; the C# ToolRunner.AnyBusy).
@@ -201,7 +211,12 @@ fn read_health(ui: &AppWindow) {
         message(ui, &tr("slog_busy"), "warning");
         return;
     }
-    let Some(p) = port() else {
+    with_port(ui, read_health_on);
+}
+
+/// read_health once the port is known (crate::with_port).
+fn read_health_on(ui: &AppWindow, found: Option<String>) {
+    let Some(p) = found else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
     };
@@ -306,7 +321,12 @@ fn live_start(ui: &AppWindow) {
         message(ui, &tr("slog_busy"), "warning");
         return;
     }
-    let Some(p) = port() else {
+    with_port(ui, live_start_on);
+}
+
+/// live_start once the port is known (crate::with_port).
+fn live_start_on(ui: &AppWindow, found: Option<String>) {
+    let Some(p) = found else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
     };
@@ -634,7 +654,7 @@ fn slog_line(ui: &AppWindow, line: String) {
         }
     });
     if done.is_none() && line.starts_with(SEARCHLOG_WAITING) {
-        let p = port().unwrap_or_default();
+        let p = with(|s| s.port_now.port.clone()).unwrap_or_default();
         show_slog(ui, Some(trf("slog_waiting", &p)));
         return;
     }
@@ -682,7 +702,12 @@ fn slog_start(ui: &AppWindow) {
     if !radio_allowed(ui) {
         return;
     }
-    let Some(p) = port() else {
+    with_port(ui, slog_start_on);
+}
+
+/// slog_start once the port is known (crate::with_port).
+fn slog_start_on(ui: &AppWindow, found: Option<String>) {
+    let Some(p) = found else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
     };

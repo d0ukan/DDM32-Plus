@@ -145,6 +145,11 @@ pub fn read_record(settings: &Settings) -> Option<InstallRecord> {
             if kind == RecordKind::Install && sha.is_some() && rec_sha != sha {
                 return Some(legacy(sha, &s));
             }
+            // the C# program restored a backup over ours: `installed_sha256` null and `installed_firmware` "stock" / ""
+            // where our record would have written something else
+            if let Some(over) = csharp_restore_over(&s, kind, text("version").as_deref()) {
+                return Some(over);
+            }
             return Some(InstallRecord {
                 kind,
                 unix: r.get("unix").and_then(Value::as_i64),
@@ -156,6 +161,34 @@ pub fn read_record(settings: &Settings) -> Option<InstallRecord> {
         }
     }
     sha.map(|sha| legacy(Some(sha), &s))
+}
+
+/// What our record would have left in the C# keys: the C# program's restore wrote `installed_sha256: null` and
+/// "stock" (factory firmware) or "" (an earlier backup). When the keys say a restore that our record does not, the C#
+/// restore is the newer write: a record of it (no time, no backup) is returned.
+fn csharp_restore_over(
+    s: &serde_json::Map<String, Value>,
+    kind: RecordKind,
+    version: Option<&str>,
+) -> Option<InstallRecord> {
+    if !matches!(s.get(INSTALLED_SHA_KEY), Some(Value::Null)) {
+        return None;
+    }
+    let firmware = s.get(INSTALLED_FIRMWARE_KEY).and_then(Value::as_str)?;
+    let ours = match kind {
+        RecordKind::Install => format!("DDM32 Plus {}", version.unwrap_or("")),
+        RecordKind::RestoreStock => "stock".into(),
+        RecordKind::RestorePrevious | RecordKind::Interrupted => String::new(),
+    };
+    let restored = match firmware {
+        "stock" => RecordKind::RestoreStock,
+        "" => RecordKind::RestorePrevious,
+        _ => return None,
+    };
+    if firmware == ours || (kind == RecordKind::Interrupted && restored == RecordKind::RestorePrevious) {
+        return None;
+    }
+    Some(InstallRecord { kind: restored, unix: None, sha256: None, version: None, backup: None, radio: None })
 }
 
 fn legacy(sha: Option<String>, s: &serde_json::Map<String, Value>) -> InstallRecord {
@@ -275,6 +308,10 @@ pub fn installed_from_record(rec: &InstallRecord, all: &[FirmwareVersion], lang:
                 Installed::NotRead => Installed::Unknown,
                 i => i,
             },
+            // a restore whose backup is not known (the C# program's): factory firmware is still named
+            None if rec.kind == RecordKind::RestoreStock => {
+                Installed::Other(i18n::tf(lang, "fw_stock", "").trim_end().to_string())
+            }
             None => Installed::Unknown,
         },
         RecordKind::Interrupted => Installed::Interrupted,

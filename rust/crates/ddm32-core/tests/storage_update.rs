@@ -254,6 +254,8 @@ fn channel_takes_over_include_beta() {
     };
     assert_eq!(0, s.channel(), "no file: a fresh install");
     assert_eq!(0, with(r#"{"language": "tr", "theme": "dark", "port": "COM14"}"#), "this program's keys only");
+    // this program writes the C# install record too: it is not a sign of a C# file
+    assert_eq!(0, with(r#"{"language": "en", "installed_sha256": "ab", "installed_firmware": "DDM32 Plus 1.0.1"}"#));
     assert_eq!(1, with(r#"{"include_beta": true}"#));
     assert_eq!(0, with(r#"{"include_beta": false, "window": {}}"#));
     for k in ddm32_core::storage::settings::NET_ONLY_KEYS {
@@ -269,6 +271,86 @@ fn channel_takes_over_include_beta() {
         assert_eq!(Some("en".into()), s.language());
         assert!(s.disclaimer_accepted("x"));
     }
+}
+
+/// A fresh install decides its channel once (Latest) and keeps it after its first install record.
+#[test]
+fn the_channel_is_settled_once() {
+    let t = tmp();
+    let path = t.path().join("settings.json");
+    let s = Settings::new(&path);
+    s.set_language("en").unwrap();
+    assert_eq!(0, s.settle_channel().unwrap());
+    assert_eq!(Some(0), s.load().get("channel").and_then(|v| v.as_i64()), "saved at the first start");
+    // the first install writes the C# keys (and any key a C# program might write later)
+    s.save("installed_sha256", serde_json::json!("ab")).unwrap();
+    s.save("installed_firmware", serde_json::json!("DDM32 Plus 1.0.1")).unwrap();
+    s.save("window", serde_json::json!({"x": 1})).unwrap();
+    assert_eq!(0, s.channel());
+    assert_eq!(0, s.settle_channel().unwrap());
+    // a C# file without `channel`: decided from it once, then kept
+    std::fs::write(&path, r#"{"language": "en", "window": {}}"#).unwrap();
+    assert_eq!(1, s.settle_channel().unwrap());
+    s.save("include_beta", serde_json::json!(false)).unwrap();
+    assert_eq!(1, s.channel(), "settled: a later include_beta does not change it");
+}
+
+/// A C# settings file keeps `port` without `port_auto`: the user's last chosen port, a fixed choice here.
+#[test]
+fn the_csharp_port_is_the_first_fixed_choice() {
+    let t = tmp();
+    let path = t.path().join("settings.json");
+    let s = Settings::new(&path);
+    std::fs::write(&path, r#"{"port": "COM14"}"#).unwrap();
+    let p = s.port_pref();
+    assert!(!p.auto);
+    assert_eq!(Some("COM14".to_string()), p.port);
+    std::fs::write(&path, r#"{"port": "COM14", "port_auto": true}"#).unwrap();
+    assert!(s.port_pref().auto, "this program's own choice wins");
+    std::fs::write(&path, r#"{}"#).unwrap();
+    assert!(s.port_pref().auto);
+}
+
+/// A backup's age: the manifest's completed_utc (else started_utc), not the folder's time (copying changes that).
+#[test]
+fn backup_age_comes_from_its_manifest() {
+    use std::time::{Duration, SystemTime};
+    let t = tmp();
+    let b = t.path().join("dm32-old");
+    std::fs::create_dir_all(&b).unwrap();
+    let at = |s: i64| SystemTime::UNIX_EPOCH + Duration::from_secs(s as u64);
+    std::fs::write(
+        b.join("backup-manifest.json"),
+        r#"{"backup_verified": true, "started_utc": "2026-11-13T10:00:00Z", "completed_utc": "2026-11-13T10:05:00Z"}"#,
+    )
+    .unwrap();
+    assert_eq!(at(1_794_564_300), backups::backup_time(&b));
+    std::fs::write(
+        b.join("backup-manifest.json"),
+        r#"{"backup_verified": true, "started_utc": "2026-11-13T10:00:00+00:00"}"#,
+    )
+    .unwrap();
+    assert_eq!(at(1_794_564_000), backups::backup_time(&b));
+    // none (or damaged): the folder's time
+    std::fs::write(b.join("backup-manifest.json"), r#"{"backup_verified": true, "completed_utc": "yesterday"}"#)
+        .unwrap();
+    let folder = std::fs::metadata(&b).unwrap().modified().unwrap();
+    assert_eq!(folder, backups::backup_time(&b));
+    // discover orders by it: an old backup copied today stays older than a newer one
+    let n = t.path().join("dm32-new");
+    std::fs::create_dir_all(&n).unwrap();
+    std::fs::write(
+        n.join("backup-manifest.json"),
+        r#"{"backup_verified": true, "completed_utc": "2026-11-20T09:00:00Z"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        b.join("backup-manifest.json"),
+        r#"{"backup_verified": true, "completed_utc": "2026-11-13T10:05:00Z"}"#,
+    )
+    .unwrap();
+    let found = discover(&[backups::BackupRoot { folder: t.path().to_path_buf(), origin: "own" }]);
+    assert_eq!(vec![n, b], found.into_iter().map(|f| f.folder).collect::<Vec<_>>());
 }
 
 #[test]

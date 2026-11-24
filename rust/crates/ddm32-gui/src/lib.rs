@@ -9,6 +9,8 @@ pub mod disclaimer;
 pub mod i18n;
 pub mod radio_pages;
 pub mod updates;
+pub mod winres;
+pub mod worker;
 
 slint::include_modules!();
 
@@ -78,6 +80,12 @@ pub struct State {
     pub cable: Option<CableStatus>,
     /// A port listing runs on its worker thread
     pub scan_running: bool,
+    /// When the last port listing was applied (a radio step uses it while it is younger than PORT_FRESH)
+    pub last_scan: Option<std::time::Instant>,
+    /// A radio step that writes to the radio runs (install, restore, pack write): the window never closes then
+    pub writing: bool,
+    /// When the close button was last refused (a second press within FORCE_CLOSE_WINDOW may offer "Close anyway")
+    pub close_refused_at: Option<std::time::Instant>,
     /// The "COM15 not found" line was dismissed for this port
     pub port_missing_ack: Option<String>,
     /// settings.json `auto_check`, read once (the 3 s tick must not read the file)
@@ -170,7 +178,8 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
     ui.global::<Theme>().set_dark(settings.theme() == SavedTheme::Dark);
     let app = ui.global::<App>();
     // this program's channel, or the C# program's include_beta during the hand-over (Settings::channel)
-    app.set_channel(settings.channel());
+    // decided once and saved, so a key written later (an install record) never changes it
+    app.set_channel(settings.settle_channel().unwrap_or_else(|_| settings.channel()));
     let disclaimer_ok = settings.disclaimer_accepted(&disclaimer::version());
     ui.global::<Radio>().set_disclaimer_ok(disclaimer_ok);
     app.set_auto_check(settings.auto_check());
@@ -215,6 +224,9 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             known: Known { installed: Installed::NotRead, source: updates::Source::None, may_prompt: false },
             cable: None,
             scan_running: false,
+            last_scan: None,
+            writing: false,
+            close_refused_at: None,
             port_missing_ack: None,
             auto_check: auto,
             restore_backup: None,
@@ -307,6 +319,7 @@ pub fn busy_state(ui: &AppWindow) -> updates::Busy {
             || app.get_prompt_open()
             || app.get_disc_open()
             || app.get_test_confirm_open()
+            || app.get_force_close_open()
             || ui.global::<Radio>().get_picker_open(),
     }
 }
@@ -325,15 +338,42 @@ pub(crate) fn request_scan(ui: &AppWindow) {
         return;
     }
     let w = ui.as_weak();
-    std::thread::spawn(move || {
-        let (status, entries) = list_ports();
-        // without an event loop (tests) nothing is applied
-        let _ = slint::invoke_from_event_loop(move || {
-            with(|s| s.scan_running = false);
-            if let Some(ui) = w.upgrade() {
+    // without an event loop (tests) nothing is applied; a panic in the listing still ends the scan
+    worker::spawn(list_ports, move |r| {
+        with(|s| s.scan_running = false);
+        if let (Some(ui), Ok((status, entries))) = (w.upgrade(), r) {
+            apply_port_scan(&ui, &status, &entries);
+        }
+    });
+}
+
+/// How long a port listing is good for a radio step's start.
+pub const PORT_FRESH: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Runs `then` with the port a radio step uses: from the last listing when it is younger than PORT_FRESH, else after
+/// a fresh listing on a worker thread (never on the window's thread; the radio buttons are off meanwhile).
+pub(crate) fn with_port(ui: &AppWindow, then: fn(&AppWindow, Option<String>)) {
+    if with(|s| s.last_scan.is_some_and(|t| t.elapsed() < PORT_FRESH)) {
+        let p = with(|s| s.port_now.port.clone());
+        then(ui, p);
+        return;
+    }
+    let app = ui.global::<App>();
+    app.set_busy(true);
+    ui.global::<Radio>().set_busy(true);
+    let w = ui.as_weak();
+    worker::spawn(list_ports, move |r| {
+        let Some(ui) = w.upgrade() else { return };
+        ui.global::<App>().set_busy(false);
+        ui.global::<Radio>().set_busy(false);
+        match r {
+            Ok((status, entries)) => {
                 apply_port_scan(&ui, &status, &entries);
+                let p = with(|s| s.port_now.port.clone());
+                then(&ui, p);
             }
-        });
+            Err(e) => set_message(&ui, &trf("msg_failed", &e), "danger"),
+        }
     });
 }
 
@@ -348,6 +388,7 @@ pub fn apply_port_scan(ui: &AppWindow, status: &CableStatus, entries: &[portpick
         }
         s.port_opts = opts.clone();
         s.cable = Some(status.clone());
+        s.last_scan = Some(std::time::Instant::now());
     });
     show_cable(ui);
     show_ports(ui);
@@ -580,6 +621,10 @@ fn wire(ui: &AppWindow) {
         let app = ui.global::<App>();
         let lang = if app.get_disc_lang() == "en" { "tr" } else { "en" };
         show_disclaimer(&ui, lang, app.get_disc_readonly());
+    });
+    let w = ui.as_weak();
+    app.on_force_close_yes(move || {
+        force_close(&w.unwrap());
     });
     let w = ui.as_weak();
     app.on_test_confirm_yes(move || {
@@ -966,7 +1011,15 @@ pub fn close_requested(ui: &AppWindow) -> slint::CloseRequestResponse {
     let app = ui.global::<App>();
     let r = ui.global::<Radio>();
     if app.get_busy() || r.get_busy() {
-        let text = tr("busy_close");
+        let writing = with(|s| s.writing);
+        let again = with(|s| s.close_refused_at.is_some_and(|t| t.elapsed() < FORCE_CLOSE_WINDOW));
+        if !writing && again {
+            // the second press: "Close anyway?" (No by default); never while the radio is written
+            app.set_force_close_open(true);
+            return slint::CloseRequestResponse::KeepWindowShown;
+        }
+        with(|s| s.close_refused_at = Some(std::time::Instant::now()));
+        let text = if writing { tr("busy_close") } else { format!("{} {}", tr("busy_close"), tr("busy_close_again")) };
         set_message(ui, &text, "warning");
         r.set_message(text.into());
         r.set_message_kind("warning".into());
@@ -990,6 +1043,22 @@ pub fn close_requested(ui: &AppWindow) -> slint::CloseRequestResponse {
         with(|s| s.close_timer = Some(timer));
     }
     slint::CloseRequestResponse::KeepWindowShown
+}
+
+/// A second press of the close button within this time, while a step that does not write to the radio runs, asks
+/// "Close anyway?".
+pub const FORCE_CLOSE_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// "Close anyway": only when no radio write runs (checked again here); the half-done backup or download is never used
+/// (a backup without its verified manifest is not one).
+pub fn force_close(ui: &AppWindow) -> bool {
+    let app = ui.global::<App>();
+    app.set_force_close_open(false);
+    if with(|s| s.writing) {
+        return false;
+    }
+    let _ = slint::quit_event_loop();
+    true
 }
 
 /// A reader (live view, search log) ended: when the close button waits for it and nothing else runs, the window
@@ -1163,23 +1232,27 @@ fn app_update(ui: &AppWindow) {
     app.set_app_update_text(tr("pu_downloading").into());
     let updates = with(|s| s.paths.updates());
     let w = ui.as_weak();
-    std::thread::spawn(move || {
-        use ddm32_core::update::self_update as su;
-        let r = (|| -> Result<(PathBuf, Vec<String>), String> {
-            let zip =
-                client::download_app(&rel.entry, &updates, &HttpReleaseNet::real(), None).map_err(|e| e.to_string())?;
-            let staged = su::stage(&zip, &updates, &rel.entry.version).map_err(|e| e.0)?;
-            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-            let app_dir = exe.parent().ok_or("no program folder")?.to_path_buf();
-            Ok(su::helper_command(
-                &staged,
-                std::process::id(),
-                &app_dir,
-                &updates.join("started.json"),
-                &updates.join(su::RESULT_FILE),
-            ))
-        })();
-        let _ = slint::invoke_from_event_loop(move || {
+    worker::spawn(
+        move || {
+            use ddm32_core::update::self_update as su;
+            (|| -> Result<(PathBuf, Vec<String>), String> {
+                let zip = client::download_app(&rel.entry, &updates, &HttpReleaseNet::real(), None)
+                    .map_err(|e| e.to_string())?;
+                let staged = su::stage(&zip, &updates, &rel.entry.version).map_err(|e| e.0)?;
+                let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+                let app_dir = exe.parent().ok_or("no program folder")?.to_path_buf();
+                Ok(su::helper_command(
+                    &staged,
+                    std::process::id(),
+                    &app_dir,
+                    &updates.join("started.json"),
+                    &updates.join(su::RESULT_FILE),
+                ))
+            })()
+        },
+        move |r| {
+            // a panic in the download or the staging ends here too (its text shown)
+            let r = r.and_then(|x| x);
             let Some(ui) = w.upgrade() else { return };
             let app = ui.global::<App>();
             app.set_busy(false);
@@ -1197,8 +1270,8 @@ fn app_update(ui: &AppWindow) {
                 }
                 Err(e) => app.set_app_update_text(trf("pu_failed", &e).into()),
             }
-        });
-    });
+        },
+    );
 }
 
 /// Asks GitHub for the signed release list in the background. A failure is never swallowed: it is written to
@@ -1209,13 +1282,13 @@ fn load_catalog(w: Weak<AppWindow>, ask: bool) {
         s.last_check = Some(std::time::Instant::now());
         s.paths.releases()
     });
-    std::thread::spawn(move || {
-        let r = client::load_catalog(&releases, &HttpReleaseNet::real(), None, None);
-        let _ = slint::invoke_from_event_loop(move || {
+    worker::spawn(
+        move || client::load_catalog(&releases, &HttpReleaseNet::real(), None, None).map_err(|e| e.0),
+        move |r| {
             let Some(ui) = w.upgrade() else { return };
-            catalog_loaded(&ui, r.map_err(|e| e.0), ask);
-        });
-    });
+            catalog_loaded(&ui, r.and_then(|x| x), ask);
+        },
+    );
 }
 
 /// The end of a release-list check (also driven by tests with a made-up result): the list replaces the cached one
@@ -1256,18 +1329,6 @@ fn set_step(ui: &AppWindow, step: i32) {
         app.set_details("".into());
     }
     set_message(ui, "", "info");
-}
-
-/// The port a radio step uses: the picker's choice while the OS lists it, else the CH340 cable (Auto). Read fresh
-/// from the OS's list (never by opening a port).
-pub(crate) fn port() -> Option<String> {
-    let (_, entries) = list_ports();
-    let opts = portpick::options(&entries, Os::current());
-    with(|s| {
-        s.port_now = portpick::resolve(&s.port_pref, &opts, None);
-        s.port_opts = opts;
-        s.port_now.port.clone()
-    })
 }
 
 /// What Home says about the cable: Windows' device list (a missing CH340 driver is found without opening a port),
@@ -1461,48 +1522,67 @@ fn run_tool(
     let app = ui.global::<App>();
     app.set_busy(true);
     clear_progress(&app);
-    with(|s| s.progress = ProgressView::new());
-    let w = ui.as_weak();
-    std::thread::spawn(move || {
-        let clock = SystemClock::default();
-        let w2 = w.clone();
-        let print = move |line: &str| {
-            let line = line.to_string();
-            let w3 = w2.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = w3.upgrade() else { return };
-                let show = with(|s| progress_show(&mut s.progress, &s.lang, &line));
-                show.apply(&ui.global::<App>());
-            });
-        };
-        let serial = move |p: &str| -> ToolResult<Box<dyn RawSerial>> {
-            if writes {
-                RadioAccess::write_factory(p)
-            } else {
-                RadioAccess::factory(p)
-            }
-        };
-        let ctx =
-            ToolContext { print: &print, clock: &clock, serial: &serial, release_key_hex: None, codec: Codec::dm32() };
-        let r = match tool {
-            "backup" => tools::backup_tool(&argv, &ctx),
-            "install_plus" => tools::install_tool(&argv, &ctx),
-            "install_firstboot" => tools::restore_stock_tool(&argv, &ctx),
-            "fast_install" => fast_install::fast_install_tool(&argv, &ctx),
-            "datapack" => cps::data_pack_tool(&argv, &ctx),
-            other => Err(ToolError::value(format!("unknown tool {other}"))),
-        };
-        let _ = slint::invoke_from_event_loop(move || {
-            let Some(ui) = w.upgrade() else { return };
-            let app = ui.global::<App>();
-            app.set_busy(false);
-            if r.is_ok() && app.get_progress() > 0.0 {
-                // a tool's last percent line may stop short of 100 (the readback prints every 25 %)
-                app.set_progress(1.0);
-            }
-            done(&ui, r.err());
-        });
+    with(|s| {
+        s.progress = ProgressView::new();
+        s.writing = writes;
     });
+    let w = ui.as_weak();
+    let w2 = w.clone();
+    worker::spawn(
+        move || {
+            let clock = SystemClock::default();
+            let print = move |line: &str| {
+                let line = line.to_string();
+                let w3 = w2.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = w3.upgrade() else { return };
+                    let show = with(|s| progress_show(&mut s.progress, &s.lang, &line));
+                    show.apply(&ui.global::<App>());
+                });
+            };
+            let serial = move |p: &str| -> ToolResult<Box<dyn RawSerial>> {
+                if writes {
+                    RadioAccess::write_factory(p)
+                } else {
+                    RadioAccess::factory(p)
+                }
+            };
+            let ctx = ToolContext {
+                print: &print,
+                clock: &clock,
+                serial: &serial,
+                release_key_hex: None,
+                codec: Codec::dm32(),
+            };
+            match tool {
+                "backup" => tools::backup_tool(&argv, &ctx),
+                "install_plus" => tools::install_tool(&argv, &ctx),
+                "install_firstboot" => tools::restore_stock_tool(&argv, &ctx),
+                "fast_install" => fast_install::fast_install_tool(&argv, &ctx),
+                "datapack" => cps::data_pack_tool(&argv, &ctx),
+                other => Err(ToolError::value(format!("unknown tool {other}"))),
+            }
+        },
+        move |r| {
+            let Some(ui) = w.upgrade() else { return };
+            let err = tool_ended(&ui, r);
+            done(&ui, err);
+        },
+    );
+}
+
+/// The end of a radio tool, also after a panic in its worker (then an error with the panic's text): the window is
+/// not busy any more and no write runs; the tool's error, if any, for the step's own message.
+pub fn tool_ended(ui: &AppWindow, r: Result<ToolResult<()>, String>) -> Option<ToolError> {
+    let app = ui.global::<App>();
+    app.set_busy(false);
+    with(|s| s.writing = false);
+    let r = r.unwrap_or_else(|panic| Err(worker::panic_error(&panic)));
+    if r.is_ok() && app.get_progress() > 0.0 {
+        // a tool's last percent line may stop short of 100 (the readback prints every 25 %)
+        app.set_progress(1.0);
+    }
+    r.err()
 }
 
 fn s(p: &Path) -> String {
@@ -1523,7 +1603,12 @@ fn start_backup(ui: &AppWindow) {
     if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
-    let Some(port) = port() else {
+    with_port(ui, start_backup_on);
+}
+
+/// start_backup once the port is known (crate::with_port).
+fn start_backup_on(ui: &AppWindow, found: Option<String>) {
+    let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
     };
@@ -1554,7 +1639,12 @@ fn start_install(ui: &AppWindow) {
     if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
-    let Some(port) = port() else {
+    with_port(ui, start_install_on);
+}
+
+/// start_install once the port is known (crate::with_port).
+fn start_install_on(ui: &AppWindow, found: Option<String>) {
+    let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
     };
@@ -1646,7 +1736,12 @@ fn start_restore(ui: &AppWindow) {
     if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
-    let Some(port) = port() else {
+    with_port(ui, start_restore_on);
+}
+
+/// start_restore once the port is known (crate::with_port).
+fn start_restore_on(ui: &AppWindow, found: Option<String>) {
+    let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
     };
@@ -1749,7 +1844,12 @@ fn pack_write(ui: &AppWindow) {
     if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
-    let Some(port) = port() else {
+    with_port(ui, pack_write_on);
+}
+
+/// pack_write once the port is known (crate::with_port).
+fn pack_write_on(ui: &AppWindow, found: Option<String>) {
+    let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
     };
@@ -1786,6 +1886,7 @@ pub fn demo(ui: &AppWindow) {
     app.set_prompt_open(false);
     app.set_disc_open(false);
     app.set_test_confirm_open(false);
+    app.set_force_close_open(false);
     ui.global::<Radio>().set_disclaimer_ok(true);
     demo_ports(ui, &lang);
     app.set_app_update_text(i18n::tf(&lang, "pu_available", "3.1.0").into());

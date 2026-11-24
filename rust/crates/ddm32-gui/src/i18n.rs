@@ -24,6 +24,10 @@ pub const TEXTS: &[(&str, &str, &str)] = &[
     ("disc_accepted", "Bu metni kabul ettiniz; telsiz işlemleri açık.", "You accepted this text; radio steps are on."),
     // the window's close button (the C# Main_BusyClose) and closing while a reader runs
     ("busy_close", "Bir adım sürüyor. Bitmeden pencere kapatılamaz (kapatmak işlemi yarıda keser).", "A step is running. The window cannot be closed before it ends (closing would stop it half way)."),
+    ("busy_close_again", "Yine de kapatmak için 5 saniye içinde bir kez daha kapatın.", "To close anyway, close it once more within 5 seconds."),
+    ("close_anyway_title", "Yine de kapatılsın mı?", "Close anyway?"),
+    ("close_anyway_text", "Bir adım hâlâ sürüyor (telsize yazmıyor). Kapatmak onu yarıda keser; yarım kalan yedek ya da indirme kullanılmaz.", "A step is still running (it does not write to the radio). Closing stops it half way; a half-done backup or download is never used."),
+    ("close_anyway_yes", "Yine de kapat", "Close anyway"),
     ("closing_wait", "Canlı izleme / arama kaydı durduruluyor; pencere ardından kapanır.", "Stopping the live view / search log; the window closes then."),
     // choosing a test / alpha version (the C# Ver_TestConfirm*): Yes / No, No by default
     ("ver_test_title", "Test / Alfa sürümü", "Test / Alpha version"),

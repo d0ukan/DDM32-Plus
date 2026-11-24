@@ -55,6 +55,9 @@ export global App {
     callback disc-accept();
     callback disc-reject();
     callback disc-toggle-lang();
+    // the close button pressed twice while a step that does not write to the radio runs: "Close anyway?" (No default)
+    in-out property <bool> force-close-open;
+    callback force-close-yes();
     // choosing a test / alpha version: Yes / No, No by default
     in-out property <bool> test-confirm-open;
     in property <string> test-confirm-text;
@@ -591,7 +594,7 @@ export component AppWindow inherits Window {
     background: Theme.window;
     default-font-size: Theme.font;
     // a dialog is open: the controls under it take no keyboard focus and no click (widgets.slint Modal)
-    property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open || App.disc-open || App.test-confirm-open;
+    property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open || App.disc-open || App.test-confirm-open || App.force-close-open;
     changed modal => { Modal.open = self.modal; }
 
     VerticalLayout {
@@ -718,6 +721,26 @@ export component AppWindow inherits Window {
                     spacing: Theme.gap; alignment: end;
                     Button { text: Tr.t(Tr.lang, "b_rescan"); in-dialog: true; clicked => { Radio.port-rescan(); } }
                     Button { text: Tr.t(Tr.lang, "b_close"); kind: "primary"; in-dialog: true; default-focus: true; clicked => { Radio.picker-open = false; } }
+                }
+            }
+        }
+    }
+
+    // "Close anyway?": only reachable while no radio write runs (lib.rs close_requested); No has the focus
+    if App.force-close-open : Rectangle {
+        background: Theme.scrim;
+        TouchArea {}
+        Card {
+            width: min(parent.width - 48px, 560px);
+            height: min(fv.preferred-height, parent.height - 32px);
+            fv := VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap * 1.5;
+                Title { text: Tr.t(Tr.lang, "close_anyway_title"); }
+                Label { text: Tr.t(Tr.lang, "close_anyway_text"); }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    Button { text: Tr.t(Tr.lang, "b_no"); in-dialog: true; default-focus: true; clicked => { App.force-close-open = false; } }
+                    Button { text: Tr.t(Tr.lang, "close_anyway_yes"); kind: "danger"; in-dialog: true; clicked => { App.force-close-yes(); } }
                 }
             }
         }

@@ -479,3 +479,60 @@ fn disclaimer_holds_the_question() {
     assert!(app.get_prompt_open(), "and comes once it is accepted");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A C# restore after our install: `installed_sha256` null and `installed_firmware` "stock" / "" supersede our record
+/// (what the radio runs is the restored firmware or not known, never our older install).
+#[test]
+fn a_csharp_restore_supersedes_our_record() {
+    let dir = temp("csrestore");
+    let s = Settings::new(dir.join("settings.json"));
+    let ok = StepResult::new(true, true, false, "");
+    let all = catalog(&[("v1.0.1", Some(("1.0.1", "stable")), None)]).firmware;
+    for (firmware, kind) in [("stock", RecordKind::RestoreStock), ("", RecordKind::RestorePrevious)] {
+        updates::record_install_result(&s, &ok, &app_sha("1.0.1"), "1.0.1", None, 1000).unwrap();
+        assert_eq!(RecordKind::Install, updates::read_record(&s).unwrap().kind);
+        // the C# RestorePage after a verified restore
+        s.save("installed_sha256", serde_json::Value::Null).unwrap();
+        s.save("installed_firmware", json!(firmware)).unwrap();
+        let r = updates::read_record(&s).unwrap();
+        assert_eq!((kind, None, None), (r.kind, r.unix, r.sha256.clone()), "{firmware:?}");
+        let shown = updates::installed_from_record(&r, &all, "en");
+        if kind == RecordKind::RestoreStock {
+            assert_eq!(Installed::Other("Factory firmware".into()), shown);
+        } else {
+            assert_eq!(Installed::Unknown, shown);
+        }
+    }
+    // our own restore records stay as they are (their C# keys agree with them)
+    let backup = dir.join("dm32-x");
+    updates::record_restore_result(&s, &ok, &backup, true, 2000).unwrap();
+    assert_eq!((RecordKind::RestoreStock, Some(2000)), {
+        let r = updates::read_record(&s).unwrap();
+        (r.kind, r.unix)
+    });
+    updates::record_restore_result(&s, &ok, &backup, false, 3000).unwrap();
+    assert_eq!(Some(3000), updates::read_record(&s).unwrap().unix);
+    // a C# stock restore over our previous-version restore
+    s.save("installed_firmware", json!("stock")).unwrap();
+    let r = updates::read_record(&s).unwrap();
+    assert_eq!((RecordKind::RestoreStock, None), (r.kind, r.unix));
+    // a C# backup note (sha kept) does not count as a restore
+    updates::record_install_result(&s, &ok, &app_sha("1.0.1"), "1.0.1", None, 4000).unwrap();
+    s.save("installed_firmware", json!("my note")).unwrap();
+    assert_eq!(Some(4000), updates::read_record(&s).unwrap().unix);
+}
+
+/// A fresh install stays on Latest after its first install record (the record writes C# keys too).
+#[test]
+fn a_fresh_install_keeps_latest_after_an_install() {
+    let (ui, root, settings) = window("fresh-channel");
+    assert_eq!(0, ui.global::<App>().get_channel());
+    let ok = StepResult::new(true, true, false, "");
+    updates::record_install_result(&settings, &ok, &app_sha("1.0.0"), "1.0.0", None, updates::now_unix()).unwrap();
+    drop(ui);
+    let ui = AppWindow::new().unwrap();
+    ddm32_gui::setup(&ui, AppPaths::new(&root), false);
+    assert_eq!(0, ui.global::<App>().get_channel());
+    assert_eq!(Some(0), settings.load().get("channel").and_then(|v| v.as_i64()), "settled at the first start");
+    let _ = std::fs::remove_dir_all(&root);
+}
