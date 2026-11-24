@@ -7,7 +7,6 @@
 
 use crate::{i18n, set_message, tr, with, App, AppWindow};
 use ddm32_core::pyjson::PyDict;
-use ddm32_core::radio::codec::Codec;
 use ddm32_core::radio::flow::FileSteps;
 use ddm32_core::storage::paths::is_verified_backup;
 use ddm32_core::storage::Settings;
@@ -125,7 +124,7 @@ pub fn choose(ui: &AppWindow, kind: Option<&str>, folder: &Path) -> bool {
     let app = ui.global::<App>();
     app.set_restore_ready(false);
     set_message(ui, "", "info");
-    let detected = FileSteps::detect_backup(folder, Codec::dm32());
+    let detected = FileSteps::detect_backup(folder, with(|s| s.codec));
     // a planned restore never records a stock backup: only the wizard's own backups enter `stock_backups`
     let stock = detected.as_ref().ok().and_then(|d| d.str("layout")) == Some("stock");
     let kind = kind.unwrap_or(if stock { "stock" } else { "previous" });

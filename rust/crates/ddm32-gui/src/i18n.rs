@@ -472,6 +472,8 @@ pub const TEXTS: &[(&str, &str, &str)] = &[
     ("ch_open", "Başka bir yedek aç...", "Open another backup..."),
     ("ch_shown", "{} / {} satır gösteriliyor", "Showing {} of {} rows"),
     ("ch_unverified", " (doğrulanmamış yedek)", " (unverified backup)"),
+    ("settings_not_saved", "settings.json okunamıyor; ayar kaydedilmedi (logs klasöründe settings.log). Dosyayı düzeltin ya da silin.",
+     "settings.json cannot be read; the setting was not saved (settings.log in the logs folder). Repair or delete the file."),
     ("ch_opened", "Kaynak: {} (açılan klasör; telsize bağlanmaz)", "Source: {} (the folder you opened; the radio is not asked)"),
     ("ch_failed", "Okunamadı: {}", "Could not read: {}"),
     ("ch_zone_title", "Bölge seçin", "Choose a zone"),

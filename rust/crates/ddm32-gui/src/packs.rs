@@ -407,10 +407,13 @@ pub fn build_radioid(ui: &AppWindow) {
     let Some(csv) = with(|s| s.packs.csv.clone()) else { return };
     let list = countries(&p.get_countries());
     let name = pack_name(&p.get_radioid_name(), "RadioID");
-    with(|s| {
-        let _ = s.settings.save(COUNTRIES_KEY, Value::String(p.get_countries().trim().to_string()));
-        let _ = s.settings.save(RADIOID_NAME_KEY, Value::String(name.clone()));
+    let saved = with(|s| {
+        s.settings.save_all(vec![
+            (COUNTRIES_KEY, Value::String(p.get_countries().trim().to_string())),
+            (RADIOID_NAME_KEY, Value::String(name.clone())),
+        ])
     });
+    let saved = crate::noted(saved, "pack_countries / pack_radioid_name");
     p.set_working(true);
     result(ui, &tr("pack_busy_read"), "info");
     let dir = packs_dir();
@@ -427,6 +430,9 @@ pub fn build_radioid(ui: &AppWindow) {
             ui.global::<Packs>().set_working(false);
             result(&ui, "", "info");
             built(&ui, RADIO_ID, r.and_then(|x| x));
+            if !saved {
+                result(&ui, &tr("settings_not_saved"), "warning");
+            }
         },
     );
 }
@@ -493,10 +499,8 @@ pub fn add_sources(ui: &AppWindow, paths: Vec<PathBuf>) {
 pub fn build_air(ui: &AppWindow) {
     let p = ui.global::<Packs>();
     let name = pack_name(&p.get_air_name(), "Aerodromes");
-    let sources = with(|s| {
-        let _ = s.settings.save(AIR_NAME_KEY, Value::String(name.clone()));
-        s.packs.air.clone()
-    });
+    let (saved, sources) = with(|s| (s.settings.save(AIR_NAME_KEY, Value::String(name.clone())), s.packs.air.clone()));
+    let saved = crate::noted(saved, "pack_air_name");
     if sources.is_empty() {
         return;
     }
@@ -507,6 +511,9 @@ pub fn build_air(ui: &AppWindow) {
         Ok((pk, file))
     });
     built(ui, AIR, r);
+    if !saved {
+        result(ui, &tr("settings_not_saved"), "warning");
+    }
 }
 
 /// "Choose a .dpk file...": a whole, checked pack (this program's, the C# program's or datapack.py's).

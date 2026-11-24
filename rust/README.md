@@ -185,8 +185,10 @@ Since v1.1.0 (candidate) the window has what a normal user used in the C# 2.0.0 
   agree; restored only when at least the window's minimum and its title bar lies on one monitor (the top inside the
   monitor's work area, a 40 px strip below it, 120 px of the width; Windows lists the monitors; elsewhere only an
   absurd place is refused); the size is cut to that monitor; a maximized or minimized window keeps the last normal
-  place. A damaged `settings.json` is never written for one of the C# keys (`window`, `last_check_utc`, the restore and
-  pack keys), and the first such key also saves `channel` as it read, so the channel can never flip to Beta. **Help** is an offline page
+  place. A damaged `settings.json` (something that is not a JSON object) is never written for one of the C# keys
+  (`window`, `last_check_utc`, the restore and pack keys); the refusal goes to `logs/settings.log` (and the data packs
+  page says so). An empty or whitespace-only file counts as a fresh one and a UTF-8 BOM is read past, as the C# program
+  does. The first such key also saves `channel` as it read, so the channel can never flip to Beta. **Help** is an offline page
   with the C# help's eight common situations (button names are this program's), one click from the full guide.
 - **Developer builds** (`--features developer`): the title says "DEVELOPER BUILD - radio access on / WRITE on" as the
   C# one, Tools > **Local release folder...** and `--release-folder PATH` load a signed release from a folder (verified
@@ -200,7 +202,10 @@ Since v1.1.0 (candidate) the window has what a normal user used in the C# 2.0.0 
   anyway" deletes its half file).
 - **Tests are hermetic**: the window takes its environment lookup from `setup_with_env`; every test passes `no_env`
   (or a sandbox inside its temporary folder), so no test reads the user's real backups (`tests/parity.rs` checks the
-  test files and that everything found lies inside the test's folder). Demo and test data use fictional callsigns and
+  test files for a plain `setup` call or import, `real_env`, `AppPaths::detect` / `for_this_program` and LOCALAPPDATA /
+  APPDATA lookups, and that everything found lies inside the test's folder). The codec tables a backup is detected
+  with are in the state (`use_codec`), so a test can use a synthetic stock firmware (the real stock bytes are never in
+  the repository). Demo and test data use fictional callsigns and
   IDs (TA1TST, 2869999).
 
 ## Radio access

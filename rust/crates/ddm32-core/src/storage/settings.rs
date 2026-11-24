@@ -54,7 +54,7 @@ impl Settings {
     pub fn load(&self) -> Map<String, Value> {
         std::fs::read(&self.file_path)
             .ok()
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|b| serde_json::from_slice::<Value>(strip_bom(&b)).ok())
             .and_then(|v| match v {
                 Value::Object(o) => Some(o),
                 _ => None,
@@ -70,12 +70,13 @@ impl Settings {
     ///
     /// A write that adds one of the C# program's keys ([`NET_ONLY_KEYS`]: the window's place, the last check, ...)
     /// keeps the release channel from flipping: `channel` is saved with it, as it read before the write, when the file
-    /// has none; and a file that is there but is not a JSON object (damaged, unreadable) is never written for such a
-    /// key (refused with an error), so it can never come to look like a C# file.
+    /// has none; and a file that holds something that is not a JSON object ([`Settings::is_garbage`]: damaged,
+    /// unreadable) is never written for such a key (refused with an error), so it can never come to look like a C#
+    /// file. An empty or whitespace-only file is a fresh one; a UTF-8 BOM is read past.
     pub fn save_all(&self, entries: Vec<(&str, Value)>) -> std::io::Result<()> {
         let net_key = entries.iter().any(|(k, _)| NET_ONLY_KEYS.contains(k));
         let mut s = self.load();
-        if net_key && s.is_empty() && self.file_path.exists() && !self.reads_as_object() {
+        if net_key && s.is_empty() && self.is_garbage() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "settings.json is not readable; not written",
@@ -91,12 +92,22 @@ impl Settings {
         self.write(&s)
     }
 
-    /// The file holds a JSON object (an empty one too).
-    fn reads_as_object(&self) -> bool {
-        std::fs::read(&self.file_path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            .is_some_and(|v| v.is_object())
+    /// The file is there and holds something that is not a JSON object (a UTF-8 BOM is allowed; a missing, empty or
+    /// whitespace-only file is a fresh one, as the C# program reads it). Unreadable counts as garbage too.
+    pub fn is_garbage(&self) -> bool {
+        if !self.file_path.exists() {
+            return false;
+        }
+        match std::fs::read(&self.file_path) {
+            Err(_) => true,
+            Ok(b) => {
+                let b = strip_bom(&b);
+                if b.iter().all(u8::is_ascii_whitespace) {
+                    return false;
+                }
+                !serde_json::from_slice::<Value>(b).is_ok_and(|v| v.is_object())
+            }
+        }
     }
 
     fn write(&self, s: &Map<String, Value>) -> std::io::Result<()> {
@@ -156,6 +167,8 @@ impl Settings {
     pub fn settle_channel(&self) -> std::io::Result<i32> {
         let c = self.channel();
         let s = self.load();
+        // an existing file that reads as empty is left as it is (the first C# key written later saves `channel`
+        // with it, see save_all)
         if s.is_empty() && self.file_path.exists() {
             return Ok(c);
         }
@@ -267,6 +280,11 @@ impl Settings {
     pub fn withdraw_disclaimer(&self, version: &str, now_utc: &str) -> std::io::Result<()> {
         self.save(DISCLAIMER_KEY, serde_json::json!({"version": version, "accepted": false, "withdrawn_utc": now_utc}))
     }
+}
+
+/// The bytes without a leading UTF-8 byte order mark (Notepad writes one).
+fn strip_bom(b: &[u8]) -> &[u8] {
+    b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(b)
 }
 
 /// The channel a settings object says (Settings::channel).

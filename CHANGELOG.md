@@ -88,7 +88,9 @@ Windows, Linux and macOS; host-tested only (fakes, no serial port, no network), 
     cannot flip to Beta; the window is restored only with its title bar on a monitor (one DPI basis); a late Yes or a
     tool start never runs beside another radio job; the versions page keeps its selected version after a check; the
     restore question names the backup once; "the folder you opened" on My channels; a RadioID download holds the close
-    button.
+    button. Second round: the wizard's backup and install refuse before anything moves while another radio job holds
+    the port; an empty, whitespace-only or BOM-prefixed settings.json is read as the C# program reads it (only real
+    garbage refuses a C# key, and the refusal is logged in `logs/settings.log`).
 
 ## v1.0.1 (2026-11-24)
 

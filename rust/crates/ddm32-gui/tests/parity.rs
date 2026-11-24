@@ -631,12 +631,22 @@ fn every_test_window_stays_in_its_own_folder() {
     for e in std::fs::read_dir(&tests).unwrap() {
         let p = e.unwrap().path();
         let text = std::fs::read_to_string(&p).unwrap();
-        assert!(
-            !text.contains(&format!("ddm32_gui::{}(", "setup")),
-            "{}: a window with the real environment",
-            p.display()
-        );
-        assert!(!text.contains(&format!("{}_env", "real")), "{}", p.display());
+        // the real environment, the real program folder, a plain setup call (imported or not): setup_with_env only
+        let forbidden = [
+            format!("{}_env", "real"),
+            format!("AppPaths::{}", "detect"),
+            format!("AppPaths::{}", "for_this_program"),
+            format!("env::var(\"{}", "LOCALAPPDATA"),
+            format!("env::var(\"{}", "APPDATA"),
+            format!("env::var_os(\"{}", "LOCALAPPDATA"),
+        ];
+        for f in &forbidden {
+            assert!(!text.contains(f.as_str()), "{}: {f}", p.display());
+        }
+        let plain = regex::Regex::new(&format!(r"(^|[^_A-Za-z]){}\(", "setup")).unwrap();
+        assert!(!plain.is_match(&text), "{}: a plain setup call (the real environment)", p.display());
+        let imported = regex::Regex::new(&format!(r"use ddm32_gui::\{{[^}}]*{}", "setup")).unwrap();
+        assert!(!imported.is_match(&text), "{}: setup imported", p.display());
     }
     // a C# install and a Python folder inside the sandbox: found, and nothing outside it
     let root = root("sandbox");
@@ -667,18 +677,6 @@ fn every_test_window_stays_in_its_own_folder() {
         assert!(src.starts_with(&root), "{}", src.display());
     }
     SANDBOX.with(|s| *s.borrow_mut() = None);
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn only_the_wizard_records_stock_backups() {
-    let root = root("stock-record");
-    let ui = window(&root, json!({"language": "en"}));
-    // a folder shown with "Choose another backup folder" is planned, never recorded (whatever its layout)
-    let other = root.join("elsewhere").join("dm32-x");
-    fake_backup(&other, b"x");
-    restore::other_folder(&ui, &other);
-    assert!(restore::stock_backups(&Settings::new(root.join("settings.json"))).is_empty());
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -737,6 +735,21 @@ fn a_late_yes_starts_nothing_while_the_port_is_held() {
         app.set_message("".into());
         p.invoke_read_radio();
         assert_eq!(i18n::t("en", "slog_busy_other"), app.get_message().as_str(), "read, hold {hold}");
+        // the wizard's backup and install: refused before anything of the wizard moves
+        for (step, name) in [(2, "backup"), (4, "install")] {
+            app.set_step(step);
+            app.set_message("".into());
+            if step == 2 {
+                app.invoke_start_backup();
+            } else {
+                app.invoke_start_install();
+            }
+            assert_eq!(i18n::t("en", "slog_busy_other"), app.get_message().as_str(), "{name}, hold {hold}");
+            assert!(
+                ddm32_gui::with_state(|s| s.wizard.running.is_none() && s.wizard.backup_dir.is_none()),
+                "{name}, hold {hold}: the wizard moved"
+            );
+        }
         assert!(ddm32_gui::with_state(|s| !s.writing && s.restore.running.is_none()));
         app.set_busy(false);
         r.set_busy(false);
@@ -784,5 +797,146 @@ fn the_selection_follows_its_version_and_the_question_names_the_backup_once() {
         "Source: dm32-y (the folder you opened; the radio is not asked)",
         ui.global::<Radio>().get_channels_source().as_str()
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---- third round: a backup that really detects as stock firmware (a synthetic codec; the real stock bytes are never
+// in the repository) --------------------------------------------------------------------------------------------------
+
+const START: usize = 0xC000;
+const SIZE: usize = 0x100000;
+const SECTOR: usize = 4096;
+const DATA_SIZE: usize = 0x1000000;
+const STOCK_CODE_AT: u64 = 0x030C68B8;
+const STOCK_TABLES_AT: u64 = 0x03072658;
+
+fn pattern(n: usize, k: usize) -> Vec<u8> {
+    (0..n).map(|i| ((i * k + (i >> 8) + 1) & 255) as u8).collect()
+}
+
+fn le(words: &[u32]) -> Vec<u8> {
+    words.iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
+/// The core tests' synthetic stock codec (tests/common synthetic_codec / synthetic_codec_tables).
+fn synthetic_codec() -> (&'static ddm32_core::radio::codec::Codec, Vec<u8>, Vec<u8>) {
+    let run = 0x16CDCu64;
+    let mut code = pattern(0x2000, 29);
+    code[..8].copy_from_slice(&le(&[0x152514D8, 0x74C776CD]));
+    let refs = vec![(0x40, run + 0x100), (0x84, run), (0x1000, run + 0x2000 - 4)];
+    for &(off, v) in &refs {
+        code[off as usize..off as usize + 4].copy_from_slice(&(v as u32).to_le_bytes());
+    }
+    let tables = pattern(0x2F78, 31);
+    let codec = ddm32_core::radio::codec::Codec::synthetic(
+        &code,
+        &tables,
+        &refs,
+        STOCK_CODE_AT,
+        STOCK_TABLES_AT,
+        "DM32.01.01.047.bin",
+        47,
+    );
+    (Box::leak(Box::new(codec)), code, tables)
+}
+
+/// A stock firmware program image holding the synthetic codec where the stock firmware keeps it.
+fn stock_program(code: &[u8], tables: &[u8]) -> Vec<u8> {
+    let rep: Vec<u8> = (0..0x3000).map(|i| (i & 255) as u8).collect();
+    let boot = [pattern(0x1000, 7), (0..0xB000).map(|i| (i & 255) as u8).collect()].concat();
+    let mut p = [boot, pattern(0x800, 19), rep, vec![0xFF; SIZE - START - 0x3800]].concat();
+    let c = (STOCK_CODE_AT - 0x03000000) as usize;
+    p[c..c + code.len()].copy_from_slice(code);
+    let t = (STOCK_TABLES_AT - 0x03000000) as usize;
+    p[t..t + tables.len()].copy_from_slice(tables);
+    p
+}
+
+/// A complete verified two-pass backup (both chips), as the backup tool writes it.
+fn write_backup(folder: &Path, program: &[u8], data: &[u8]) {
+    std::fs::create_dir_all(folder).unwrap();
+    let mut captures = vec![];
+    for (memory, image) in [("progmem", program), ("q128", data)] {
+        for n in 1..=2 {
+            let name = format!("{memory}-pass{n}.bin");
+            std::fs::write(folder.join(&name), image).unwrap();
+            let sectors: Vec<String> = image.chunks(SECTOR).map(sm::sha256_hex).collect();
+            captures.push(json!({"file": name, "bytes": image.len(), "sha256": sm::sha256_hex(image),
+                "sector_sha256": sectors}));
+        }
+    }
+    let m = json!({"backup_verified": true, "captures": captures,
+        "chips": {"progmem": {"jedec": "c84014", "bytes": SIZE}, "q128": {"jedec": "ef4018", "bytes": DATA_SIZE}}});
+    std::fs::write(folder.join("backup-manifest.json"), m.to_string()).unwrap();
+}
+
+#[test]
+fn stock_backups_are_recorded_by_the_wizard_only() {
+    let root = root("stock-record");
+    let ui = window(&root, json!({"language": "en"}));
+    let app = ui.global::<App>();
+    let settings = Settings::new(root.join("settings.json"));
+    let (codec, code, tables) = synthetic_codec();
+    ddm32_gui::use_codec(codec);
+    let b = root.join("backups").join("dm32-stock");
+    write_backup(&b, &stock_program(&code, &tables), &vec![0xFFu8; DATA_SIZE]);
+    // the fixture really is stock firmware
+    let d = ddm32_core::radio::flow::FileSteps::detect_backup(&b, codec).unwrap();
+    assert_eq!(Some("stock"), d.str("layout"));
+    // chosen with "Choose another backup folder" or from the list: planned as stock, never recorded
+    restore::other_folder(&ui, &b);
+    let seen = ddm32_gui::with_state(|s| s.restore.detection.as_ref().and_then(|d| d.str("layout")).map(String::from));
+    assert_eq!(Some("stock".to_string()), seen, "the restore page saw a stock backup");
+    restore::choose(&ui, None, &b);
+    assert!(restore::stock_backups(&settings).is_empty(), "a backup the user showed is not recorded");
+    // the wizard's own backup, at its check: recorded
+    ddm32_gui::with_state(|s| {
+        s.wizard.set_port(Some("COM1")).unwrap();
+        s.wizard.start_backup(&b).unwrap();
+        s.wizard.backup_finished(&ddm32_core::radio::flow::StepResult::backup(&b, None));
+    });
+    app.invoke_navigate(1);
+    ddm32_gui::with_state(|s| {
+        s.wizard.set_port(Some("COM1")).unwrap();
+        s.wizard.start_backup(&b).unwrap();
+        s.wizard.backup_finished(&ddm32_core::radio::flow::StepResult::backup(&b, None));
+    });
+    app.set_step(2);
+    app.invoke_wizard_next();
+    assert_eq!(vec![b.display().to_string()], restore::stock_backups(&settings));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn settings_files_the_csharp_program_reads_as_empty() {
+    let root = root("settings-kinds");
+    let path = root.join("settings.json");
+    let s = Settings::new(&path);
+    let window = json!({"x": 1, "y": 2, "w": 900, "h": 700, "max": false});
+    // 0 bytes and whitespace only: a fresh file; the C# key goes in with channel Latest
+    for text in [&b""[..], &b" \r\n\t "[..]] {
+        std::fs::write(&path, text).unwrap();
+        assert!(!s.is_garbage());
+        s.save("window", window.clone()).unwrap();
+        assert_eq!((0, 0), (s.load()["channel"].as_i64().unwrap(), s.channel()));
+    }
+    // a UTF-8 BOM (Notepad) is read past: the keys stay
+    std::fs::write(&path, [&[0xEF, 0xBB, 0xBF][..], br#"{"language": "en", "include_beta": true}"#].concat()).unwrap();
+    assert_eq!(Some("en".to_string()), s.language());
+    assert_eq!(1, s.channel());
+    s.save("last_check_utc", json!("2026-11-24T00:00:00Z")).unwrap();
+    assert_eq!(("en", 1), (s.load()["language"].as_str().unwrap(), s.load()["channel"].as_i64().unwrap()));
+    // garbage: refused for a C# key, the file untouched, and the refusal is logged (never swallowed)
+    std::fs::write(&path, b"not json at all").unwrap();
+    assert!(s.is_garbage());
+    assert!(s.save("window", window.clone()).is_err());
+    assert_eq!(b"not json at all".to_vec(), std::fs::read(&path).unwrap());
+    init();
+    let ui = AppWindow::new().unwrap();
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(&root), false, ddm32_gui::no_env);
+    window::save(&ui);
+    assert_eq!(b"not json at all".to_vec(), std::fs::read(&path).unwrap());
+    let log = std::fs::read_to_string(root.join("logs").join("settings.log")).unwrap();
+    assert!(log.contains("window not saved"), "{log}");
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -143,7 +143,8 @@ pub fn save(ui: &crate::AppWindow) {
         Rect { x: p.x as f64 / scale, y: p.y as f64 / scale, w: s.width as f64 / scale, h: s.height as f64 / scale };
     let saved = crate::with(|st| st.settings.load().get("window").cloned());
     if let Some(g) = save_plan(now, w.is_maximized(), w.is_minimized(), saved.as_ref()) {
-        let _ = crate::with(|st| st.settings.save("window", to_json(&g)));
+        let r = crate::with(|st| st.settings.save("window", to_json(&g)));
+        crate::noted(r, "window");
     }
 }
 

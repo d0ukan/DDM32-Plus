@@ -74,7 +74,7 @@ fn a_running_step_refuses_the_close_button() {
         assert_eq!(refused, app.get_message().as_str());
         assert_eq!(refused, radio.get_message().as_str());
         assert_eq!("warning", radio.get_message_kind().as_str());
-        // the window's own close event goes the same way (the handler is set up by setup())
+        // the window's own close event goes the same way (the handler is set up by setup_with_env())
         radio.set_message("".into());
         ui.window().dispatch_event(WindowEvent::CloseRequested);
         assert_eq!(refused, radio.get_message().as_str(), "the close event reached the guard");

@@ -137,6 +137,33 @@ pub struct State {
     pub packs: packs::PackState,
     /// The environment the other programs' backups are found through (setup_with_env)
     pub env: EnvLookup,
+    /// The DM-32's codec tables the backups are detected with (always Codec::dm32() in the program; the tests set a
+    /// synthetic one with [`use_codec`], since the real stock bytes are never in the repository)
+    pub codec: &'static Codec,
+}
+
+/// The codec tables a backup is detected with (tests: a synthetic stock firmware).
+pub fn use_codec(codec: &'static Codec) {
+    with(|s| s.codec = codec);
+}
+
+/// A settings write that failed (a damaged settings.json refuses the C# keys): appended to `logs/settings.log`, never
+/// swallowed. True when the write went through.
+pub(crate) fn noted(r: std::io::Result<()>, what: &str) -> bool {
+    match r {
+        Ok(()) => true,
+        Err(e) => {
+            let logs = with(|s| s.paths.logs());
+            let _ = std::fs::create_dir_all(&logs);
+            let line = format!("{} settings.json: {what} not saved: {e}\n", client::now_utc());
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(logs.join("settings.log"))
+                .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+            false
+        }
+    }
 }
 
 thread_local! {
@@ -289,6 +316,7 @@ pub fn setup_with_env(ui: &AppWindow, paths: AppPaths, fetch: bool, env: EnvLook
             health_timer: None,
             packs: Default::default(),
             env,
+            codec: Codec::dm32(),
         })
     });
     with(|s| s.port_pref = s.settings.port_pref());
@@ -1316,7 +1344,7 @@ fn refresh(ui: &AppWindow) {
         let roots = backups::backup_roots(&s.paths, &s.settings, Os::current(), &s.env);
         s.found = backups::discover(&roots);
         let dirs: Vec<PathBuf> = roots.iter().map(|r| r.folder.clone()).collect();
-        s.quick = backups::last_for_quick_update(&dirs, Codec::dm32(), 8);
+        s.quick = backups::last_for_quick_update(&dirs, s.codec, 8);
         (s.found.clone(), s.quick.clone())
     });
     app.set_backups_text(trf("backups_found", &found.len().to_string()).into());
@@ -1531,19 +1559,24 @@ fn load_catalog(w: Weak<AppWindow>, ask: bool) {
 pub fn catalog_loaded(ui: &AppWindow, r: Result<Catalog, String>, ask: bool) {
     match r {
         Ok(mut cat) => {
+            let mut pending_note = None;
             with(|s| {
                 // a local release folder stays in the list (developer builds)
                 if let Some(local) = &s.local {
                     cat.add_local(local);
                 }
                 if let Some(t) = &cat.checked_utc {
-                    let _ = s.settings.save("last_check_utc", serde_json::Value::String(t.clone()));
+                    let r = s.settings.save("last_check_utc", serde_json::Value::String(t.clone()));
+                    pending_note = Some(r);
                 }
                 s.catalog = Some(cat);
                 s.check_error = None;
                 s.check_error_raw = None;
                 s.checking = false;
             });
+            if let Some(r) = pending_note {
+                noted(r, "last_check_utc");
+            }
             refresh(ui);
             versions::show(ui);
             if ask {
@@ -1679,10 +1712,11 @@ fn wizard_next(ui: &AppWindow) {
 fn check(ui: &AppWindow) {
     set_step(ui, 3);
     let app = ui.global::<App>();
+    let mut stock_note = None;
     let r: Result<(bool, String), String> = with(|s| {
         s.wizard.start_detect().map_err(|e| e.0.to_string())?;
         let backup = s.wizard.backup_dir.clone().unwrap_or_default();
-        match FileSteps::detect_backup(&backup, Codec::dm32()) {
+        match FileSteps::detect_backup(&backup, s.codec) {
             Ok(d) => s.wizard.detect_finished(Some(d), ""),
             Err(e) => {
                 s.wizard.detect_finished(None, &e.record());
@@ -1692,12 +1726,12 @@ fn check(ui: &AppWindow) {
         let stock = s.wizard.detection.as_ref().and_then(|d| d.str("layout")) == Some("stock");
         if stock {
             // kept for "Back to stock firmware" (the C# RememberStockBackup)
-            let _ = restore::remember_stock_backup(&s.settings, &backup);
+            stock_note = Some(restore::remember_stock_backup(&s.settings, &backup));
         }
         s.wizard.start_plan().map_err(|_| i18n::t(&s.lang, s.wizard.message.0))?;
         let plus = s.package.clone().unwrap_or_default();
         let mode = s.wizard.mode().unwrap_or("install_plus");
-        match FileSteps::plan(mode, &backup, &plus, None, Codec::dm32()) {
+        match FileSteps::plan(mode, &backup, &plus, None, s.codec) {
             Ok(p) => {
                 let safe = FileSteps::safe(&p);
                 let text = pyjson::dumps2(&Py::Dict(p.clone()));
@@ -1713,6 +1747,9 @@ fn check(ui: &AppWindow) {
             }
         }
     });
+    if let Some(n) = stock_note {
+        noted(n, "stock_backups");
+    }
     match r {
         Ok((stock, details)) => {
             app.set_summary(tr(if stock { "msg_check_stock" } else { "msg_check_ok" }).into());
@@ -1897,7 +1934,7 @@ pub(crate) fn reader_holds_port(ui: &AppWindow) -> bool {
 }
 
 fn start_backup(ui: &AppWindow) {
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     with_port(ui, start_backup_on);
@@ -1905,8 +1942,9 @@ fn start_backup(ui: &AppWindow) {
 
 /// start_backup once the port is known (crate::with_port).
 fn start_backup_on(ui: &AppWindow, found: Option<String>) {
-    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile; nothing of
+    // the wizard moves before they pass
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     let Some(port) = found else {
@@ -1937,7 +1975,7 @@ fn start_backup_on(ui: &AppWindow, found: Option<String>) {
 }
 
 fn start_install(ui: &AppWindow) {
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     with_port(ui, start_install_on);
@@ -1945,8 +1983,9 @@ fn start_install(ui: &AppWindow) {
 
 /// start_install once the port is known (crate::with_port).
 fn start_install_on(ui: &AppWindow, found: Option<String>) {
-    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile; nothing of
+    // the wizard moves before they pass
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     let Some(port) = found else {
@@ -1976,13 +2015,14 @@ fn start_install_on(ui: &AppWindow, found: Option<String>) {
     set_message(ui, &tr("msg_installing"), "info");
     run_tool(ui, tool, argv, true, move |ui, err| {
         let r = StepResult::install(&out, err.as_ref());
+        let mut prev_note = None;
         let none = with(|st| {
             st.wizard.install_finished(&r);
             let none = st.wizard.path == ddm32_core::radio::flow::BackupPath::None;
             let backup = if none { None } else { st.wizard.backup_dir.clone() };
             if let Some(b) = backup.as_deref().filter(|_| r.passed || r.writes_started) {
                 // "Back to the previous version" restores it (the C# restore_previous_backup)
-                let _ = restore::remember_previous_backup(&st.settings, b);
+                prev_note = Some(restore::remember_previous_backup(&st.settings, b));
             }
             let _ = updates::record_install_result(
                 &st.settings,
@@ -1994,6 +2034,9 @@ fn start_install_on(ui: &AppWindow, found: Option<String>) {
             );
             none
         });
+        if let Some(n) = prev_note {
+            noted(n, "restore_previous_backup");
+        }
         if r.passed {
             set_step(ui, 5);
         } else if r.writes_started {
@@ -2256,7 +2299,10 @@ pub fn demo_versions(ui: &AppWindow, lang: &str) {
     app.set_ver_status_kind("success".into());
     app.set_ver_last_check(versions::last_check(lang, Some("2026-11-24T09:41:00Z")).into());
     app.set_ver_banner(
-        i18n::t(lang, "update_newer").replacen("{}", "1.0.1 (En yeni)", 1).replacen("{}", "1.0.0", 1).into(),
+        i18n::t(lang, "update_newer")
+            .replacen("{}", &format!("1.0.1 ({})", label_in(lang, ReleaseLabel::Latest)), 1)
+            .replacen("{}", "1.0.0", 1)
+            .into(),
     );
     app.set_ver_rejected(
         format!("{}\nv0.9.9-test: signature does not verify\nv0.9.8: no signed manifest", t("ver_rejected")).into(),
