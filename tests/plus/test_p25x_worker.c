@@ -23,7 +23,13 @@ static unsigned failures;
 
 #if CONFIG_LANG_ANY
 /* The UI's catalogs aren't linked here: English (the words are the catalogs' msgids, tr.po has them in Turkish) */
-const char *tr(const char *en) { return en; }
+int tr_turkish;	/* tests/plus/test_p25rxnac.c: the two words the caller line translates, as tr.po has them */
+const char *tr(const char *en)
+{
+    if(tr_turkish && !strcmp(en,"EMERGENCY"))return "AC\xC4\xB0L DURUM";
+    if(tr_turkish && !strcmp(en,"Private"))return "\xC3\x96zel";
+    return en;
+}
 #endif
 
 /* ---- FreeRTOS, clock, board ---- */
