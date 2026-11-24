@@ -14,7 +14,7 @@ fn actions_parse() {
     assert_eq!(parse_menu_action("logs-folder"), Some(MenuAction::LogsFolder));
     assert_eq!(parse_menu_action("guide"), Some(MenuAction::Guide));
     // the first-start page, unknown pages and junk are not reachable
-    for bad in ["page:6", "page:11", "page:-1", "page:x", "", "format"] {
+    for bad in ["page:6", "page:13", "page:-1", "page:x", "", "format"] {
         assert_eq!(parse_menu_action(bad), None, "{bad}");
     }
 }

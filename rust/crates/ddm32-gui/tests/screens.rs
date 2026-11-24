@@ -147,6 +147,12 @@ fn every_screen_in_both_themes() {
         ("health", 7, 0, 0, ""),
         ("live", 8, 0, 0, ""),
         ("channels", 9, 0, 0, ""),
+        ("versions", 11, 0, 0, ""),
+        ("versions-details", 11, 0, 0, "ver-details"),
+        ("help", 12, 0, 0, ""),
+        ("backups-restore-confirm", 2, 0, 0, "res-confirm"),
+        ("packs-write-confirm", 3, 0, 0, "pack-confirm"),
+        ("channels-zone-picker", 9, 0, 0, "zone-picker"),
         // a dialog takes the keyboard focus: last, so the wizard shots above keep their focused Next
         ("update-1-test-confirm", 1, 0, 0, "test-confirm"),
     ];
@@ -222,6 +228,20 @@ fn every_screen_in_both_themes() {
                         app.set_test_confirm_text(i18n::tf(lang, "ver_test_confirm", "1.2.0-alpha.1").into());
                         app.set_test_confirm_open(true);
                     }
+                    "ver-details" => app.set_ver_details(true),
+                    "res-confirm" => {
+                        let status = app.get_res_status().to_string();
+                        let p = std::path::Path::new("C:/Users/…/DDM32 Plus/backups/dm32-20261121");
+                        app.set_res_confirm_text(ddm32_gui::restore::confirm_text(lang, p, &status).into());
+                        app.set_res_confirm_open(true);
+                    }
+                    "pack-confirm" => {
+                        let pk = ddm32_gui::packs::demo_pack();
+                        let p = ui.global::<ddm32_gui::Packs>();
+                        p.set_write_confirm_text(ddm32_gui::packs::confirm_text(lang, &pk, "COM14").into());
+                        p.set_write_confirm_open(true);
+                    }
+                    "zone-picker" => ddm32_gui::channels::demo_picker(&ui, lang),
                     _ => {}
                 }
                 // switch the theme live on this very page
@@ -232,7 +252,15 @@ fn every_screen_in_both_themes() {
                 let corner = buf[(H as usize - 2) * W as usize + 2];
                 let modal = matches!(
                     *extra,
-                    "confirm" | "prompt" | "picker" | "disclaimer" | "disclaimer-read" | "test-confirm"
+                    "confirm"
+                        | "prompt"
+                        | "picker"
+                        | "disclaimer"
+                        | "disclaimer-read"
+                        | "test-confirm"
+                        | "res-confirm"
+                        | "pack-confirm"
+                        | "zone-picker"
                 );
                 if !modal {
                     assert_eq!(
@@ -259,6 +287,12 @@ fn every_screen_in_both_themes() {
                             | "home-disclaimer-read"
                             | "home-not-accepted"
                             | "update-1-test-confirm"
+                            | "versions"
+                            | "help"
+                            | "packs"
+                            | "backups"
+                            | "channels"
+                            | "health"
                     )
                 {
                     let file = format!("{name}-{}-{lang}.png", if dark { "dark" } else { "light" });
@@ -297,11 +331,16 @@ fn no_colour_outside_the_theme_and_every_text_exists() {
             assert!(i18n::TEXTS.iter().any(|(x, _, _)| *x == k), "{name}: text key {k} is missing");
         }
     }
-    // every Rust-side key too
-    let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
-    let rkey = regex_lite(r#"\btrf?\("([a-z_0-9]+)""#);
-    for k in rkey(&src) {
-        assert!(i18n::TEXTS.iter().any(|(x, _, _)| *x == k), "lib.rs: text key {k} is missing");
+    // every Rust-side key too (every source file: tr("k"), trf("k", ..), i18n::t / tf / tn(lang, "k", ..))
+    let rkey = regex_lite(r#"\btrf?\("([A-Za-z_0-9]+)""#);
+    let ikey = regex_lite(r#"i18n::t[fn]?\(&?[a-z_]+, "([A-Za-z_0-9]+)""#);
+    for entry in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src")).unwrap() {
+        let p = entry.unwrap().path();
+        let src = std::fs::read_to_string(&p).unwrap();
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        for k in rkey(&src).into_iter().chain(ikey(&src)) {
+            assert!(i18n::TEXTS.iter().any(|(x, _, _)| *x == k), "{name}: text key {k} is missing");
+        }
     }
     for (k, t, e) in i18n::TEXTS {
         assert!(!t.is_empty() && !e.is_empty(), "{k}: a language is empty");

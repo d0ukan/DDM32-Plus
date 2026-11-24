@@ -5,156 +5,12 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, Progress, PageHeader, Modal } from "widgets.slint";
 import { MenuBar } from "menubar.slint";
-import { Radio, Fact, TableRow, PortRow, HealthPage, LivePage, ChannelsPage, SearchLogPage, DisclaimerGate } from "radio_pages.slint";
-export { Theme, Tr, Radio, Fact, TableRow, PortRow, Modal }
+import { Radio, Fact, TableRow, PortRow, ZoneRow, HealthPage, LivePage, ChannelsPage, SearchLogPage, DisclaimerGate } from "radio_pages.slint";
+import { App, Packs, VersionRow, BackupRow, VerRow, HelpItem } from "state.slint";
+import { Page, ProgramUpdate, VersionsPage, HelpPage, PacksPage } from "pages.slint";
+export { Theme, Tr, Radio, Fact, TableRow, PortRow, ZoneRow, Modal, App, Packs, VersionRow, BackupRow, VerRow, HelpItem }
 
-export struct VersionRow { version: string, label: string, notes: string, local: bool }
-export struct BackupRow { name: string, detail: string, origin: string, kind: string }
 
-export global App {
-    // 0 home, 1 update wizard, 2 backups and going back, 3 data packs, 4 settings, 5 about, 6 first start, 7 health, 8 live, 9 my channels
-    in-out property <int> page: 0;
-    // the home screen
-    in property <string> radio-text;
-    in property <string> radio-kind: "info";
-    in property <string> update-text;
-    in property <string> backups-text;
-    in property <string> installed-text;
-    // "Program 3.0.0 · Radio firmware 1.0.1" (Home and the title bar); the radio's part only as the program knows it
-    in property <string> version-line;
-    in property <string> title-text: "DDM32 Plus - TA2DOU";
-    // a failed update check (written to logs/update-check.log too); dismissable
-    in property <string> check-error;
-    callback dismiss-check-error();
-    // the one question after the start-up check: "Program 3.0.0 -> 3.1.0" and / or "Radio firmware 1.0.1 -> 1.0.2"
-    in-out property <bool> prompt-open;
-    in property <string> prompt-program;
-    in property <string> prompt-program-detail;
-    in property <string> prompt-firmware;
-    in property <string> prompt-firmware-detail;
-    callback prompt-update-program();
-    callback prompt-update-firmware();
-    callback prompt-later();
-    // "Skip this version" for one item (the program, the firmware)
-    callback prompt-skip-program();
-    callback prompt-skip-firmware();
-    // a chosen port is gone: "COM15 not found; using COM14", on Home until dismissed
-    in property <string> port-missing;
-    callback dismiss-port-missing();
-    // the disclaimer (lib.rs open_disclaimer): accepted with the box ticked; read only once accepted. Its own
-    // language switch, as the C# dialog
-    in-out property <bool> disc-open;
-    in property <bool> disc-readonly;
-    in property <string> disc-lang: "tr";
-    in-out property <bool> disc-checked;
-    in property <string> disc-title;
-    in property <string> disc-intro;
-    in property <[string]> disc-points;
-    in property <string> disc-outro;
-    in property <bool> disc-outro-bold;
-    callback disc-accept();
-    callback disc-reject();
-    callback disc-toggle-lang();
-    // the close button pressed twice while a step that does not write to the radio runs: "Close anyway?" (No default)
-    in-out property <bool> force-close-open;
-    callback force-close-yes();
-    // choosing a test / alpha version: Yes / No, No by default
-    in-out property <bool> test-confirm-open;
-    in property <string> test-confirm-text;
-    callback test-confirm-yes();
-    // the wizard: 0 version, 1 backup choice, 2 backup, 3 check, 4 install, 5 done
-    in-out property <int> step: 0;
-    in property <[VersionRow]> versions;
-    in-out property <int> selected-version: 0;
-    in-out property <int> backup-choice: 0;   // 0 new backup, 1 last backup (quick), 2 no backup
-    in property <bool> quick-available;
-    in property <string> quick-backup;
-    in-out property <bool> understood;
-    in-out property <bool> confirm-open;
-    in property <bool> busy;
-    in property <bool> step-done;            // the current step succeeded: Next is open
-    in property <string> message;
-    in property <string> message-kind: "info";
-    in property <string> power-prompt;
-    in property <float> progress;
-    in property <string> progress-text;      // the percent line (phase and percent); never a raw tool line
-    in property <string> progress-info;      // the last other tool line (JEDEC ID, boot ROM answered, ...)
-    in property <string> summary;
-    in property <string> details;
-    in-out property <bool> show-details;
-    in property <bool> radio-access;
-    // backups page
-    in property <[BackupRow]> backups;
-    in-out property <int> selected-backup: -1;
-    in property <string> backups-folder;
-    in property <bool> restore-ready;
-    // data packs
-    in property <string> pack-text;
-    in property <bool> pack-ready;
-    // settings
-    in-out property <int> channel: 0;   // 0 Latest, 1 Beta, 2 Test / Alpha
-    in-out property <bool> auto-check: true;
-    // about: the program's version and what the radio runs (as the program knows it), each on its own line
-    in property <string> version;
-    in property <string> installed-firmware;
-    in property <string> data-folder;
-    in property <string> key-id;
-
-    callback navigate(int);
-    callback refresh();
-    callback wizard-next();
-    callback wizard-back();
-    callback start-backup();
-    callback start-install();
-    callback choose-backup(int);
-    callback confirm-no-backup();
-    callback restore();
-    callback restore-plan();
-    callback pack-radioid();
-    callback pack-air();
-    callback pack-write();
-    callback set-theme(bool);
-    callback set-lang(string);
-    callback set-channel(int);
-    callback set-auto-check(bool);
-    callback open-backups-folder();
-    // an entry of the menu bar: "page:N", "backups-folder", "logs-folder", "guide", "github" or "exit"
-    callback menu-action(string);
-    // the menu bar: the radio entries are off while any radio step, the live panel or the search log holds the port
-    out property <bool> menu-radio-locked: root.busy || Radio.busy || Radio.live-running || Radio.slog-running;
-    // the update wizard is between its steps (backup choice .. install): the port is not changed now and no question
-    // pops up over it
-    out property <bool> wizard-active: root.page == 1 && root.step >= 1 && root.step <= 4;
-    out property <bool> port-locked: root.menu-radio-locked || root.wizard-active;
-    // the program's own update
-    in property <string> app-update-text;
-    in property <bool> app-update-available;
-    callback app-check();
-    callback app-update();
-}
-
-// a page: the header row across the window, then the page's own content
-component Page inherits VerticalLayout {
-    in property <string> heading;
-    in property <bool> back: true;
-    // the page has radio steps: the disclaimer's gate shows while it is not accepted
-    in property <bool> gated: false;
-    padding: 0;
-    spacing: 0;
-    PageHeader {
-        heading: root.heading;
-        back: root.back;
-        back-text: Tr.t(Tr.lang, "back_home");
-        back-enabled: !App.busy;
-        back-clicked => { App.navigate(0); }
-    }
-    VerticalLayout {
-        padding: Theme.pad;
-        spacing: Theme.gap;
-        if root.gated && !Radio.disclaimer-ok : DisclaimerGate {}
-        @children
-    }
-}
 
 component Home inherits VerticalLayout {
     padding: 0;
@@ -204,6 +60,7 @@ component Home inherits VerticalLayout {
             Button { even: true; text: Tr.t(Tr.lang, "home_backups"); clicked => { App.navigate(2); } }
             Button { even: true; text: Tr.t(Tr.lang, "home_packs"); clicked => { App.navigate(3); } }
             Button { even: true; text: Tr.t(Tr.lang, "home_channels"); clicked => { App.navigate(9); } }
+            Button { even: true; text: Tr.t(Tr.lang, "home_versions"); clicked => { App.navigate(11); } }
         }
         HorizontalLayout {
             spacing: Theme.gap;
@@ -418,25 +275,51 @@ component Wizard inherits Page {
 component Backups inherits Page {
     heading: Tr.t(Tr.lang, "home_backups");
     gated: true;
-    Muted { text: Tr.t(Tr.lang, "backups_where") + " " + App.backups-folder; }
-    if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
+    // scrolls as a whole when the window is small (150 % / 200 %); the backups list is one part of it
     ScrollView {
         vertical-stretch: 1;
         VerticalLayout {
-            spacing: 8px;
+            spacing: Theme.gap;
             padding-right: 8px;
             alignment: start;
+            Muted { text: Tr.t(Tr.lang, "res_text"); font-size: Theme.font; }
+            Muted { text: Tr.t(Tr.lang, "backups_where") + " " + App.backups-folder; }
+            if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
+            // the C# RestorePage shortcuts: the backup before the last install, the stock firmware backup, any folder
+            HorizontalLayout {
+                spacing: Theme.gap;
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Button { text: Tr.t(Tr.lang, "res_previous"); enabled: !App.busy; clicked => { App.res-previous(); } }
+                    Muted { text: Tr.t(Tr.lang, "res_previous_tip"); }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Button { text: Tr.t(Tr.lang, "res_stock"); enabled: !App.busy; clicked => { App.res-stock(); } }
+                    Muted { text: Tr.t(Tr.lang, "res_stock_tip"); }
+                }
+            }
+            HorizontalLayout {
+                alignment: start;
+                Button { text: Tr.t(Tr.lang, "res_other"); enabled: !App.busy; clicked => { App.res-other(); } }
+            }
+            Muted { text: Tr.t(Tr.lang, "res_list"); }
             for b[i] in App.backups : Choice {
                 title: b.name; detail: b.detail;
                 selected: App.selected-backup == i;
+                enabled: !App.busy;
                 clicked => { App.selected-backup = i; App.restore-plan(); }
             }
             if App.backups.length == 0 : Notice { text: Tr.t(Tr.lang, "backups_none"); }
         }
     }
+    if App.res-status != "" : Label { text: App.res-status; vertical-stretch: 0; }
     if App.message != "" : Notice { text: App.message; kind: App.message-kind; }
     if App.busy || App.progress > 0 : VerticalLayout {
         spacing: 6px;
+        vertical-stretch: 0;
         Progress { value: App.progress; }
         if App.progress-text != "" : Muted { text: App.progress-text; }
         if App.progress-info != "" : Muted { text: App.progress-info; font-size: Theme.font-small; }
@@ -444,58 +327,12 @@ component Backups inherits Page {
     HorizontalLayout {
         spacing: Theme.gap;
         alignment: end;
+        vertical-stretch: 0;
         Button { text: Tr.t(Tr.lang, "b_open_folder"); clicked => { App.open-backups-folder(); } }
         Button {
             text: Tr.t(Tr.lang, "b_restore"); kind: "primary";
             enabled: App.restore-ready && !App.busy && App.radio-access && !Radio.slog-running && Radio.disclaimer-ok;
             clicked => { App.restore(); }
-        }
-    }
-}
-
-component Packs inherits Page {
-    heading: Tr.t(Tr.lang, "home_packs");
-    gated: true;
-    Label { text: Tr.t(Tr.lang, "packs_intro"); }
-    if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
-    HorizontalLayout {
-        spacing: Theme.gap;
-        alignment: start;
-        Button { text: Tr.t(Tr.lang, "b_pack_radioid"); enabled: !App.busy; clicked => { App.pack-radioid(); } }
-        Button { text: Tr.t(Tr.lang, "b_pack_air"); enabled: !App.busy; clicked => { App.pack-air(); } }
-    }
-    if App.pack-text != "" : Notice { text: App.pack-text; kind: App.pack-ready ? "success" : "info"; }
-    if App.message != "" : Notice { text: App.message; kind: App.message-kind; }
-    HorizontalLayout {
-        alignment: start;
-        Button {
-            text: Tr.t(Tr.lang, "b_pack_write"); kind: "primary";
-            enabled: App.pack-ready && !App.busy && App.radio-access && !Radio.slog-running && Radio.disclaimer-ok;
-            clicked => { App.pack-write(); }
-        }
-    }
-    Muted { text: Tr.t(Tr.lang, "packs_note"); }
-    Rectangle {}
-}
-
-// the program's own update (through the signed manifest)
-component ProgramUpdate inherits Card {
-    min-height: pu.preferred-height;
-    vertical-stretch: 0;
-    pu := VerticalLayout {
-        padding: Theme.pad;
-        spacing: 10px;
-        Heading { text: Tr.t(Tr.lang, "pu_title"); }
-        Label { text: App.app-update-text; }
-        HorizontalLayout {
-            spacing: Theme.gap;
-            alignment: start;
-            Button { text: Tr.t(Tr.lang, "pu_check"); enabled: !App.busy; clicked => { App.app-check(); } }
-            Button {
-                text: Tr.t(Tr.lang, "pu_install"); kind: "primary";
-                enabled: App.app-update-available && !App.busy;
-                clicked => { App.app-update(); }
-            }
         }
     }
 }
@@ -583,6 +420,36 @@ component FirstStart inherits VerticalLayout {
     }
 }
 
+// a Yes / No question over the window: No has the focus (Enter = No), Yes is the page's step
+component YesNo inherits Rectangle {
+    in property <string> title;
+    in property <string> text;
+    in property <string> yes;
+    in property <bool> danger: true;
+    callback yes-clicked();
+    callback no-clicked();
+    background: Theme.scrim;
+    TouchArea {}
+    Card {
+        width: min(parent.width - 48px, 600px);
+        height: min(yv.preferred-height, parent.height - 32px);
+        ScrollView {
+            width: parent.width;
+            height: parent.height;
+            yv := VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap * 1.5;
+                Title { text: root.title; }
+                Label { text: root.text; vertical-alignment: top; }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    Button { text: Tr.t(Tr.lang, "b_no"); in-dialog: true; default-focus: true; clicked => { root.no-clicked(); } }
+                    Button { text: root.yes; kind: root.danger ? "danger" : "primary"; in-dialog: true; clicked => { root.yes-clicked(); } }
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: App.title-text;
     // the title bar and taskbar icon (the program's logo, as the setup's shortcuts)
@@ -594,14 +461,18 @@ export component AppWindow inherits Window {
     background: Theme.window;
     default-font-size: Theme.font;
     // a dialog is open: the controls under it take no keyboard focus and no click (widgets.slint Modal)
-    property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open || App.disc-open || App.test-confirm-open || App.force-close-open;
+    property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open || App.disc-open || App.test-confirm-open || App.force-close-open
+        || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || Radio.zone-picker-open;
     changed modal => { Modal.open = self.modal; }
 
     VerticalLayout {
         padding: 0;
         spacing: 0;
         if App.page != 6 : MenuBar {
-            radio-locked: App.menu-radio-locked || App.confirm-open || App.disc-open || App.test-confirm-open;
+            radio-locked: App.menu-radio-locked || App.confirm-open || App.disc-open || App.test-confirm-open
+                || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open;
+            developer: App.developer;
+            lang: Tr.lang;
             cable-text: Radio.access ? Radio.port-head : "";
             cable-locked: App.port-locked;
             action(a) => { App.menu-action(a); }
@@ -612,7 +483,7 @@ export component AppWindow inherits Window {
         if App.page == 0 : Home {}
         if App.page == 1 : Wizard {}
         if App.page == 2 : Backups {}
-        if App.page == 3 : Packs {}
+        if App.page == 3 : PacksPage {}
         if App.page == 4 : Settings {}
         if App.page == 5 : About {}
         if App.page == 6 : FirstStart {}
@@ -620,6 +491,8 @@ export component AppWindow inherits Window {
         if App.page == 8 : LivePage {}
         if App.page == 9 : ChannelsPage {}
         if App.page == 10 : SearchLogPage { app-busy: App.busy; }
+        if App.page == 11 : VersionsPage {}
+        if App.page == 12 : HelpPage {}
         }
     }
 
@@ -761,6 +634,65 @@ export component AppWindow inherits Window {
                     spacing: Theme.gap; alignment: end;
                     Button { text: Tr.t(Tr.lang, "b_no"); in-dialog: true; default-focus: true; clicked => { App.test-confirm-open = false; } }
                     Button { text: Tr.t(Tr.lang, "ver_test_yes"); kind: "danger"; in-dialog: true; clicked => { App.test-confirm-yes(); } }
+                }
+            }
+        }
+    }
+
+    // a Yes / No question of a page (No has the focus): restore, download user.csv, write a data pack
+    if App.res-confirm-open : YesNo {
+        title: Tr.t(Tr.lang, "res_confirm_title");
+        text: App.res-confirm-text;
+        yes: Tr.t(Tr.lang, "res_confirm_yes");
+        no-clicked => { App.res-confirm-open = false; }
+        yes-clicked => { App.res-confirm-yes(); }
+    }
+    if Packs.download-confirm-open : YesNo {
+        title: Tr.t(Tr.lang, "pack_download");
+        text: Packs.download-confirm-text;
+        yes: Tr.t(Tr.lang, "pack_download_yes");
+        danger: false;
+        no-clicked => { Packs.download-confirm-open = false; }
+        yes-clicked => { Packs.download-yes(); }
+    }
+    if Packs.write-confirm-open : YesNo {
+        title: Tr.t(Tr.lang, "pack_confirm_title");
+        text: Packs.write-confirm-text;
+        yes: Tr.t(Tr.lang, "pack_confirm_yes");
+        no-clicked => { Packs.write-confirm-open = false; }
+        yes-clicked => { Packs.write-yes(); }
+    }
+
+    // my channels: the zone or mode filter (all, or one zone's channels / one mode)
+    if Radio.zone-picker-open : Rectangle {
+        background: Theme.scrim;
+        TouchArea {}
+        Card {
+            width: min(parent.width - 48px, 600px);
+            height: min(zv.preferred-height, parent.height - 32px);
+            zv := VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap;
+                Title { text: Radio.pick-title; }
+                Muted { text: Tr.t(Tr.lang, "ch_zone_intro"); }
+                ScrollView {
+                    vertical-stretch: 1;
+                    min-height: min(zl.preferred-height, 120px);
+                    preferred-height: zl.preferred-height;
+                    zl := VerticalLayout {
+                        spacing: 8px;
+                        padding-right: 8px;
+                        alignment: start;
+                        for z in Radio.pick-rows : Choice {
+                            title: z.name; detail: "";
+                            in-dialog: true;
+                            selected: Radio.pick-selected == z.key;
+                            clicked => { Radio.pick(z.key); }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    Button { text: Tr.t(Tr.lang, "b_close"); kind: "primary"; in-dialog: true; default-focus: true; clicked => { Radio.zone-picker-open = false; } }
                 }
             }
         }

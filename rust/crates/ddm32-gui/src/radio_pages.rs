@@ -6,7 +6,6 @@
 use crate::{
     i18n, radio_allowed, reader_ended, tr, trf, with, with_port, worker, App, AppWindow, Fact, Radio, TableRow,
 };
-use ddm32_core::codeplug::{self, Codeplug, Table};
 use ddm32_core::radio::codec::Codec;
 use ddm32_core::radio::debug::{health_tool, live_tool, searchlog_tool, SEARCHLOG_WAITING};
 use ddm32_core::radio::live::{self, HealthSummary, LiveSummary, Verdict};
@@ -14,9 +13,6 @@ use ddm32_core::radio::port::{RadioAccess, RawSerial, SystemClock};
 use ddm32_core::radio::searchlog::{self, SearchGroup, SearchLogBook};
 use ddm32_core::radio::tools::ToolContext;
 use ddm32_core::radio::{ToolError, ToolResult};
-use ddm32_core::storage::backups;
-use ddm32_core::storage::paths::real_env;
-use ddm32_core::storage::Os;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -80,16 +76,11 @@ pub fn wire(ui: &AppWindow) {
         ui.global::<Radio>().set_slog_confirm(false);
         show_slog(&ui, None);
     });
+    crate::channels::wire(ui);
     let w = ui.as_weak();
-    r.on_choose_table(move |t| {
-        let ui = w.unwrap();
-        ui.global::<Radio>().set_table(t);
-        show_table(&ui);
-    });
+    r.on_check_cable(move || check_cable(&w.unwrap()));
     let w = ui.as_weak();
-    r.on_search_changed(move |_| show_table(&w.unwrap()));
-    let w = ui.as_weak();
-    r.on_export_csv(move || export_csv(&w.unwrap()));
+    r.on_health_auto_changed(move |on| health_auto(&w.unwrap(), on));
 }
 
 // ---- health -----------------------------------------------------------------------------------------------------------
@@ -244,7 +235,11 @@ fn read_health_on(ui: &AppWindow, found: Option<String>) {
             ui.global::<Radio>().set_busy(false);
             let all = lines.lock().unwrap().clone();
             match err {
-                None => show_health(ui, &all),
+                None => {
+                    show_health(ui, &all);
+                    let t = searchlog::format_time(searchlog::local_stamp());
+                    ui.global::<Radio>().set_health_when(trf("health_last_read", &t[11..]).into());
+                }
                 Some(e) => {
                     ui.global::<Radio>().set_health_raw(all.join("\n").into());
                     message(ui, &trf("msg_failed", &e.record()), "danger");
@@ -252,6 +247,51 @@ fn read_health_on(ui: &AppWindow, found: Option<String>) {
             }
         },
     );
+}
+
+/// "Check the cable": the computer's device list read again on its worker thread (no port is opened); the result
+/// shows on this page and on Home.
+fn check_cable(ui: &AppWindow) {
+    crate::request_scan(ui);
+}
+
+/// How often "read every 30 s" reads the health (the C# LiveData.AutoSeconds).
+pub const HEALTH_AUTO: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// "Read every 30 s" ticked or not (default off; never kept: it ends when the page is left). Each read is the same
+/// read-only step as the button's, and only while nothing else holds the port and the disclaimer is accepted.
+pub fn health_auto(ui: &AppWindow, on: bool) {
+    ui.global::<Radio>().set_health_auto(on);
+    if !on {
+        with(|s| s.health_timer = None);
+        return;
+    }
+    let timer = slint::Timer::default();
+    let w = ui.as_weak();
+    timer.start(slint::TimerMode::Repeated, HEALTH_AUTO, move || {
+        if let Some(ui) = w.upgrade() {
+            health_auto_tick(&ui);
+        }
+    });
+    with(|s| s.health_timer = Some(timer));
+}
+
+/// One tick of "read every 30 s": a read when the health page is open and the port is free (also the tests).
+pub fn health_auto_tick(ui: &AppWindow) -> bool {
+    let app = ui.global::<App>();
+    let r = ui.global::<Radio>();
+    let free = app.get_page() == 7
+        && r.get_health_auto()
+        && !app.get_busy()
+        && !r.get_busy()
+        && !r.get_live_running()
+        && !r.get_slog_running()
+        && r.get_disclaimer_ok()
+        && with(|s| s.port_now.port.is_some());
+    if free {
+        read_health(ui);
+    }
+    free
 }
 
 // ---- live view --------------------------------------------------------------------------------------------------------
@@ -372,115 +412,9 @@ fn live_start_on(ui: &AppWindow, found: Option<String>) {
     });
 }
 
-// ---- my channels ------------------------------------------------------------------------------------------------------
+// ---- my channels (channels.rs) -----------------------------------------------------------------------------------
 
-/// The column fractions of each table (they add up to 1).
-fn widths(table: Table) -> Vec<f32> {
-    match table {
-        Table::Channels => vec![0.07, 0.22, 0.2, 0.1, 0.41],
-        Table::Zones => vec![0.07, 0.25, 0.13, 0.55],
-        Table::Contacts => vec![0.07, 0.33, 0.2, 0.2, 0.2],
-        Table::Lists => vec![0.07, 0.25, 0.13, 0.55],
-    }
-}
-
-/// The columns shown on screen (the CSV has all of them).
-fn shown(table: Table) -> &'static [&'static str] {
-    match table {
-        Table::Channels => &["number", "name", "freq", "mode", "summary"],
-        Table::Zones => &["index", "name", "count", "channel_names"],
-        Table::Contacts => &["index", "name", "id", "type", "ts"],
-        Table::Lists => &["index", "name", "count", "contact_names"],
-    }
-}
-
-fn table_of(i: i32) -> Table {
-    match i {
-        1 => Table::Zones,
-        2 => Table::Contacts,
-        3 => Table::Lists,
-        _ => Table::Channels,
-    }
-}
-
-/// (column titles, rows of the shown columns) of a table, the rows matching the search.
-pub fn table_view(cp: &Codeplug, table: Table, search: &str) -> (Vec<String>, Vec<Vec<String>>) {
-    let cols = cp.columns(table);
-    let keys = shown(table);
-    let titles = keys.iter().map(|k| cols.iter().find(|c| c.0 == *k).map_or("", |c| c.1).to_string()).collect();
-    let rows = cp
-        .rows(table)
-        .into_iter()
-        .filter(|r| codeplug::matches(r, search))
-        .map(|r| keys.iter().map(|k| r.get(*k).cloned().unwrap_or_default()).collect())
-        .collect();
-    (titles, rows)
-}
-
-/// Decodes the newest verified backup's data flash (files only) in the language of the window.
-pub fn load_channels(ui: &AppWindow) {
-    let lang = with(|s| s.lang.clone());
-    let found = with(|s| {
-        let roots = backups::backup_roots(&s.paths, &s.settings, Os::current(), &real_env);
-        backups::discover(&roots)
-    });
-    let r = ui.global::<Radio>();
-    message(ui, "", "info");
-    let loaded = found.iter().find_map(|b| Codeplug::load_image(&b.folder).ok().map(|img| (b.folder.clone(), img)));
-    match loaded {
-        Some((folder, img)) => match Codeplug::decode(&img, codeplug::CodeplugText::for_lang(&lang)) {
-            Ok(cp) => {
-                let name = folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                r.set_channels_source(i18n::tf(&lang, "channels_source", &name).into());
-                with(|s| s.codeplug = Some(cp));
-            }
-            Err(e) => message(ui, &trf("msg_failed", &e.0), "danger"),
-        },
-        None => {
-            r.set_channels_source("".into());
-            with(|s| s.codeplug = None);
-        }
-    }
-    show_table(ui);
-}
-
-pub fn show_table(ui: &AppWindow) {
-    let r = ui.global::<Radio>();
-    let table = table_of(r.get_table());
-    let search = r.get_search().to_string();
-    let (cols, rows) = with(|s| s.codeplug.as_ref().map(|cp| table_view(cp, table, &search))).unwrap_or_default();
-    let lang = with(|s| s.lang.clone());
-    r.set_table_count(i18n::tf(&lang, "channels_count", &rows.len().to_string()).into());
-    r.set_table_columns(ModelRc::new(VecModel::from(cols.into_iter().map(SharedString::from).collect::<Vec<_>>())));
-    r.set_table_widths(ModelRc::new(VecModel::from(widths(table))));
-    let rows: Vec<TableRow> = rows
-        .into_iter()
-        .map(|cells| TableRow {
-            cells: ModelRc::new(VecModel::from(cells.into_iter().map(SharedString::from).collect::<Vec<_>>())),
-        })
-        .collect();
-    r.set_table_rows(ModelRc::new(VecModel::from(rows)));
-}
-
-fn export_csv(ui: &AppWindow) {
-    let r = ui.global::<Radio>();
-    let table = table_of(r.get_table());
-    let search = r.get_search().to_string();
-    let Some(csv) = with(|s| {
-        s.codeplug.as_ref().map(|cp| {
-            let rows: Vec<_> = cp.rows(table).into_iter().filter(|x| codeplug::matches(x, &search)).collect();
-            codeplug::to_csv(cp.columns(table), &rows)
-        })
-    }) else {
-        return;
-    };
-    let name = ["kanallar.csv", "bolgeler.csv", "kisiler.csv", "rx-gruplari.csv"][r.get_table().clamp(0, 3) as usize];
-    let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter("CSV", &["csv"]).save_file() else { return };
-    match codeplug::write_csv(&path, &csv) {
-        Ok(()) => message(ui, &trf("csv_saved", &path.display().to_string()), "success"),
-        Err(e) => message(ui, &trf("msg_failed", &e.to_string()), "danger"),
-    }
-}
+pub use crate::channels::{load_channels, show_table, table_view};
 
 /// Example contents for the screenshots (no radio, no file).
 pub fn demo(ui: &AppWindow, lang: &str) {
@@ -546,7 +480,16 @@ pub fn demo(ui: &AppWindow, lang: &str) {
         vec!["No".into(), "Ad".into(), "Frekans".into(), "Mod".into(), "Ayar".into()]
     };
     r.set_table_columns(ModelRc::new(VecModel::from(cols)));
-    r.set_table_widths(ModelRc::new(VecModel::from(widths(Table::Channels))));
+    r.set_table_widths(ModelRc::new(VecModel::from(vec![0.07f32, 0.22, 0.2, 0.1, 0.41])));
+    r.set_table_loaded(true);
+    r.set_channels_radio(i18n::t(lang, "ch_radio").replacen("{}", "TA2DOU", 1).replacen("{}", "2862001", 1).into());
+    r.set_zone_text(i18n::tf(lang, "ch_zone", &i18n::t(lang, "ch_all_zones")).into());
+    r.set_mode_text(format!("{} {}", i18n::t(lang, "ch_mode"), i18n::t(lang, "ch_all_modes")).into());
+    r.set_sort_column(-1);
+    r.set_table_min_width(0.0);
+    r.set_cable_text(i18n::tf(lang, "radio_ready", "COM14").into());
+    r.set_cable_kind("success".into());
+    r.set_health_when(i18n::tf(lang, "health_last_read", "21:14:05").into());
     let rows = [
         ["1", "FM Simplex", "145.500", "FM", "Ton RX 67.0 / TX D023I"],
         ["2", "DMR TG91", "438.500 / TX 430.900", "DMR", "CC 1 · TS 2 · Kişi 3"],
@@ -560,7 +503,7 @@ pub fn demo(ui: &AppWindow, lang: &str) {
             cells: ModelRc::new(VecModel::from(c.iter().map(|x| SharedString::from(*x)).collect::<Vec<_>>())),
         })
         .collect();
-    r.set_table_count(i18n::tf(lang, "channels_count", &rows.len().to_string()).into());
+    r.set_table_count(i18n::tn(lang, "ch_shown", &[&rows.len().to_string(), "212"]).into());
     r.set_table_rows(ModelRc::new(VecModel::from(rows)));
 }
 

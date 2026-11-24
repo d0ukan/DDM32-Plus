@@ -2,11 +2,13 @@
 // The read-only radio pages: health, live view, my channels, the search log. Every colour from Theme, every text from Tr.
 import { ListView, ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Choice, Progress, PageHeader, Modal } from "widgets.slint";
+import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Choice, Check, Progress, PageHeader, Modal } from "widgets.slint";
 
 export struct Fact { label: string, value: string }
 export struct TableRow { cells: [string] }
 export struct PortRow { name: string, detail: string }
+// one entry of the channels page's filter picker: its key ("zone:5", "mode:DMR", "zone:-1" = all) and its name
+export struct ZoneRow { key: string, name: string }
 
 export global Radio {
     // health
@@ -37,6 +39,35 @@ export global Radio {
     in property <string> table-count;
     in-out property <int> table: 0;                // 0 channels, 1 zones, 2 contacts, 3 lists
     in-out property <string> search;
+    // the channels' filters (zone, mode), all columns, the sort (column, ascending), another backup (channels.rs)
+    in property <string> channels-radio;
+    in property <string> zone-text;
+    in property <string> mode-text;
+    in-out property <bool> all-columns;
+    in property <int> sort-column: -1;
+    in property <bool> sort-ascending: true;
+    // the table's width in px when it is wider than the window (all columns: it scrolls sideways); 0 = fit
+    in property <float> table-min-width: 0;
+    in property <bool> table-loaded;
+    // the filter picker (zone or mode): its title, its entries, the chosen key
+    in-out property <bool> zone-picker-open;
+    in property <string> pick-title;
+    in property <[ZoneRow]> pick-rows;
+    in property <string> pick-selected;
+    callback pick(string);
+    callback open-zone-picker();
+    callback open-mode-picker();
+    callback toggle-columns(bool);
+    callback sort(int);
+    callback zone-activate(int);
+    callback open-backup();
+    // health: the cable check (the device list; no port opened), the read every 30 s, the last read's time
+    in property <string> cable-text;
+    in property <string> cable-kind: "info";
+    in-out property <bool> health-auto;
+    in property <string> health-when;
+    callback check-cable();
+    callback health-auto-changed(bool);
     // shared
     in property <string> message;
     in property <string> message-kind: "info";
@@ -147,18 +178,39 @@ component Raw inherits VerticalLayout {
 export component HealthPage inherits Screen {
     heading: Tr.t(Tr.lang, "home_health");
     Muted { text: Tr.t(Tr.lang, "health_intro"); }
+    // the cable (the C# HealthPage card): the computer's device list, read without opening a port
     HorizontalLayout {
+        spacing: Theme.gap;
+        if Radio.cable-text != "" : Notice { text: Radio.cable-text; kind: Radio.cable-kind; horizontal-stretch: 1; }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+            Button { text: Tr.t(Tr.lang, "health_cable_check"); clicked => { Radio.check-cable(); } }
+        }
+    }
+    HorizontalLayout {
+        spacing: Theme.gap;
         alignment: start;
         Button {
             text: Tr.t(Tr.lang, "b_read_health");
             kind: "primary";
             big: true;
             default-focus: true;
+            horizontal-stretch: 0;
             // the search log holds the port while it runs (radio_pages.rs slog_holds_port)
             enabled: !Radio.busy && !Radio.slog-running && Radio.disclaimer-ok;
             clicked => { Radio.read-health(); }
         }
+        VerticalLayout {
+            alignment: center;
+            Check {
+                text: Tr.t(Tr.lang, "health_auto");
+                checked <=> Radio.health-auto;
+                toggled => { Radio.health-auto-changed(Radio.health-auto); }
+            }
+        }
     }
+    if Radio.health-when != "" : Muted { text: Radio.health-when; }
     if Radio.health-verdict != "grey" : Notice {
         text: Radio.health-text;
         big: true;
@@ -247,11 +299,11 @@ export component LivePage inherits Screen {
 }
 
 export component ChannelsPage inherits Screen {
-    // the columns' share of the table's width (fractions from the controller, one per column)
-    property <length> cols-w: self.width - 2 * Theme.pad - 16px - 16px - 8px * 4 - 14px;
     heading: Tr.t(Tr.lang, "home_channels");
     show-port: false;
-    Muted { text: Radio.channels-source; }
+    Notice { text: Tr.t(Tr.lang, "ch_warn"); kind: "warning"; }
+    if Radio.channels-source != "" : Muted { text: Radio.channels-source; }
+    if Radio.channels-radio != "" : Muted { text: Radio.channels-radio; }
     HorizontalLayout {
         spacing: 8px;
         for name[i] in [Tr.t(Tr.lang, "t_channels"), Tr.t(Tr.lang, "t_zones"), Tr.t(Tr.lang, "t_contacts"), Tr.t(Tr.lang, "t_lists")] : Choice {
@@ -277,6 +329,7 @@ export component ChannelsPage inherits Screen {
                 color: Theme.text;
                 font-size: Theme.font;
                 vertical-alignment: center;
+                single-line: true;
                 selection-background-color: Theme.primary;
                 selection-foreground-color: Theme.primary-text;
                 accessible-role: text-input;
@@ -291,51 +344,92 @@ export component ChannelsPage inherits Screen {
                 vertical-alignment: center;
             }
         }
-        Muted { text: Radio.table-count; vertical-alignment: center; horizontal-stretch: 0; font-size: Theme.font; }
+        Muted { text: Radio.table-count; vertical-alignment: center; horizontal-stretch: 0; font-size: Theme.font-small; }
         Button {
             text: Tr.t(Tr.lang, "b_csv");
             horizontal-stretch: 0;
             enabled: Radio.table-rows.length > 0;
             clicked => { Radio.export-csv(); }
         }
+        Button { text: Tr.t(Tr.lang, "ch_open"); horizontal-stretch: 0; clicked => { Radio.open-backup(); } }
+    }
+    // the channels' own filters (the C# zone and mode boxes) and all columns
+    if Radio.table == 0 && Radio.table-loaded : HorizontalLayout {
+        spacing: Theme.gap;
+        alignment: start;
+        Button { text: Radio.zone-text; clicked => { Radio.open-zone-picker(); } }
+        Button { text: Radio.mode-text; clicked => { Radio.open-mode-picker(); } }
+        VerticalLayout {
+            alignment: center;
+            Check {
+                text: Tr.t(Tr.lang, "ch_all_columns");
+                checked <=> Radio.all-columns;
+                toggled => { Radio.toggle-columns(Radio.all-columns); }
+            }
+        }
     }
     if Radio.message != "" : Notice { text: Radio.message; kind: Radio.message-kind; }
-    Card {
+    tc := Card {
         vertical-stretch: 1;
-        VerticalLayout {
-            padding: 8px;
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 8px;
-                padding-right: 8px;
-                height: 32px;
-                for c[i] in Radio.table-columns : Text {
-                    text: c;
-                    color: Theme.text-muted;
-                    font-size: Theme.font-small;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                    width: root.cols-w * Radio.table-widths[i];
-                }
-            }
-            Rectangle { height: 1px; background: Theme.border; }
-            if Radio.table-rows.length == 0 : Notice { text: Tr.t(Tr.lang, "channels_none"); }
-            ListView {
-                vertical-stretch: 1;
-                for r[ri] in Radio.table-rows : Rectangle {
-                    height: max(30px, rl.preferred-height + 10px);
-                    background: Math.mod(ri, 2) == 0 ? Theme.surface : Theme.surface-alt;
-                    rl := HorizontalLayout {
-                        spacing: 8px;
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        for c[i] in r.cells : Text {
-                            text: c;
-                            color: Theme.text;
+        // the table's width: the card's, or (all columns) wider, then it scrolls sideways; the rows scroll inside
+        property <length> table-w: max(self.width - 2px, Radio.table-min-width * 1px);
+        property <length> cols-w: self.table-w - 16px - 16px - 8px * max(0, Radio.table-columns.length - 1) - 14px;
+        hs := ScrollView {
+            width: parent.width;
+            height: parent.height;
+            viewport-width: tc.table-w;
+            viewport-height: self.visible-height;
+            VerticalLayout {
+                width: tc.table-w;
+                height: hs.visible-height;
+                padding: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    height: 32px;
+                    // a column's title sorts by it (again: the other way round); numbers as numbers
+                    for c[i] in Radio.table-columns : Rectangle {
+                        width: tc.cols-w * Radio.table-widths[i];
+                        accessible-role: button;
+                        accessible-label: Tr.t(Tr.lang, "ch_sort") + " (" + c + ")";
+                        accessible-action-default => { Radio.sort(i); }
+                        Text {
+                            width: parent.width;
+                            text: c + (Radio.sort-column == i ? (Radio.sort-ascending ? " ↑" : " ↓") : "");
+                            color: Theme.text-muted;
                             font-size: Theme.font-small;
-                            wrap: word-wrap;
+                            font-weight: 700;
                             vertical-alignment: center;
-                            width: root.cols-w * Radio.table-widths[i];
+                            overflow: elide;
+                        }
+                        TouchArea { enabled: !Modal.open; mouse-cursor: pointer; clicked => { Radio.sort(i); } }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                if Radio.table-rows.length == 0 : Notice { text: Tr.t(Tr.lang, "channels_none"); }
+                ListView {
+                    vertical-stretch: 1;
+                    for r[ri] in Radio.table-rows : Rectangle {
+                        height: max(30px, rl.preferred-height + 10px);
+                        background: Math.mod(ri, 2) == 0 ? Theme.surface : Theme.surface-alt;
+                        rl := HorizontalLayout {
+                            spacing: 8px;
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            for c[i] in r.cells : Text {
+                                text: c;
+                                color: Theme.text;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                                vertical-alignment: center;
+                                width: tc.cols-w * Radio.table-widths[i];
+                            }
+                        }
+                        // a zone's row: a double click shows its channels (the C# zone double-click)
+                        if Radio.table == 1 : TouchArea {
+                            enabled: !Modal.open;
+                            double-clicked => { Radio.zone-activate(ri); }
                         }
                     }
                 }

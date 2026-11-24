@@ -160,6 +160,8 @@ fn keyboard_and_screen_reader() {
         (7, 0, 0, false),
         (8, 0, 0, false),
         (9, 0, 0, false),
+        (11, 0, 0, false),
+        (12, 0, 0, false),
     ];
     for lang in ["tr", "en"] {
         ui.global::<Tr>().set_lang(lang.into());
@@ -232,7 +234,7 @@ fn keyboard_and_screen_reader() {
     assert_eq!(*asked.borrow(), vec!["navigate 1".to_string()]);
 
     // 5. Tab reaches something on every page and the ring is drawn
-    for (page, step) in [(1, 0), (1, 1), (2, 0), (3, 0), (4, 0), (5, 0), (7, 0), (8, 0), (9, 0)] {
+    for (page, step) in [(1, 0), (1, 1), (2, 0), (3, 0), (4, 0), (5, 0), (7, 0), (8, 0), (9, 0), (11, 0), (12, 0)] {
         ddm32_gui::demo(&ui);
         open_page(&ui, page);
         app.set_step(step);

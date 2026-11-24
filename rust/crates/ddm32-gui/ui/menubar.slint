@@ -131,6 +131,10 @@ export component MenuBar inherits Rectangle {
     in property <string> cable-text;
     // the port is held, or the update wizard is between its radio steps: the port is not changed now
     in property <bool> cable-locked;
+    // a developer build: the local release folder entry (Tools)
+    in property <bool> developer;
+    // the window's language (the Language menu marks it)
+    in property <string> lang;
     callback cable-clicked;
     callback action(string);
     background: Theme.surface;
@@ -165,22 +169,45 @@ export component MenuBar inherits Rectangle {
             ];
             chosen(a) => { root.action(a); }
         }
-        MenuHead {
+        // a developer build has the local release folder entry too (the C# Menu_LocalRelease)
+        if root.developer : MenuHead {
             text: Tr.t(Tr.lang, "m_tools");
             entries: [
                 { text: Tr.t(Tr.lang, "home_channels"), action: "page:9", enabled: !root.radio-locked },
                 { text: Tr.t(Tr.lang, "home_packs"), action: "page:3", enabled: !root.radio-locked },
+                { text: Tr.t(Tr.lang, "home_versions"), action: "page:11", enabled: !root.radio-locked },
+                { separator: true },
+                { text: Tr.t(Tr.lang, "m_local_release"), action: "local-release", enabled: !root.radio-locked },
+            ];
+            chosen(a) => { root.action(a); }
+        }
+        if !root.developer : MenuHead {
+            text: Tr.t(Tr.lang, "m_tools");
+            entries: [
+                { text: Tr.t(Tr.lang, "home_channels"), action: "page:9", enabled: !root.radio-locked },
+                { text: Tr.t(Tr.lang, "home_packs"), action: "page:3", enabled: !root.radio-locked },
+                { text: Tr.t(Tr.lang, "home_versions"), action: "page:11", enabled: !root.radio-locked },
             ];
             chosen(a) => { root.action(a); }
         }
         MenuHead {
             text: Tr.t(Tr.lang, "m_help");
             entries: [
+                { text: Tr.t(Tr.lang, "m_help_page"), action: "page:12", enabled: !root.radio-locked },
                 { text: Tr.t(Tr.lang, "m_guide"), action: "guide", enabled: true },
                 { text: Tr.t(Tr.lang, "m_github"), action: "github", enabled: true },
                 { text: Tr.t(Tr.lang, "m_disclaimer"), action: "disclaimer", enabled: true },
                 { separator: true },
                 { text: Tr.t(Tr.lang, "home_about"), action: "page:5", enabled: !root.radio-locked },
+            ];
+            chosen(a) => { root.action(a); }
+        }
+        // the language at once (C#'s toolbar Language menu); it never touches the radio
+        MenuHead {
+            text: Tr.t(Tr.lang, "m_language");
+            entries: [
+                { text: (root.lang == "tr" ? "• " : "   ") + "Türkçe", action: "lang:tr", enabled: true },
+                { text: (root.lang == "en" ? "• " : "   ") + "English", action: "lang:en", enabled: true },
             ];
             chosen(a) => { root.action(a); }
         }

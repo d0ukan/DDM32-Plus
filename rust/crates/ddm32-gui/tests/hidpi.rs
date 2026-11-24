@@ -91,12 +91,20 @@ fn scaled_150_and_200_percent() {
         ("update-1-version", 1, 0, ""),
         ("update-2-backup-choice", 1, 1, ""),
         ("settings", 4, 0, ""),
+        ("backups", 2, 0, ""),
+        ("packs", 3, 0, ""),
+        ("versions", 11, 0, ""),
+        ("help", 12, 0, ""),
+        ("health", 7, 0, ""),
         ("update-prompt", -1, 0, "prompt"),
         ("cable-picker", -1, 0, "picker"),
         ("disclaimer", -1, 0, "disclaimer"),
         ("disclaimer-read", -1, 0, "disclaimer-read"),
         ("test-confirm", -1, 0, "test-confirm"),
         ("home-not-accepted", 0, 0, "gate"),
+        ("restore-confirm", -1, 0, "res-confirm"),
+        ("pack-confirm", -1, 0, "pack-confirm"),
+        ("zone-picker", -1, 0, "zone-picker"),
     ];
     for lang in ["tr", "en"] {
         ui.global::<Tr>().set_lang(lang.into());
@@ -131,6 +139,19 @@ fn scaled_150_and_200_percent() {
                                 app.set_test_confirm_open(true);
                             }
                             "gate" => ui.global::<ddm32_gui::Radio>().set_disclaimer_ok(false),
+                            "res-confirm" => {
+                                let p = Path::new("C:/Users/…/DDM32 Plus/backups/dm32-20261121");
+                                let status = app.get_res_status().to_string();
+                                app.set_res_confirm_text(ddm32_gui::restore::confirm_text(lang, p, &status).into());
+                                app.set_res_confirm_open(true);
+                            }
+                            "pack-confirm" => {
+                                let pk = ddm32_gui::packs::demo_pack();
+                                let p = ui.global::<ddm32_gui::Packs>();
+                                p.set_write_confirm_text(ddm32_gui::packs::confirm_text(lang, &pk, "COM14").into());
+                                p.set_write_confirm_open(true);
+                            }
+                            "zone-picker" => ddm32_gui::channels::demo_picker(&ui, lang),
                             _ => {}
                         }
                         if dialog == "picker" {

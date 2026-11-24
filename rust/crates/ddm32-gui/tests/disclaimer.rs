@@ -4,7 +4,7 @@
 //! accepted, the acceptance saved in the C# format, Help > Disclaimer read only once accepted. No radio (no port is
 //! opened: every step is refused before it would look for one), no network.
 use ddm32_core::storage::{AppPaths, Settings};
-use ddm32_gui::{disclaimer, i18n, App, AppWindow, Radio};
+use ddm32_gui::{disclaimer, i18n, App, AppWindow, Packs, Radio};
 use slint::ComponentHandle;
 use std::path::{Path, PathBuf};
 
@@ -135,6 +135,7 @@ fn every_radio_step_is_refused_until_accepted_then_saved_in_the_csharp_format() 
     let ui = window(&root);
     let app = ui.global::<App>();
     let radio = ui.global::<Radio>();
+    let packs = ui.global::<Packs>();
     let refused = i18n::t("en", "disc_not_accepted");
     // "I do not accept": nothing saved, the steps stay off
     app.invoke_disc_reject();
@@ -148,7 +149,11 @@ fn every_radio_step_is_refused_until_accepted_then_saved_in_the_csharp_format() 
         ("backup", Box::new(|| app.invoke_start_backup())),
         ("install", Box::new(|| app.invoke_start_install())),
         ("restore", Box::new(|| app.invoke_restore())),
-        ("pack write", Box::new(|| app.invoke_pack_write())),
+        ("restore after Yes", Box::new(|| app.invoke_res_confirm_yes())),
+        ("pack write (RadioID)", Box::new(|| packs.invoke_write_radioid())),
+        ("pack write (air)", Box::new(|| packs.invoke_write_air())),
+        ("pack write after Yes", Box::new(|| packs.invoke_write_yes())),
+        ("pack read", Box::new(|| packs.invoke_read_radio())),
         ("health", Box::new(|| radio.invoke_read_health())),
         ("live", Box::new(|| radio.invoke_live_start())),
         ("search log", Box::new(|| radio.invoke_slog_start())),
@@ -197,12 +202,15 @@ fn the_help_menu_reaches_it() {
 #[test]
 fn every_radio_button_is_off_until_accepted() {
     let ui = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/app.slint")).unwrap()
-        + &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/radio_pages.slint")).unwrap();
+        + &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/radio_pages.slint")).unwrap()
+        + &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/pages.slint")).unwrap();
     for callback in [
         "App.start-backup()",
         "App.start-install()",
         "App.restore()",
-        "App.pack-write()",
+        "Packs.read-radio()",
+        "Packs.write-radioid()",
+        "Packs.write-air()",
         "App.wizard-next()",
         "Radio.read-health()",
         "Radio.live-start()",

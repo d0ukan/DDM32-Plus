@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The pages the C# 2.0.0 program had and 3.0.0 lacked: versions, data packs (full), offline help; plus the page frame
+// and the program update card they share with app.slint. Every colour from Theme, every text from Tr.
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, Progress, PageHeader, Modal, Field } from "widgets.slint";
+import { Radio, DisclaimerGate } from "radio_pages.slint";
+import { App, Packs } from "state.slint";
+
+// a page: the header row across the window, then the page's own content
+export component Page inherits VerticalLayout {
+    in property <string> heading;
+    in property <bool> back: true;
+    // the page has radio steps: the disclaimer's gate shows while it is not accepted
+    in property <bool> gated: false;
+    padding: 0;
+    spacing: 0;
+    PageHeader {
+        heading: root.heading;
+        back: root.back;
+        back-text: Tr.t(Tr.lang, "back_home");
+        back-enabled: !App.busy;
+        back-clicked => { App.navigate(0); }
+    }
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+        if root.gated && !Radio.disclaimer-ok : DisclaimerGate {}
+        @children
+    }
+}
+
+// the program's own update (through the signed manifest)
+export component ProgramUpdate inherits Card {
+    min-height: pu.preferred-height;
+    vertical-stretch: 0;
+    pu := VerticalLayout {
+        padding: Theme.pad;
+        spacing: 10px;
+        Heading { text: Tr.t(Tr.lang, "pu_title"); }
+        Label { text: App.app-update-text; }
+        HorizontalLayout {
+            spacing: Theme.gap;
+            alignment: start;
+            Button { text: Tr.t(Tr.lang, "pu_check"); enabled: !App.busy; clicked => { App.app-check(); } }
+            Button {
+                text: Tr.t(Tr.lang, "pu_install"); kind: "primary";
+                enabled: App.app-update-available && !App.busy;
+                clicked => { App.app-update(); }
+            }
+        }
+    }
+}
+
+// Versions (the C# VersionsPage): every signed version with its label and state, "Switch to this version" (opens the
+// wizard at it; never a radio step), the check, the channel, rejected releases and the key under Details, the program
+export component VersionsPage inherits Page {
+    heading: Tr.t(Tr.lang, "home_versions");
+    ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            spacing: Theme.gap;
+            padding-right: 8px;
+            alignment: start;
+            Muted { text: Tr.t(Tr.lang, "ver_intro"); font-size: Theme.font; }
+            if App.ver-banner != "" : Notice { text: App.ver-banner; kind: "info"; }
+            if App.ver-note != "" : Notice { text: App.ver-note; kind: App.ver-note-kind; }
+            HorizontalLayout {
+                spacing: Theme.gap;
+                Button {
+                    text: App.ver-checking ? Tr.t(Tr.lang, "ver_checking") : Tr.t(Tr.lang, "ver_check");
+                    enabled: !App.ver-checking && !App.busy;
+                    horizontal-stretch: 0;
+                    clicked => { App.ver-check(); }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 2px;
+                    if App.ver-status != "" : Text {
+                        text: App.ver-status;
+                        color: App.ver-status-kind == "danger" ? Theme.danger : App.ver-status-kind == "success" ? Theme.success : Theme.text;
+                        font-size: Theme.font-small;
+                        wrap: word-wrap;
+                    }
+                    Muted { text: App.ver-last-check; }
+                }
+            }
+            Check {
+                text: Tr.t(Tr.lang, "set_auto");
+                checked <=> App.auto-check;
+                toggled => { App.set-auto-check(App.auto-check); }
+            }
+            Heading { text: Tr.t(Tr.lang, "set_channel"); }
+            HorizontalLayout {
+                spacing: Theme.gap;
+                Choice { title: Tr.t(Tr.lang, "ch_latest"); detail: Tr.t(Tr.lang, "ch_latest_d"); selected: App.channel == 0; clicked => { App.set-channel(0); } }
+                Choice { title: Tr.t(Tr.lang, "ch_beta"); detail: Tr.t(Tr.lang, "ch_beta_d"); selected: App.channel == 1; clicked => { App.set-channel(1); } }
+                Choice { title: Tr.t(Tr.lang, "ch_test"); detail: Tr.t(Tr.lang, "ch_test_d"); selected: App.channel == 2; danger: true; clicked => { App.set-channel(2); } }
+            }
+            Heading { text: Tr.t(Tr.lang, "home_versions"); }
+            for v[i] in App.ver-rows : Choice {
+                title: v.version + "   " + v.label;
+                detail: v.state + (v.notes != "" ? "\n" + v.notes : "");
+                danger: v.kind == "test";
+                enabled: !App.busy;
+                selected: App.ver-selected == i;
+                clicked => { App.ver-selected = i; }
+            }
+            if App.ver-rows.length == 0 : Notice { text: Tr.t(Tr.lang, "ver_empty"); kind: "warning"; }
+            if App.ver-selected >= 0 && App.ver-selected < App.ver-rows.length : Card {
+                min-height: nv.preferred-height;
+                nv := VerticalLayout {
+                    padding: Theme.pad;
+                    spacing: 6px;
+                    Heading { text: Tr.t(Tr.lang, "ver_notes") + ": " + App.ver-rows[App.ver-selected].version; }
+                    Label { text: App.ver-rows[App.ver-selected].notes-both; font-size: Theme.font-small; }
+                }
+            }
+            ProgramUpdate {}
+            HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: (App.ver-details ? "− " : "+ ") + Tr.t(Tr.lang, "details");
+                    clicked => { App.ver-details = !App.ver-details; }
+                }
+            }
+            if App.ver-details : Card {
+                min-height: dv.preferred-height;
+                dv := VerticalLayout {
+                    padding: Theme.pad;
+                    spacing: 6px;
+                    Muted { text: App.ver-key; }
+                    Text { text: App.ver-rejected; color: Theme.text-muted; font-size: Theme.font-small; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        vertical-stretch: 0;
+        Button {
+            text: Tr.t(Tr.lang, "ver_switch");
+            kind: "primary";
+            enabled: !App.busy && App.ver-selected >= 0 && App.ver-selected < App.ver-rows.length
+                && App.ver-rows[App.ver-selected].installable;
+            clicked => { App.ver-switch(); }
+        }
+    }
+}
+
+// Help (the C# InfoDialog.ShowHelp): common situations, offline
+export component HelpPage inherits Page {
+    heading: Tr.t(Tr.lang, "help_title");
+    ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            spacing: 8px;
+            padding-right: 8px;
+            alignment: start;
+            Muted { text: Tr.t(Tr.lang, "help_intro"); font-size: Theme.font; }
+            for h in App.help-items : VerticalLayout {
+                spacing: 4px;
+                padding-top: 6px;
+                Heading { text: h.title; }
+                Label { text: h.body; vertical-alignment: top; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                padding-top: 6px;
+                Button { text: Tr.t(Tr.lang, "help_online"); clicked => { App.help-online(); } }
+            }
+        }
+    }
+}
+
+// a section of the data packs page: its title, its words, its controls
+component Section inherits Card {
+    in property <string> title;
+    in property <string> text;
+    min-height: sl.preferred-height;
+    vertical-stretch: 0;
+    sl := VerticalLayout {
+        padding: Theme.pad;
+        spacing: 8px;
+        Heading { text: root.title; }
+        if root.text != "" : Muted { text: root.text; }
+        @children
+    }
+}
+
+// Data packs (the C# DataPacksPage): what the radio or a backup holds, the RadioID pack (download, CSV, countries,
+// name), the air band pack (pages, name), the write of each (asks first; a radio step behind the disclaimer) and a .dpk
+export component PacksPage inherits Page {
+    heading: Tr.t(Tr.lang, "home_packs");
+    gated: true;
+    property <bool> radio-ok: !App.busy && App.radio-access && !Radio.slog-running && !Radio.live-running && Radio.disclaimer-ok;
+    ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            spacing: Theme.gap;
+            padding-right: 8px;
+            alignment: start;
+            Muted { text: Tr.t(Tr.lang, "pack_text"); font-size: Theme.font; }
+            if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
+            Section {
+                title: Tr.t(Tr.lang, "pack_on_radio");
+                text: Tr.t(Tr.lang, "pack_on_radio_text");
+                HorizontalLayout {
+                    spacing: Theme.gap;
+                    alignment: start;
+                    Button { text: Tr.t(Tr.lang, "pack_read"); enabled: root.radio-ok && Radio.disclaimer-ok && !Packs.working; clicked => { Packs.read-radio(); } }
+                    Button { text: Tr.t(Tr.lang, "pack_from_backup"); enabled: !App.busy && !Packs.working; clicked => { Packs.from-backup(); } }
+                }
+                Label { text: Packs.radio-text; font-size: Theme.font-small; }
+            }
+            Section {
+                title: Tr.t(Tr.lang, "pack_radioid_title");
+                text: Tr.t(Tr.lang, "pack_radioid_text");
+                HorizontalLayout {
+                    spacing: Theme.gap;
+                    alignment: start;
+                    Button { text: Tr.t(Tr.lang, "pack_open_radioid"); clicked => { Packs.open-radioid(); } }
+                    Button { text: Tr.t(Tr.lang, "pack_download"); enabled: !Packs.downloading && !Packs.working && !App.busy; clicked => { Packs.download(); } }
+                    Button { text: Tr.t(Tr.lang, "pack_choose_csv"); enabled: !Packs.working && !App.busy; clicked => { Packs.choose-csv(); } }
+                }
+                Label { text: Packs.csv-text; font-size: Theme.font-small; }
+                HorizontalLayout {
+                    spacing: Theme.gap;
+                    Field { label: Tr.t(Tr.lang, "pack_countries"); text <=> Packs.countries; horizontal-stretch: 3; }
+                    Field { label: Tr.t(Tr.lang, "pack_name"); text <=> Packs.radioid-name; horizontal-stretch: 2; }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        text: Tr.t(Tr.lang, "pack_build");
+                        enabled: Packs.csv-ready && !Packs.working && !App.busy;
+                        clicked => { Packs.build-radioid(); }
+                    }
+                }
+                if Packs.radioid-result != "" : Label { text: Packs.radioid-result; font-size: Theme.font-small; }
+            }
+            Section {
+                title: Tr.t(Tr.lang, "pack_air_title");
+                text: Tr.t(Tr.lang, "pack_air_text");
+                HorizontalLayout {
+                    spacing: Theme.gap;
+                    alignment: start;
+                    Button { text: Tr.t(Tr.lang, "pack_open_aip"); clicked => { Packs.open-aip(); } }
+                    Button { text: Tr.t(Tr.lang, "pack_add_pdf"); enabled: !Packs.working && !App.busy; clicked => { Packs.add-pdf(); } }
+                    Button { text: Tr.t(Tr.lang, "pack_clear"); enabled: Packs.air-ready && !Packs.working; clicked => { Packs.clear-pdf(); } }
+                }
+                Label { text: Packs.air-list; font-size: Theme.font-small; }
+                HorizontalLayout {
+                    spacing: Theme.gap;
+                    Field { label: Tr.t(Tr.lang, "pack_name"); text <=> Packs.air-name; horizontal-stretch: 1; }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        text: Tr.t(Tr.lang, "pack_build");
+                        enabled: Packs.air-ready && !Packs.working && !App.busy;
+                        clicked => { Packs.build-air(); }
+                    }
+                }
+                if Packs.air-result != "" : Label { text: Packs.air-result; font-size: Theme.font-small; }
+            }
+            Section {
+                title: Tr.t(Tr.lang, "pack_write_title");
+                text: Tr.t(Tr.lang, "pack_write_text") + "\n" + Tr.t(Tr.lang, "packs_note");
+                Label { text: Packs.chosen-text; font-size: Theme.font-small; }
+                HorizontalLayout {
+                    spacing: Theme.gap;
+                    alignment: start;
+                    Button {
+                        text: Tr.t(Tr.lang, "pack_write_radioid"); kind: "primary";
+                        enabled: Packs.radioid-pack && root.radio-ok && Radio.disclaimer-ok && !Packs.working;
+                        clicked => { Packs.write-radioid(); }
+                    }
+                    Button {
+                        text: Tr.t(Tr.lang, "pack_write_air"); kind: "primary";
+                        enabled: Packs.air-pack && root.radio-ok && Radio.disclaimer-ok && !Packs.working;
+                        clicked => { Packs.write-air(); }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Button { text: Tr.t(Tr.lang, "pack_load_dpk"); enabled: !App.busy && !Packs.working; clicked => { Packs.load-dpk(); } }
+                }
+                if App.busy || Packs.progress > 0 : Progress { value: Packs.progress; }
+            }
+        }
+    }
+    if Packs.result != "" : Notice { text: Packs.result; kind: Packs.result-kind; }
+}

@@ -1,0 +1,202 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The window's controller-facing state (lib.rs): the App global and its rows, shared by every page file.
+import { Radio } from "radio_pages.slint";
+
+export struct VersionRow { version: string, label: string, notes: string, local: bool }
+export struct BackupRow { name: string, detail: string, origin: string, kind: string }
+
+// one row of the versions page: kind latest / stable / beta / test / legacy (its colour), the states joined
+export struct VerRow { version: string, label: string, kind: string, state: string, notes: string, notes-both: string, installable: bool }
+export struct HelpItem { title: string, body: string }
+
+export global App {
+    // 0 home, 1 update wizard, 2 backups and going back, 3 data packs, 4 settings, 5 about, 6 first start, 7 health,
+    // 8 live, 9 my channels, 10 search log, 11 versions, 12 help
+    in-out property <int> page: 0;
+    // the home screen
+    in property <string> radio-text;
+    in property <string> radio-kind: "info";
+    in property <string> update-text;
+    in property <string> backups-text;
+    in property <string> installed-text;
+    // "Program 3.0.0 · Radio firmware 1.0.1" (Home and the title bar); the radio's part only as the program knows it
+    in property <string> version-line;
+    in property <string> title-text: "DDM32 Plus - TA2DOU";
+    // a failed update check (written to logs/update-check.log too); dismissable
+    in property <string> check-error;
+    callback dismiss-check-error();
+    // the one question after the start-up check: "Program 3.0.0 -> 3.1.0" and / or "Radio firmware 1.0.1 -> 1.0.2"
+    in-out property <bool> prompt-open;
+    in property <string> prompt-program;
+    in property <string> prompt-program-detail;
+    in property <string> prompt-firmware;
+    in property <string> prompt-firmware-detail;
+    callback prompt-update-program();
+    callback prompt-update-firmware();
+    callback prompt-later();
+    // "Skip this version" for one item (the program, the firmware)
+    callback prompt-skip-program();
+    callback prompt-skip-firmware();
+    // a chosen port is gone: "COM15 not found; using COM14", on Home until dismissed
+    in property <string> port-missing;
+    callback dismiss-port-missing();
+    // the disclaimer (lib.rs open_disclaimer): accepted with the box ticked; read only once accepted. Its own
+    // language switch, as the C# dialog
+    in-out property <bool> disc-open;
+    in property <bool> disc-readonly;
+    in property <string> disc-lang: "tr";
+    in-out property <bool> disc-checked;
+    in property <string> disc-title;
+    in property <string> disc-intro;
+    in property <[string]> disc-points;
+    in property <string> disc-outro;
+    in property <bool> disc-outro-bold;
+    callback disc-accept();
+    callback disc-reject();
+    callback disc-toggle-lang();
+    // the close button pressed twice while a step that does not write to the radio runs: "Close anyway?" (No default)
+    in-out property <bool> force-close-open;
+    callback force-close-yes();
+    // choosing a test / alpha version: Yes / No, No by default
+    in-out property <bool> test-confirm-open;
+    in property <string> test-confirm-text;
+    callback test-confirm-yes();
+    // the wizard: 0 version, 1 backup choice, 2 backup, 3 check, 4 install, 5 done
+    in-out property <int> step: 0;
+    in property <[VersionRow]> versions;
+    in-out property <int> selected-version: 0;
+    in-out property <int> backup-choice: 0;   // 0 new backup, 1 last backup (quick), 2 no backup
+    in property <bool> quick-available;
+    in property <string> quick-backup;
+    in-out property <bool> understood;
+    in-out property <bool> confirm-open;
+    in property <bool> busy;
+    in property <bool> step-done;            // the current step succeeded: Next is open
+    in property <string> message;
+    in property <string> message-kind: "info";
+    in property <string> power-prompt;
+    in property <float> progress;
+    in property <string> progress-text;      // the percent line (phase and percent); never a raw tool line
+    in property <string> progress-info;      // the last other tool line (JEDEC ID, boot ROM answered, ...)
+    in property <string> summary;
+    in property <string> details;
+    in-out property <bool> show-details;
+    in property <bool> radio-access;
+    // backups page
+    in property <[BackupRow]> backups;
+    in-out property <int> selected-backup: -1;
+    in property <string> backups-folder;
+    in property <bool> restore-ready;
+    // settings
+    in-out property <int> channel: 0;   // 0 Latest, 1 Beta, 2 Test / Alpha
+    in-out property <bool> auto-check: true;
+    // about: the program's version and what the radio runs (as the program knows it), each on its own line
+    in property <string> version;
+    in property <string> installed-firmware;
+    in property <string> data-folder;
+    in property <string> key-id;
+
+    callback navigate(int);
+    callback refresh();
+    callback wizard-next();
+    callback wizard-back();
+    callback start-backup();
+    callback start-install();
+    callback choose-backup(int);
+    callback confirm-no-backup();
+    callback restore();
+    callback restore-plan();
+    callback set-theme(bool);
+    callback set-lang(string);
+    callback set-channel(int);
+    callback set-auto-check(bool);
+    callback open-backups-folder();
+    // an entry of the menu bar: "page:N", "backups-folder", "logs-folder", "guide", "github" or "exit"
+    callback menu-action(string);
+    // the menu bar: the radio entries are off while any radio step, the live panel or the search log holds the port
+    out property <bool> menu-radio-locked: root.busy || Radio.busy || Radio.live-running || Radio.slog-running;
+    // the update wizard is between its steps (backup choice .. install): the port is not changed now and no question
+    // pops up over it
+    out property <bool> wizard-active: root.page == 1 && root.step >= 1 && root.step <= 4;
+    out property <bool> port-locked: root.menu-radio-locked || root.wizard-active;
+    // the program's own update
+    in property <string> app-update-text;
+    in property <bool> app-update-available;
+    callback app-check();
+    callback app-update();
+
+    // ---- v1.1.0 candidate ----------------------------------------------------------------------------------------
+    // the title is marked in a developer build (lib.rs dev_title); the local release folder entry exists only then
+    in property <bool> developer;
+    // the versions page (lib.rs / versions.rs): every signed version with its state, the check, rejected releases
+    in property <[VerRow]> ver-rows;
+    in-out property <int> ver-selected: -1;
+    in property <bool> ver-checking;
+    in property <string> ver-status;
+    in property <string> ver-status-kind: "info";
+    in property <string> ver-last-check;
+    in property <string> ver-banner;
+    in property <string> ver-rejected;
+    in property <string> ver-key;
+    in property <string> ver-note;
+    in property <string> ver-note-kind: "info";
+    in-out property <bool> ver-details;
+    callback ver-check();
+    callback ver-switch();
+    // the restore page's shortcuts (RestorePage): previous version, stock, another folder; the chosen backup's lines
+    in property <string> res-status;
+    callback res-previous();
+    callback res-stock();
+    callback res-other();
+    // "Restore the radio from this backup?" (Yes / No, No by default)
+    in-out property <bool> res-confirm-open;
+    in property <string> res-confirm-text;
+    callback res-confirm-yes();
+    // help (offline, the C# help texts)
+    in property <[HelpItem]> help-items;
+    callback help-online();
+}
+
+
+// the data packs page (packs.rs): what the radio or a backup holds, the RadioID and air band packs, the write
+export global Packs {
+    in property <string> radio-text;
+    in property <string> csv-text;
+    in-out property <string> countries: "Turkey";
+    in-out property <string> radioid-name: "RadioID TR";
+    in property <string> radioid-result;
+    in property <bool> csv-ready;
+    in property <string> air-list;
+    in-out property <string> air-name: "TR aerodromes";
+    in property <string> air-result;
+    in property <bool> air-ready;
+    in property <string> chosen-text;
+    in property <bool> radioid-pack;
+    in property <bool> air-pack;
+    in property <string> result;
+    in property <string> result-kind: "info";
+    in property <float> progress;
+    // building or downloading (no radio): the page's own buttons wait
+    in property <bool> working;
+    in property <bool> downloading;
+    // "Download user.csv now?" and "Write this pack?" (Yes / No, No by default)
+    in-out property <bool> download-confirm-open;
+    in property <string> download-confirm-text;
+    in-out property <bool> write-confirm-open;
+    in property <string> write-confirm-text;
+    callback read-radio();
+    callback from-backup();
+    callback open-radioid();
+    callback download();
+    callback download-yes();
+    callback choose-csv();
+    callback build-radioid();
+    callback open-aip();
+    callback add-pdf();
+    callback clear-pdf();
+    callback build-air();
+    callback write-radioid();
+    callback write-air();
+    callback write-yes();
+    callback load-dpk();
+}

@@ -288,6 +288,39 @@ export component Choice {
     TouchArea { enabled: root.live; clicked => { fs.focus(); root.clicked(); } }
 }
 
+// A one-line text field with its name above it (the name is also the screen reader's label)
+export component Field inherits VerticalLayout {
+    in property <string> label;
+    in-out property <string> text;
+    in property <bool> enabled: true;
+    callback edited(string);
+    spacing: 4px;
+    vertical-stretch: 0;
+    Text { text: root.label; color: Theme.text-muted; font-size: Theme.font-small; wrap: word-wrap; }
+    Rectangle {
+        min-height: Theme.control-height;
+        border-radius: Theme.radius;
+        background: root.enabled ? Theme.surface : Theme.disabled;
+        border-width: fi.has-focus ? 2px : 1px;
+        border-color: fi.has-focus ? Theme.focus : Theme.border;
+        fi := TextInput {
+            x: 10px;
+            width: parent.width - 20px;
+            text <=> root.text;
+            enabled: root.enabled && !Modal.open;
+            color: root.enabled ? Theme.text : Theme.disabled-text;
+            font-size: Theme.font;
+            vertical-alignment: center;
+            single-line: true;
+            selection-background-color: Theme.primary;
+            selection-foreground-color: Theme.primary-text;
+            accessible-role: text-input;
+            accessible-label: root.label;
+            edited => { root.edited(self.text); }
+        }
+    }
+}
+
 export component Progress inherits Rectangle {
     in property <float> value; // 0..1
     height: 8px;

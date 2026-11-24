@@ -3,18 +3,24 @@
 //!
 //! Every radio step starts only from its own button (one click = one step) and runs in a worker thread; its lines
 //! come back to the window as progress. Nothing here retries a failed write. Backups always go to the program's own
-//! `backups` and are found by themselves (ddm32_core::storage::backups); the user never chooses a folder.
+//! `backups` and are found by themselves (ddm32_core::storage::backups); a restore may also take another backup folder
+//! the user shows (it must be a verified backup).
 
+pub mod channels;
 pub mod disclaimer;
+pub mod help;
 pub mod i18n;
+pub mod packs;
 pub mod radio_pages;
+pub mod restore;
 pub mod updates;
+pub mod versions;
+pub mod window;
 pub mod winres;
 pub mod worker;
 
 slint::include_modules!();
 
-use ddm32_core::datapacks::files::{self as packs, BuiltPack};
 use ddm32_core::pyjson::{self, Py};
 use ddm32_core::radio::cable::CableStatus;
 use ddm32_core::radio::codec::Codec;
@@ -47,7 +53,6 @@ pub struct State {
     pub restore: RestoreFlow,
     pub found: Vec<FoundBackup>,
     pub quick: Option<PathBuf>,
-    pub pack: Option<PathBuf>,
     pub progress: ProgressView,
     /// A note shown once on Home (the last program update's result).
     pub note: Option<String>,
@@ -108,6 +113,19 @@ pub struct State {
     /// the window closes when both have ended (or after CLOSE_FALLBACK)
     pub close_pending: bool,
     pub close_timer: Option<slint::Timer>,
+    /// A local release folder loaded (developer builds): its versions stay in the list after a check
+    pub local: Option<Catalog>,
+    /// A version "Switch to this version" chose that the channel does not offer: in the wizard's list this time
+    pub pinned: Option<String>,
+    /// The versions page's check runs; the last check's error as it came (the page says it in its own words)
+    pub checking: bool,
+    pub check_error_raw: Option<String>,
+    /// My channels: the filters, the sort, the backup shown
+    pub channels: channels::ChannelView,
+    /// Health: "read every 30 s" while ticked
+    pub health_timer: Option<slint::Timer>,
+    /// Data packs: the list, the pages, the packs built or loaded, what the radio holds
+    pub packs: packs::PackState,
 }
 
 thread_local! {
@@ -209,7 +227,6 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             restore: RestoreFlow::new(),
             found: vec![],
             quick: None,
-            pack: None,
             progress: ProgressView::new(),
             note: None,
             codeplug: None,
@@ -247,11 +264,21 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             test_ok: None,
             close_pending: false,
             close_timer: None,
+            local: None,
+            pinned: None,
+            checking: false,
+            check_error_raw: None,
+            channels: Default::default(),
+            health_timer: None,
+            packs: Default::default(),
         })
     });
     with(|s| s.port_pref = s.settings.port_pref());
+    app.set_developer(ddm32_core::app_info::DEVELOPER);
     wire(ui);
     radio_pages::wire(ui);
+    packs::wire(ui);
+    packs::init(ui);
     refresh(ui);
     if first_start {
         // the language first; the disclaimer follows when the first page is left (navigate)
@@ -328,8 +355,18 @@ pub fn busy_state(ui: &AppWindow) -> updates::Busy {
             || app.get_disc_open()
             || app.get_test_confirm_open()
             || app.get_force_close_open()
+            || page_dialog_open(ui)
             || ui.global::<Radio>().get_picker_open(),
     }
+}
+
+/// A page's own question is open (restore, download user.csv, write a pack) or the channels' filter picker.
+fn page_dialog_open(ui: &AppWindow) -> bool {
+    let p = ui.global::<Packs>();
+    ui.global::<App>().get_res_confirm_open()
+        || p.get_download_confirm_open()
+        || p.get_write_confirm_open()
+        || ui.global::<Radio>().get_zone_picker_open()
 }
 
 /// The OS's serial ports and the cable check, read without opening any port (on the calling thread).
@@ -413,8 +450,12 @@ fn show_cable(ui: &AppWindow) {
     let Some((text, kind)) = with(|s| s.cable.as_ref().map(|st| cable_text(&s.lang, st, &s.port_opts.cables))) else {
         return;
     };
-    app.set_radio_text(text.into());
+    app.set_radio_text(text.clone().into());
     app.set_radio_kind(kind.into());
+    // the health page's cable card says the same
+    let r = ui.global::<Radio>();
+    r.set_cable_text(text.into());
+    r.set_cable_kind(kind.into());
 }
 
 /// The picker's texts and lists from the state (in the window's language).
@@ -599,13 +640,36 @@ fn wire(ui: &AppWindow) {
     let w = ui.as_weak();
     app.on_restore_plan(move || restore_plan(&w.unwrap()));
     let w = ui.as_weak();
-    app.on_restore(move || start_restore(&w.unwrap()));
+    app.on_restore(move || restore::ask(&w.unwrap()));
     let w = ui.as_weak();
-    app.on_pack_radioid(move || pack_radioid(&w.unwrap()));
+    app.on_res_confirm_yes(move || {
+        let ui = w.unwrap();
+        ui.global::<App>().set_res_confirm_open(false);
+        start_restore(&ui);
+    });
     let w = ui.as_weak();
-    app.on_pack_air(move || pack_air(&w.unwrap()));
+    app.on_res_previous(move || {
+        restore::shortcut(&w.unwrap(), "previous");
+    });
     let w = ui.as_weak();
-    app.on_pack_write(move || pack_write(&w.unwrap()));
+    app.on_res_stock(move || {
+        restore::shortcut(&w.unwrap(), "stock");
+    });
+    let w = ui.as_weak();
+    app.on_res_other(move || {
+        let ui = w.unwrap();
+        let start = with(|s| s.paths.backups());
+        if let Some(f) = rfd::FileDialog::new().set_directory(&start).pick_folder() {
+            restore::other_folder(&ui, &f);
+        }
+    });
+    let w = ui.as_weak();
+    app.on_ver_check(move || versions::check_now(&w.unwrap()));
+    let w = ui.as_weak();
+    app.on_ver_switch(move || {
+        versions::switch(&w.unwrap());
+    });
+    app.on_help_online(|| open_folder(Path::new(&format!("{GITHUB_URL}#readme"))));
     let w = ui.as_weak();
     app.on_app_check(move || {
         let ui = w.unwrap();
@@ -697,6 +761,7 @@ fn blocked_besides_prompt(ui: &AppWindow) -> bool {
     b.dialog_open = app.get_confirm_open()
         || app.get_disc_open()
         || app.get_test_confirm_open()
+        || page_dialog_open(ui)
         || ui.global::<Radio>().get_picker_open();
     b.any()
 }
@@ -840,10 +905,17 @@ pub enum MenuAction {
     Guide,
     GitHub,
     Disclaimer,
+    /// "lang:tr" / "lang:en": the window's language at once
+    Lang(String),
+    /// A signed release from a local folder (developer builds only; refused otherwise)
+    LocalRelease,
     Exit,
 }
 
 pub const GITHUB_URL: &str = "https://github.com/d0ukan/DDM32-Plus";
+
+/// The pages: 0 home .. 10 search log, 11 versions, 12 help (6, the first start, is never a menu target).
+pub const LAST_PAGE: i32 = 12;
 
 pub fn parse_menu_action(a: &str) -> Option<MenuAction> {
     Some(match a {
@@ -853,7 +925,12 @@ pub fn parse_menu_action(a: &str) -> Option<MenuAction> {
         "github" => MenuAction::GitHub,
         "disclaimer" => MenuAction::Disclaimer,
         "exit" => MenuAction::Exit,
-        _ => MenuAction::Page(a.strip_prefix("page:")?.parse().ok().filter(|p| (0..=10).contains(p) && *p != 6)?),
+        "lang:tr" => MenuAction::Lang("tr".into()),
+        "lang:en" => MenuAction::Lang("en".into()),
+        "local-release" if ddm32_core::app_info::DEVELOPER => MenuAction::LocalRelease,
+        _ => {
+            MenuAction::Page(a.strip_prefix("page:")?.parse().ok().filter(|p| (0..=LAST_PAGE).contains(p) && *p != 6)?)
+        }
     })
 }
 
@@ -878,12 +955,19 @@ fn menu_action(ui: &AppWindow, a: &str) {
         MenuAction::Guide => open_folder(Path::new(&format!("{GITHUB_URL}#readme"))),
         MenuAction::GitHub => open_folder(Path::new(GITHUB_URL)),
         MenuAction::Disclaimer => open_disclaimer(ui),
+        MenuAction::Lang(l) => app.invoke_set_lang(l.into()),
+        MenuAction::LocalRelease => {
+            if let Some(f) = rfd::FileDialog::new().pick_folder() {
+                load_local_release(ui, &f);
+            }
+        }
         MenuAction::Exit => {
             if app.get_menu_radio_locked() {
                 set_message(ui, &tr("m_exit_busy"), "warning");
                 ui.global::<Radio>().set_message(tr("m_exit_busy").into());
                 ui.global::<Radio>().set_message_kind("warning".into());
             } else {
+                window::save(ui);
                 let _ = slint::quit_event_loop();
             }
         }
@@ -901,7 +985,7 @@ pub(crate) fn open_folder(dir: &Path) {
     let _ = std::process::Command::new(cmd).arg(dir).spawn();
 }
 
-fn set_message(ui: &AppWindow, text: &str, kind: &str) {
+pub(crate) fn set_message(ui: &AppWindow, text: &str, kind: &str) {
     let app = ui.global::<App>();
     app.set_message(text.into());
     app.set_message_kind(kind.into());
@@ -919,11 +1003,16 @@ fn navigate(ui: &AppWindow, page: i32) {
     clear_progress(&app);
     app.set_details("".into());
     app.set_show_details(false);
+    if page != 7 && ui.global::<Radio>().get_health_auto() {
+        // "read every 30 s" belongs to the health page: leaving it ends it
+        radio_pages::health_auto(ui, false);
+    }
     if page == 1 {
         with(|s| {
             s.wizard = Wizard::new();
             s.package = None;
             s.test_ok = None;
+            s.pinned = None;
         });
         app.set_backup_choice(0);
         app.set_understood(false);
@@ -937,9 +1026,20 @@ fn navigate(ui: &AppWindow, page: i32) {
     app.set_restore_ready(false);
     if page == 2 {
         app.set_selected_backup(-1);
+        app.set_res_status("".into());
     }
-    refresh(ui);
+    if page == 3 {
+        packs::show(ui);
+        ui.global::<Packs>().set_result("".into());
+    }
+    if page == 11 {
+        app.set_ver_note("".into());
+    }
+    if page == 12 {
+        help::show(ui);
+    }
     app.set_page(page);
+    refresh(ui);
     if from_first_start && !ui.global::<Radio>().get_disclaimer_ok() {
         open_disclaimer(ui);
     }
@@ -1034,6 +1134,7 @@ pub fn close_requested(ui: &AppWindow) -> slint::CloseRequestResponse {
         return slint::CloseRequestResponse::KeepWindowShown;
     }
     let readers: Vec<_> = with(|s| [s.live_cancel.clone(), s.slog_cancel.clone()].into_iter().flatten().collect());
+    window::save(ui);
     if readers.is_empty() {
         return slint::CloseRequestResponse::HideWindow;
     }
@@ -1070,6 +1171,7 @@ pub fn force_close(ui: &AppWindow) -> bool {
         r.set_message_kind("warning".into());
         return false;
     }
+    window::save(ui);
     let _ = slint::quit_event_loop();
     true
 }
@@ -1079,6 +1181,7 @@ pub fn force_close(ui: &AppWindow) -> bool {
 pub fn reader_ended() -> bool {
     let close = with(|s| s.close_pending && s.live_cancel.is_none() && s.slog_cancel.is_none());
     if close {
+        // the place was saved when the close button was pressed
         let _ = slint::quit_event_loop();
     }
     close
@@ -1103,6 +1206,33 @@ pub fn arm_start_marker(args: &[String]) {
         slint::Timer::single_shot(MARKER_DELAY, move || {
             let _ = ddm32_core::update::self_update::write_marker(&marker, ddm32_core::app_info::VERSION);
         });
+    }
+}
+
+/// offered(), plus a version "Switch to this version" chose that the channel does not offer (never a legacy one),
+/// in its place in the order.
+pub fn offered_with(cat: &Catalog, channel: i32, pinned: Option<&str>) -> Vec<catalog::FirmwareVersion> {
+    let mut list = offered(cat, channel);
+    if let Some(fv) = pinned.and_then(|v| cat.find(v)).filter(|f| !f.is_legacy()) {
+        if !list.iter().any(|f| f.version() == fv.version()) {
+            list.push(fv.clone());
+            list.sort_by_key(|f| std::cmp::Reverse(f.key()));
+        }
+    }
+    list
+}
+
+/// The update wizard at its first step with `version` selected, added to the list when the channel does not offer
+/// it (the versions page's "Switch to this version"). No radio step.
+pub fn open_wizard_pinned(ui: &AppWindow, version: &str) {
+    navigate(ui, 1);
+    if ui.global::<App>().get_page() != 1 {
+        return;
+    }
+    with(|s| s.pinned = Some(version.to_string()));
+    refresh(ui);
+    if let Some(i) = with(|s| s.shown.iter().position(|f| f.version() == version)) {
+        ui.global::<App>().set_selected_version(i as i32);
     }
 }
 
@@ -1139,7 +1269,7 @@ fn refresh(ui: &AppWindow) {
     // versions
     let rows = with(|s| {
         let cat = s.catalog.clone().unwrap_or_default();
-        s.shown = offered(&cat, channel);
+        s.shown = offered_with(&cat, channel, s.pinned.as_deref());
         s.shown.clone()
     });
     let all = with(|s| s.catalog.clone().unwrap_or_default().firmware);
@@ -1181,7 +1311,7 @@ fn refresh(ui: &AppWindow) {
     app.set_installed_text(updates::installed_text(&known.installed, &lang).into());
     let program = ddm32_core::app_info::VERSION;
     app.set_version_line(updates::version_text(&lang, program, &known).into());
-    app.set_title_text(updates::title_text(&lang, program, &known).into());
+    app.set_title_text(format!("{}{}", updates::title_text(&lang, program, &known), dev_title(&lang)).into());
     app.set_installed_firmware(updates::installed_short(&known, &lang).into());
     let status = updates::firmware_status(&known.installed, &rows);
     app.set_update_text(updates::firmware_status_text(&lang, &status, known.source, &rows, &all).into());
@@ -1217,6 +1347,69 @@ fn refresh(ui: &AppWindow) {
         })
         .collect();
     app.set_backups(ModelRc::new(VecModel::from(brows)));
+    if app.get_page() == 11 {
+        versions::show(ui);
+    }
+}
+
+/// The developer build's mark in the title (the C# Dev_Title / Dev_TitleWrite); nothing in a release build.
+pub fn dev_title(lang: &str) -> String {
+    if !ddm32_core::app_info::DEVELOPER {
+        return String::new();
+    }
+    let key = if RadioAccess::WRITES_ENABLED {
+        "dev_title_write"
+    } else if RadioAccess::ENABLED {
+        "dev_title"
+    } else {
+        "dev_title_off"
+    };
+    i18n::t(lang, key)
+}
+
+/// A signed release in a local folder (developer builds only): verified like a downloaded one, its versions added to
+/// the list (and kept there after a check); the versions page says what was loaded.
+pub fn load_local_release(ui: &AppWindow, folder: &Path) {
+    if !ddm32_core::app_info::DEVELOPER {
+        return;
+    }
+    let releases = with(|s| s.paths.releases());
+    let folder = folder.to_path_buf();
+    let w = ui.as_weak();
+    worker::spawn(
+        move || ddm32_core::releases::local::load_local(&folder, &releases, None).map_err(|e| e.0),
+        move |r| {
+            let Some(ui) = w.upgrade() else { return };
+            local_release_loaded(&ui, r.and_then(|x| x));
+        },
+    );
+}
+
+/// The end of a local release load (also the tests): the versions added, or the reason; the versions page opens.
+pub fn local_release_loaded(ui: &AppWindow, r: Result<Catalog, String>) {
+    let lang = with(|s| s.lang.clone());
+    let (text, kind) = match r {
+        Ok(cat) if !cat.firmware.is_empty() => {
+            let names: Vec<String> = cat.firmware.iter().map(|f| f.version().to_string()).collect();
+            with(|s| {
+                let mut all = s.catalog.clone().unwrap_or_default();
+                all.add_local(&cat);
+                s.catalog = Some(all);
+                s.local = Some(cat);
+            });
+            (i18n::tf(&lang, "local_loaded", &names.join(", ")), "success")
+        }
+        Ok(cat) => {
+            let why: Vec<String> = cat.rejected.iter().map(|(t, r)| format!("{t}: {r}")).collect();
+            (i18n::tf(&lang, "local_failed", &why.join("; ")), "warning")
+        }
+        Err(e) => (i18n::tf(&lang, "local_failed", &e), "warning"),
+    };
+    navigate(ui, 11);
+    let app = ui.global::<App>();
+    app.set_ver_note(text.into());
+    app.set_ver_note_kind(kind.into());
+    versions::show(ui);
 }
 
 /// Downloads the new program (size and SHA-256 from the signed manifest), stages it, starts the staged program as
@@ -1290,6 +1483,11 @@ fn app_update(ui: &AppWindow) {
 /// Asks GitHub for the signed release list in the background. A failure is never swallowed: it is written to
 /// `logs/update-check.log` and shown on Home (dismissable). `ask`: the start-up / 24 h check, which may ask the one
 /// update question; the Check button only refreshes the texts.
+/// The versions page's "Check for updates" (crate::versions::check_now).
+pub(crate) fn start_catalog_check(w: Weak<AppWindow>, ask: bool) {
+    load_catalog(w, ask);
+}
+
 fn load_catalog(w: Weak<AppWindow>, ask: bool) {
     let releases = with(|s| {
         s.last_check = Some(std::time::Instant::now());
@@ -1308,12 +1506,22 @@ fn load_catalog(w: Weak<AppWindow>, ask: bool) {
 /// and, for the start-up check, the one question is considered; a failure goes to logs/update-check.log and Home.
 pub fn catalog_loaded(ui: &AppWindow, r: Result<Catalog, String>, ask: bool) {
     match r {
-        Ok(cat) => {
+        Ok(mut cat) => {
             with(|s| {
+                // a local release folder stays in the list (developer builds)
+                if let Some(local) = &s.local {
+                    cat.add_local(local);
+                }
+                if let Some(t) = &cat.checked_utc {
+                    let _ = s.settings.save("last_check_utc", serde_json::Value::String(t.clone()));
+                }
                 s.catalog = Some(cat);
                 s.check_error = None;
+                s.check_error_raw = None;
+                s.checking = false;
             });
             refresh(ui);
+            versions::show(ui);
             if ask {
                 consider_prompt(ui);
             }
@@ -1322,8 +1530,13 @@ pub fn catalog_loaded(ui: &AppWindow, r: Result<Catalog, String>, ask: bool) {
             let logs = with(|s| s.paths.logs());
             let _ = updates::log_check_error(&logs, &client::now_utc(), &e);
             let text = trf("check_failed", &e);
-            with(|s| s.check_error = Some(text));
+            with(|s| {
+                s.check_error = Some(text);
+                s.check_error_raw = Some(e.clone());
+                s.checking = false;
+            });
             refresh(ui);
+            versions::show(ui);
         }
     }
 }
@@ -1453,6 +1666,10 @@ fn check(ui: &AppWindow) {
             }
         }
         let stock = s.wizard.detection.as_ref().and_then(|d| d.str("layout")) == Some("stock");
+        if stock {
+            // kept for "Back to stock firmware" (the C# RememberStockBackup)
+            let _ = restore::remember_stock_backup(&s.settings, &backup);
+        }
         s.wizard.start_plan().map_err(|_| i18n::t(&s.lang, s.wizard.message.0))?;
         let plus = s.package.clone().unwrap_or_default();
         let mode = s.wizard.mode().unwrap_or("install_plus");
@@ -1536,6 +1753,24 @@ fn run_tool(
     writes: bool,
     done: impl FnOnce(&AppWindow, Option<ToolError>) + Send + 'static,
 ) {
+    run_tool_lines(ui, tool, argv, writes, progress_line, done);
+}
+
+/// A tool line into the wizard's / restore's progress area.
+fn progress_line(ui: &AppWindow, line: &str) {
+    let show = with(|s| progress_show(&mut s.progress, &s.lang, line));
+    show.apply(&ui.global::<App>());
+}
+
+/// run_tool with its own handler of the tool's lines (the data pack tool's slots, plan and sectors).
+pub(crate) fn run_tool_lines(
+    ui: &AppWindow,
+    tool: &'static str,
+    argv: Vec<String>,
+    writes: bool,
+    on_line: fn(&AppWindow, &str),
+    done: impl FnOnce(&AppWindow, Option<ToolError>) + Send + 'static,
+) {
     let app = ui.global::<App>();
     app.set_busy(true);
     clear_progress(&app);
@@ -1557,8 +1792,7 @@ fn run_tool(
                 let w3 = w2.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(ui) = w3.upgrade() else { return };
-                    let show = with(|s| progress_show(&mut s.progress, &s.lang, &line));
-                    show.apply(&ui.global::<App>());
+                    on_line(&ui, &line);
                 });
             };
             let serial = move |p: &str| -> ToolResult<Box<dyn RawSerial>> {
@@ -1612,7 +1846,7 @@ fn s(p: &Path) -> String {
 
 /// A read-only reader (the search log or the live view) holds the radio's port: the radio steps wait (said on screen).
 /// On Linux / macOS a second open of the same tty would succeed and the two streams would mix.
-fn reader_holds_port(ui: &AppWindow) -> bool {
+pub(crate) fn reader_holds_port(ui: &AppWindow) -> bool {
     let held = with(|st| st.slog_cancel.is_some() || st.live_cancel.is_some());
     if held {
         set_message(ui, &tr("slog_busy"), "warning");
@@ -1704,6 +1938,10 @@ fn start_install_on(ui: &AppWindow, found: Option<String>) {
             st.wizard.install_finished(&r);
             let none = st.wizard.path == ddm32_core::radio::flow::BackupPath::None;
             let backup = if none { None } else { st.wizard.backup_dir.clone() };
+            if let Some(b) = backup.as_deref().filter(|_| r.passed || r.writes_started) {
+                // "Back to the previous version" restores it (the C# restore_previous_backup)
+                let _ = restore::remember_previous_backup(&st.settings, b);
+            }
             let _ = updates::record_install_result(
                 &st.settings,
                 &r,
@@ -1731,34 +1969,9 @@ fn start_install_on(ui: &AppWindow, found: Option<String>) {
 }
 
 fn restore_plan(ui: &AppWindow) {
-    let app = ui.global::<App>();
-    let i = app.get_selected_backup();
+    let i = ui.global::<App>().get_selected_backup();
     let Some(b) = with(|st| st.found.get(i as usize).cloned()) else { return };
-    app.set_restore_ready(false);
-    let r: Result<(), String> = with(|st| {
-        let d = FileSteps::detect_backup(&b.folder, Codec::dm32()).map_err(|e| e.record())?;
-        let kind = if d.str("layout") == Some("stock") { "stock" } else { "previous" };
-        st.restore.choose(kind, &b.folder).map_err(|e| e.0.to_string())?;
-        st.restore.start_detect().map_err(|e| e.0.to_string())?;
-        st.restore.detect_finished(Some(d), "");
-        let (_, _, mode) = st.restore.tool().ok_or_else(|| i18n::t(&st.lang, st.restore.message.0))?;
-        st.restore.start_plan().map_err(|e| e.0.to_string())?;
-        let p = FileSteps::restore_plan(mode, &b.folder).map_err(|e| e.record())?;
-        let safe = FileSteps::safe(&p);
-        st.restore.plan_finished(Some(p), "", safe);
-        if safe {
-            Ok(())
-        } else {
-            Err("unsafe plan".into())
-        }
-    });
-    match r {
-        Ok(()) => {
-            app.set_restore_ready(true);
-            set_message(ui, &tr("msg_restore_plan"), "info");
-        }
-        Err(e) => set_message(ui, &trf("msg_restore_cannot", &e), "warning"),
-    }
+    restore::choose(ui, None, &b.folder);
 }
 
 fn start_restore(ui: &AppWindow) {
@@ -1829,72 +2042,8 @@ fn start_restore_on(ui: &AppWindow, found: Option<String>) {
         } else {
             set_message(ui, &trf("msg_install_not_started", &r.error), "warning");
         }
+        restore::show_status(ui);
         refresh(ui);
-    });
-}
-
-fn pack_done(ui: &AppWindow, r: Result<BuiltPack, String>, name: &str) {
-    let app = ui.global::<App>();
-    match r {
-        Ok(p) => {
-            let dir = with(|st| st.paths.packs());
-            let _ = std::fs::create_dir_all(&dir);
-            let file = unique_folder(&dir, &format!("{name}-{}.dpk", today()));
-            if let Err(e) = std::fs::write(&file, &p.image) {
-                set_message(ui, &trf("msg_pack_failed", &e.to_string()), "danger");
-                return;
-            }
-            with(|st| st.pack = Some(file));
-            app.set_pack_text(trf("msg_pack_ready", &ddm32_core::datapacks::datapack::info(&p.image)).into());
-            app.set_pack_ready(true);
-            set_message(ui, "", "info");
-        }
-        Err(e) => {
-            app.set_pack_ready(false);
-            set_message(ui, &trf("msg_pack_failed", &e), "danger");
-        }
-    }
-}
-
-fn pack_radioid(ui: &AppWindow) {
-    let Some(csv) = rfd::FileDialog::new().add_filter("RadioID user.csv", &["csv"]).pick_file() else { return };
-    let r = packs::radio_id(&csv, &[], "RadioID", None).map_err(|e| e.0);
-    pack_done(ui, r, "radioid");
-}
-
-fn pack_air(ui: &AppWindow) {
-    let Some(files) = rfd::FileDialog::new().add_filter("AIP AD 2", &["pdf", "txt"]).pick_files() else { return };
-    let r = files
-        .iter()
-        .map(|f| packs::read_air_source(f))
-        .collect::<Result<Vec<_>, _>>()
-        .and_then(|src| packs::air_pack(&src, "Air band", None))
-        .map_err(|e| e.0);
-    pack_done(ui, r, "air");
-}
-
-fn pack_write(ui: &AppWindow) {
-    if !radio_allowed(ui) || reader_holds_port(ui) {
-        return;
-    }
-    with_port(ui, pack_write_on);
-}
-
-/// pack_write once the port is known (crate::with_port).
-fn pack_write_on(ui: &AppWindow, found: Option<String>) {
-    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
-    if !radio_allowed(ui) || reader_holds_port(ui) {
-        return;
-    }
-    let Some(port) = found else {
-        set_message(ui, &tr("radio_nocable"), "warning");
-        return;
-    };
-    let Some(pack) = with(|st| st.pack.clone()) else { return };
-    let argv = vec!["write".into(), "--port".into(), port, "--pack".into(), s(&pack)];
-    run_tool(ui, "datapack", argv, true, move |ui, err| match err {
-        None => set_message(ui, &tr("msg_pack_written"), "success"),
-        Some(e) => set_message(ui, &trf("msg_failed", &e.record()), "danger"),
     });
 }
 
@@ -1916,7 +2065,9 @@ pub fn demo(ui: &AppWindow) {
     app.set_backups_text(i18n::tf(&lang, "backups_found", "3").into());
     app.set_installed_text(updates::installed_text(&known.installed, &lang).into());
     app.set_version_line(updates::version_text(&lang, ddm32_core::app_info::VERSION, &known).into());
-    app.set_title_text(updates::title_text(&lang, ddm32_core::app_info::VERSION, &known).into());
+    app.set_title_text(
+        format!("{}{}", updates::title_text(&lang, ddm32_core::app_info::VERSION, &known), dev_title(&lang)).into(),
+    );
     app.set_installed_firmware(updates::installed_short(&known, &lang).into());
     app.set_port_missing("".into());
     app.set_check_error("".into());
@@ -1924,6 +2075,9 @@ pub fn demo(ui: &AppWindow) {
     app.set_disc_open(false);
     app.set_test_confirm_open(false);
     app.set_force_close_open(false);
+    app.set_res_confirm_open(false);
+    ui.global::<Radio>().set_zone_picker_open(false);
+    ui.global::<Radio>().set_health_auto(false);
     ui.global::<Radio>().set_disclaimer_ok(true);
     demo_ports(ui, &lang);
     app.set_app_update_text(i18n::tf(&lang, "pu_available", "3.1.0").into());
@@ -1964,11 +2118,110 @@ pub fn demo(ui: &AppWindow) {
         },
     ])));
     app.set_backups_folder("C:\\Users\\…\\AppData\\Local\\Programs\\DDM32 Plus\\backups".into());
-    app.set_pack_text(i18n::tf(&lang, "msg_pack_ready", "type 1 format 1 sequence 0 \"RadioID\" 2 IDs").into());
-    app.set_pack_ready(true);
+    packs::demo(ui, &lang);
+    help::show_in(ui, &lang, "C:\\Users\\…\\AppData\\Local\\Programs\\DDM32 Plus\\backups");
+    app.set_res_status(
+        format!(
+            "{}\n{}",
+            i18n::tf(&lang, "res_chosen", "dm32-20261121"),
+            i18n::tn(&lang, "res_plan_summary", &["23", "0x0C000", "0x22000"])
+        )
+        .into(),
+    );
+    demo_versions(ui, &lang);
     app.set_version(ddm32_core::app_info::VERSION.into());
     app.set_key_id(ddm32_core::releases::PUBLIC_KEY_ID.into());
     app.set_data_folder("C:\\Users\\…\\AppData\\Local\\Programs\\DDM32 Plus".into());
+}
+
+/// A page by its `--show` name (the C# names, and this program's own).
+pub fn show_page_key(key: &str) -> Option<i32> {
+    Some(match key {
+        "home" => 0,
+        "update" => 1,
+        "restore" | "backups" => 2,
+        "packs" => 3,
+        "settings" => 4,
+        "about" => 5,
+        "health" => 7,
+        "live" => 8,
+        "channels" => 9,
+        "searchlog" => 10,
+        "versions" => 11,
+        "help" => 12,
+        _ => return None,
+    })
+}
+
+/// `--show PAGE[:demo|:FOLDER]` (screenshots, demos; the C# MainWindow.ShowFromArgs): opens a page; health:demo and
+/// live:demo show made-up readings, channels:FOLDER that backup's codeplug. Navigation and file reads only: a radio
+/// step still needs its own button. False when the page is unknown.
+pub fn show_from_args(ui: &AppWindow, spec: &str) -> bool {
+    let (key, rest) = match spec.split_once(':') {
+        Some((k, r)) => (k, Some(r)),
+        None => (spec, None),
+    };
+    let Some(page) = show_page_key(key) else { return false };
+    navigate(ui, page);
+    let lang = with(|s| s.lang.clone());
+    match (key, rest) {
+        ("health" | "live", Some("demo")) => {
+            radio_pages::demo(ui, &lang);
+            // made-up readings only: no reader runs, so nothing holds the port
+            ui.global::<Radio>().set_live_running(false);
+        }
+        ("channels", Some(folder)) if !folder.is_empty() => channels::open_backup(ui, Path::new(folder)),
+        _ => {}
+    }
+    true
+}
+
+/// Example versions page (screenshots, demo): a newer stable, the one on the radio, a beta, a test build, a legacy one.
+pub fn demo_versions(ui: &AppWindow, lang: &str) {
+    let app = ui.global::<App>();
+    let t = |k: &str| i18n::t(lang, k);
+    let row = |v: &str, label: &str, kind: &str, st: Vec<String>, notes: &str| VerRow {
+        version: v.into(),
+        label: t(label).into(),
+        kind: kind.into(),
+        state: st.join(", ").into(),
+        notes: notes.into(),
+        notes_both: format!("TR: {notes}\nEN: {notes}").into(),
+        installable: kind != "legacy",
+    };
+    app.set_ver_rows(ModelRc::new(VecModel::from(vec![
+        row(
+            "1.2.0-alpha.1",
+            "label_test",
+            "test",
+            vec![t("state_newer"), t("state_not_downloaded"), t("state_test")],
+            "P25 search engine test",
+        ),
+        row("1.1.0-beta.2", "label_beta", "beta", vec![t("state_newer"), t("state_downloaded")], "Beta: channels view"),
+        row("1.0.1", "label_latest", "latest", vec![t("state_newer"), t("state_not_downloaded")], "DMR audio fix"),
+        row(
+            "1.0.0",
+            "label_stable",
+            "stable",
+            vec![t("state_on_radio"), t("state_downloaded")],
+            "First stable release",
+        ),
+        row("1.0.0-beta.3", "label_legacy", "legacy", vec![t("state_older"), t("state_legacy")], ""),
+    ])));
+    app.set_ver_selected(2);
+    app.set_ver_checking(false);
+    app.set_ver_status(i18n::tf(lang, "ver_checked", "5").into());
+    app.set_ver_status_kind("success".into());
+    app.set_ver_last_check(versions::last_check(lang, Some("2026-11-24T09:41:00Z")).into());
+    app.set_ver_banner(
+        i18n::t(lang, "update_newer").replacen("{}", "1.0.1 (En yeni)", 1).replacen("{}", "1.0.0", 1).into(),
+    );
+    app.set_ver_rejected(
+        format!("{}\nv0.9.9-test: signature does not verify\nv0.9.8: no signed manifest", t("ver_rejected")).into(),
+    );
+    app.set_ver_key(i18n::tf(lang, "ver_key", ddm32_core::releases::PUBLIC_KEY_ID).into());
+    app.set_ver_note("".into());
+    app.set_ver_details(false);
 }
 
 /// Example cable picker contents (screenshots, demo): two CH340 cables, Auto on COM14, a USB serial adapter and a
