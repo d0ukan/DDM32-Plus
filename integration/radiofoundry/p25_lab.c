@@ -314,6 +314,37 @@ static void line_hex3(line_t *l,uint16_t v)
     }
     *l->p='\0';
 }
+#if CONFIG_P25_EXTRAS
+/* DM32 Plus: an emergency call on a channel that does not say its NAC (Any, or another NAC): Home's forms keep the NAC.
+ * "EMERGENCY TG65535 ID16777214 $1C8" (wide) | "EMG TG65535 ID16777214 $1C8" (27 characters: the 8 px font) |
+ * "EMG ID16777214 $1C8" (the caller and the NAC: 19 characters, any font). No BER here, the room is the NAC's. A
+ * unit-to-unit emergency says "Private 77285>1234" in the first two */
+static size_t emergency_nac_line(char *out,size_t cap,uint16_t tg,uint32_t src,uint32_t target,bool unit,uint16_t heard)
+{
+    line_t l={out,cap,false};
+    for(unsigned form=0;form<3u;form++) {
+        line_str(&l,form?"\x1f":"\x1d");
+        line_str(&l,form?"EMG":TR("EMERGENCY"));
+        line_str(&l," ");
+        if(form==2u && src) {
+            line_str(&l,"ID");line_u32(&l,src);
+        } else if(unit) {
+            line_str(&l,TR("Private"));line_str(&l," ");
+            line_u32(&l,src);line_str(&l,">");line_u32(&l,target);
+        } else {
+            line_str(&l,"TG");line_u32(&l,tg);
+            if(src){line_str(&l," ID");line_u32(&l,src);}
+        }
+        line_str(&l," ");
+#if CONFIG_NAC_DEC
+        line_str(&l,"$");
+#endif
+        line_hex3(&l,heard);
+    }
+    line_str(&l,"\x1e");
+    return (size_t)(l.p-out);
+}
+#endif
 size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
 {
     if(!out || !cap)return 0;
@@ -346,6 +377,9 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
         short_nac=true;
 #endif
     }
+#if CONFIG_P25_EXTRAS
+    if(short_nac && (kind&P25_LAB_EMERGENCY))return emergency_nac_line(out,cap,tg,src,target,unit,heard_nac);
+#endif
 #if CONFIG_SIGNAL_QUALITY
     unsigned alts=short_nac?4u:3u;   /* the last one: TG, ID and NAC without BER (24 characters of a 9 px font) */
 #else

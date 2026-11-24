@@ -371,6 +371,7 @@ __pycache__/
 !/tests/plus/test_p25x.c
 !/tests/plus/test_p25x_worker.c
 !/tests/plus/test_p25rxnac.c
+!/tests/plus/test_ui_p25rxnac.c
 !/tests/plus/test_ui_p25x.c
 !/tests/plus/p25_lc_build.h
 !/tests/plus/test_p25_mode2.c

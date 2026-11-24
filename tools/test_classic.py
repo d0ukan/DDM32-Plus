@@ -927,6 +927,16 @@ def main():
          '-DCONFIG_P25_TXNAC=1','-DCONFIG_CALL_LOG=1','-DCONFIG_P25_CALLER=1','-DCONFIG_P25_EXTRAS=1','-DCONFIG_LANG_TR=1','-I'+str(host),
          str(APP/'core/dpmr/dpmr.c'),str(APP/'core/radio/vfox.c')],cwd=host)
     run([OUT/'test_ui_mwheard'],cwd=host)
+    # DDM32 Plus the NAC a P25 call came on, on Home's caller line with the real fonts (tests/plus/test_ui_p25rxnac.c):
+    # worst-case numbers, normal and Large text, the simulator's layout checks (the worker's forms stubbed)
+    argv_rn=[str(ROOT/'tests/plus/test_ui_p25rxnac.c') if a==str(ROOT/'tests/plus/test_ui_vfox.c') else a for a in argv]
+    argv_rn[argv_rn.index('-o')+1]=str(OUT/'test_ui_p25rxnac')
+    run([*argv_rn,'-DCONFIG_P25_ANY=1','-DCONFIG_DEV_TX=1','-DCONFIG_YSF=1','-DCONFIG_NXDN=1','-DCONFIG_DPMR=1',
+         '-DCONFIG_NAC_DEC=1','-DCONFIG_DMR_ANY=1','-DCONFIG_MULTI_WATCH=1','-DCONFIG_VFO_MODES=1','-DCONFIG_P25_NATIVE=1',
+         '-DCONFIG_P25_TXNAC=1','-DCONFIG_CALL_LOG=1','-DCONFIG_P25_CALLER=1','-DCONFIG_P25_EXTRAS=1',
+         '-DCONFIG_SIGNAL_QUALITY=1','-DCONFIG_LANG_TR=1','-I'+str(host),str(APP/'core/dpmr/dpmr.c'),
+         str(APP/'core/radio/vfox.c')],cwd=host)
+    run([OUT/'test_ui_p25rxnac'],cwd=host)
     # DM32 Plus separate RX / TX NAC: the editor's and VFO settings' rows (tests/plus/test_ui_p25nac.c)
     p25nac.ui(argv,ROOT/'tests/plus/test_ui_vfox.c',['-DCONFIG_P25_ANY=1','-DCONFIG_DEV_TX=1','-DCONFIG_YSF=1',
         '-DCONFIG_NXDN=1','-DCONFIG_DPMR=1','-DCONFIG_NAC_DEC=1','-DCONFIG_DMR_ANY=1','-DCONFIG_MULTI_WATCH=1',

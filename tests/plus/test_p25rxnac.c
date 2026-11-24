@@ -136,17 +136,39 @@ int main(void)
     CHECK(p25_lab_p25_caller_line(home,sizeof home,false)==0 && p25_lab_p25_caller_line(pane,sizeof pane,true)==0);
     printf("%s a new receive: no caller line, no old NAC\n",failures==before?"ok  ":"FAIL");
 
-    /* Emergency and unit-to-unit calls on Any, informational: widths of the forms Home takes */
+    /* An emergency on Any keeps the NAC: "EMERGENCY ..." | "EMG TG ID $NAC" | "EMG ID $NAC"; the 8 px font takes the
+     * second at the worst case, the 9 px font the last (19 characters), shorter numbers the second at 9 px */
     for(unsigned tr_on=0;tr_on<2u;tr_on++) {
         tr_turkish=(int)tr_on;
+        before=failures;
+        char shown[96],want[160];
         any_call(0x1C8,65535,16777214u,0x80);
         CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0);
-        CHECK(strlen(home)<sizeof home-1u && home[strlen(home)-1]=='\x1e' && strstr(home,"$1C8"));
-        char shown[96];
+        snprintf(want,sizeof want,"\x1d%s TG65535 ID16777214 $1C8\x1f" "EMG TG65535 ID16777214 $1C8\x1f" "EMG ID16777214 $1C8\x1e",
+                 tr_on?"AC\xC4\xB0L DURUM":"EMERGENCY");
+        CHECK(!strcmp(home,want));
         pick(home,9,shown);
-        printf("info %s emergency worst case at 9 px: \"%s\" (%d px)\n",tr_on?"TR":"EN",shown,(int)strlen(shown)*9);
+        CHECK(!strcmp(shown,"EMG ID16777214 $1C8") && (int)strlen(shown)*9<=SAFE_W);
+        pick(home,8,shown);
+        CHECK(!strcmp(shown,"EMG TG65535 ID16777214 $1C8") && (int)strlen(shown)*8<=SAFE_W);
+        any_call(0x659,101,77285,0x80);
+        CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0);
+        pick(home,9,shown);
+        CHECK(!strcmp(shown,"EMG TG101 ID77285 $659") && (int)strlen(shown)*9<=SAFE_W);
+        printf("%s %s emergency on Any keeps the NAC\n",failures==before?"ok  ":"FAIL",tr_on?"TR":"EN");
     }
     tr_turkish=0;
+    /* An emergency unit-to-unit call on Any: "Private" in the wide forms, the caller and the NAC in the last */
+    before=failures;
+    lc_unit(lc,0x80,1234,77285);
+    build_call(0x1C8,0,lc,lc);
+    clock_ms=depth=turn=0;callback=NULL;maximum_ms=rec_count*30u+3000u;
+    CHECK(p25_lab_set_channel(0xF7E,0x293,0,0,1));
+    CHECK(p25_lab_channel_rx(433500000u));
+    if(!setjmp(finished))worker_fn(NULL);
+    CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0);
+    CHECK(!strcmp(home,"\x1d" "EMERGENCY Private 77285>1234 $1C8\x1f" "EMG Private 77285>1234 $1C8\x1f" "EMG ID77285 $1C8\x1e"));
+    printf("%s emergency unit-to-unit on Any keeps the NAC\n",failures==before?"ok  ":"FAIL");
     printf("P25 RX NAC: %u failures\n",failures);
     return failures?1:0;
 }
