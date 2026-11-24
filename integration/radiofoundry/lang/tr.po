@@ -161,24 +161,24 @@ msgid "Back"
 msgstr "Geri"
 
 #: core/ui/ui_almanac.c
-msgid "Sun up/down"
-msgstr "Güneş doğ/bat"
+msgid "Sun"
+msgstr "Güneş"
 
 #: core/ui/ui_almanac.c
-msgid "Dawn/dusk"
-msgstr "Şafak/alacakaranlık"
+msgid "Dawn"
+msgstr "Şafak"
 
 #: core/ui/ui_almanac.c
 msgid "Day "
 msgstr "Gün "
 
 #: core/ui/ui_almanac.c
-msgid "no sunrise or sunset"
-msgstr "gün doğumu/batımı yok"
+msgid "no rise/set"
+msgstr "doğ/bat yok"
 
 #: core/ui/ui_almanac.c
 msgid "% lit, "
-msgstr "% aydınlık, "
+msgstr "% ışık, "
 
 #: core/ui/ui_almanac.c
 msgid " days"

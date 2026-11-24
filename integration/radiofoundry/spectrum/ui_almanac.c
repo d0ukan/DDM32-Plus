@@ -33,7 +33,7 @@ static int row(int y, const char *label, int16_t a, int16_t c)
 	char buf[24];
 	sbuf_t b;
 	const font_t *f = ui_layout.medium;
-	gfx_text(f, 0, y, label, ui_col.dim);
+	gfx_text(f, 0, y, label, ui_col.dim);	/* a short word: the two times (12 characters) own the right of the row */
 	sb_init(&b, buf, sizeof buf);
 	sb_hhmm(&b, a);
 	sb_str(&b, "  ");
@@ -95,15 +95,15 @@ static void almanac_draw(void)
 	sb_u32(&b, (uint32_t)z % 60u, 2);
 	gfx_text(s, 0, y, buf, ui_col.dim);
 	y += s->h + 4;
-	y = row(y, TR("Sun up/down"), a.rise_min, a.set_min);
-	y = row(y, TR("Dawn/dusk"), a.dawn_min, a.dusk_min);
+	y = row(y, TR("Sun"), a.rise_min, a.set_min);
+	y = row(y, TR("Dawn"), a.dawn_min, a.dusk_min);
 	sb_init(&b, buf, sizeof buf);
 	sb_str(&b, TR("Day "));
 	if (a.rise_min != ALMANAC_NONE && a.set_min != ALMANAC_NONE) {
 		int16_t len = (int16_t)((a.set_min - a.rise_min + 1440) % 1440);
 		sb_hhmm(&b, len);
 	} else {
-		sb_str(&b, TR("no sunrise or sunset"));
+		sb_str(&b, TR("no rise/set"));
 	}
 	gfx_text(m, 0, y, buf, ui_col.fg);
 	y += m->h + 6;
