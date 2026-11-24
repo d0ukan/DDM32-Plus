@@ -65,6 +65,24 @@ Windows, Linux and macOS; host-tested only (fakes, no serial port, no network), 
 - The wizard's firmware download reports back like every other worker; "Close anyway?" closes when a radio write
   starts and a refused "Yes" says why; start-up never rewrites an unreadable settings.json, and `--demo` saves no
   channel.
+- The window gets what C# 2.0.0 users had (host-tested only, no radio run yet; `rust/README.md` "The C# 2.0.0
+  pages"):
+  - Versions page: every signed version with its label and state (on the radio, newer / older, downloaded, old names,
+    test), notes in both languages, Check for updates with the last check's time and error, the releases that were
+    not listed and why, the signing key, the program update; "Switch to this version" opens the wizard at it.
+  - Backups and going back: "Back to the previous version", "Back to stock firmware" (the C# `restore_previous_backup`
+    / `stock_backups`, now also written by this program), "Choose another backup folder...", and a Yes / No question
+    before every restore (it used to start at once).
+  - Data packs: read the radio's packs (read only) or a backup's, RadioID download (after a Yes), countries (no longer
+    fixed to Turkey) and pack names (the C# `pack_*` keys), several AD 2 PDFs with Clear, a saved .dpk, separate
+    writes for the RadioID and the air band pack, each asking first.
+  - My channels: zone and mode filters, all columns, sort by any column, zone double click, another backup, CSV of
+    the rows shown.
+  - Health: Check the cable and Read every 30 s (off by default).
+  - The window keeps its size and place (`settings.json` `window`, the C# format); offline Help; menu entries for
+    Versions, Help and Language; a developer build's title mark, local release folder and `--release-folder`;
+    `--show PAGE[:demo|:FOLDER]`.
+  - The search log keeps a Linux / macOS PC awake too (`systemd-inhibit` / `caffeinate`, when present).
 
 ## v1.0.1 (2026-11-24)
 

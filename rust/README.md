@@ -38,7 +38,9 @@ rust/
 
 A plain menu bar across the top of the window (every colour from the theme, light and dark): **Dosya / File** (Home,
 backups folder, logs folder, Settings, Exit), **Telsiz / Radio** (health, live, search log, update, backups and going
-back), **Araçlar / Tools** (my channels, data packs), **Yardım / Help** (user guide, GitHub page, Disclaimer, About). It only
+back), **Araçlar / Tools** (my channels, data packs, versions; a developer build adds "Local release folder..."),
+**Yardım / Help** (offline help, user guide on GitHub, GitHub page, Disclaimer, About) and **Dil / Language** (Türkçe /
+English at once, the current one ticked). It only
 navigates or opens folders and links, never starts a radio step; no page is left (and the window is not closed) while a radio step, the live
 panel or the search log holds the port; the same gate sits in `navigate()` (`App.menu-radio-locked`, `tests/menu.rs`). It is hidden on the first-start
 language screen. Menu bar: ui/menubar.slint.
@@ -130,6 +132,63 @@ and again to restart after its download, while anything of that is under way. Wh
 checked again every 24 h (not while anything is under way). A failed check is appended to `logs/update-check.log` and
 shown as a small dismissable line on Home. The program update follows the firmware list's rule: on the default
 channel, while no stable program build has been published, the betas are offered. Tests: `tests/updates.rs`.
+
+## The C# 2.0.0 pages (v1.1.0 candidate)
+
+Since v1.1.0 (candidate) the window has what a normal user used in the C# 2.0.0 program; host-tested only
+(`tests/parity.rs`, the screenshots), not run against a radio.
+
+- **Versions** (Home, Tools > Versions; `src/versions.rs`): every signed version (legacy ones too) with its label
+  (Latest / Stable / Beta / Test / Old) and its state: on the radio, newer / older than the radio's (from what the
+  program knows, see above), downloaded / not downloaded, old names (not installable), test / alpha (asks first), from
+  a local folder. The selected row shows its notes in Turkish and English. "Check for updates" (the start-up question
+  is not asked from it), "Last check" (the list's time, else the C# key `last_check_utc`, which every successful check
+  now writes), a failed check with its error (the list then from the signed copies on this computer), the start-up
+  check box and the channel (as in Settings), the program update card, and under Details the signing key and every
+  release that was not listed with its reason (signature, manifest format, release mismatch, no signed manifest).
+  "Switch to this version" opens the update wizard at its first step with that version selected (added to the wizard's
+  list for that time when the channel does not offer it); a test version still asks Yes / No at Next; a legacy one is
+  only explained. Never a radio step.
+- **Backups and going back** (`src/restore.rs`): the C# shortcuts **Back to the previous version** (settings.json
+  `restore_previous_backup`, now written after every verified install with a backup and after one that stopped after
+  its writes began; else this program's install record's backup) and **Back to stock firmware** (`stock_backups`, now
+  recorded whenever the wizard's check or a planned restore sees a stock backup), **Choose another backup folder...**
+  (a verified backup only), and the list of every backup found. Old Turkish paths (`yedekler`, ...) follow the moved
+  folders. Choosing only detects and plans (files only) and shows the chosen backup and "N sectors will be written
+  (first - last)"; **Restore** then asks Yes / No (No by default) with the backup's path, the plan and "You are
+  responsible. Is your backup ready?" before the radio step starts, behind the disclaimer and the port lock. Limit:
+  a stock backup taken by 3.0.0 is not in `stock_backups`; "Choose another backup folder..." or the list finds it.
+- **Data packs** (`src/packs.rs`): what the radio holds (**Read the radio's packs**: the data pack tool's read-only
+  `read` over the CPS protocol, a user-clicked radio step behind the disclaimer) or what a verified backup's data chip
+  image holds (**Show from a backup...**, files only); the RadioID pack: Open radioid.net, **Download user.csv**
+  (radioid.net only, after a Yes / No, into `packs/user.csv`, on a worker), Choose a CSV..., **Countries** (comma
+  separated, as RadioID.net writes them; default "Turkey") and **Name** (16 characters at most), Build; the air band
+  pack: Open the DHMI AIP page, Add AD 2 PDFs... (read on a worker), Clear, Name, Build; **Write the RadioID pack** /
+  **Write the air band pack** (each asks Yes / No with the pack, the port, both slots and the sector count; the write
+  passes the screen line as the C# program does) and **Choose a .dpk file...**. Countries and names are the C# keys
+  (`pack_countries`, `pack_radioid_name`, `pack_air_name`); packs are saved as `packs/radioid-DATE.dpk` /
+  `air-DATE.dpk` as the C# program names them.
+- **My channels** (`src/channels.rs`): a view-only warning, a zone filter and a mode filter (each a small picker),
+  **All columns** (every field but the two made from others; the table then scrolls sideways), a sort by any column
+  title (numbers as numbers, again for the other way round), a double click on a zone shows its channels, **Open
+  another backup...** (a folder or a 16 MiB image; it stays chosen while the program runs), "Showing N of M rows", and
+  the CSV of exactly the rows shown.
+- **Health**: the cable card with **Check the cable** (the device list again; no port opened) and **Read every 30 s**
+  (off by default, ends when the page is left; each read only while nothing else holds the port, a cable is known and
+  the disclaimer is accepted), and the last read's time.
+- **Window**: size and place kept in `settings.json` `window` in the C# format (`x`, `y`, `w`, `h`, `max`, logical
+  pixels) so both programs agree; restored only when at least the window's minimum and a 120 x 40 px grip of it lies on
+  the screens there are now (Windows: the virtual screen at the system DPI, as WPF measures it; elsewhere only an
+  absurd place is refused); a maximized or minimized window keeps the last normal place. **Help** is an offline page
+  with the C# help's eight common situations (button names are this program's), one click from the full guide.
+- **Developer builds** (`--features developer`): the title says "DEVELOPER BUILD - radio access on / WRITE on" as the
+  C# one, Tools > **Local release folder...** and `--release-folder PATH` load a signed release from a folder (verified
+  like a download; its versions stay in the list after a check). Every build has `--show PAGE` (`home`, `update`,
+  `versions`, `restore`, `packs`, `health`, `live`, `searchlog`, `channels`, `settings`, `about`, `help`),
+  `--show health:demo` / `live:demo` (made-up readings; nothing holds the port) and `--show channels:FOLDER`.
+- **Search log keep-awake** on Linux and macOS: a `systemd-inhibit --what=sleep:idle ... tail --pid=PID -f /dev/null`
+  / `caffeinate -i -w PID` child process while the log runs (ended with the log, and by itself with the program);
+  without the tool nothing happens and the log reconnects after a sleep as before. Not tried on a real Linux or Mac.
 
 ## Radio access
 

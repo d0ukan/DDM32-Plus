@@ -120,6 +120,27 @@ install is locked and the page points to "Yedekler ve geri dönüş".
   Skip, Later as the default button; dialogs modal for the keyboard (`tests/modal.rs`); port listing on a worker
   thread; the port choice locked through the wizard's radio steps; a gone port said on Home and in the header.
 
+### Done 2026-11-24, second part (branch rsgap2): the C# 2.0.0 pages
+
+The gap list of `docs/csharp-vs-rust-2026-11-24.md` (lab repo) for what a normal user used (README "The C# 2.0.0
+pages"; `tests/parity.rs`, screenshots, a11y and hidpi passes extended):
+
+- Versions page (`src/versions.rs`, `ui/pages.slint`): states, notes in both languages, check now with time and
+  error, rejected releases with their reason, key, program update, "Switch to this version" (wizard only).
+- Restore shortcuts (`src/restore.rs`): previous version / stock / another folder, the C# keys written again, a Yes /
+  No question before every restore.
+- Data packs (`src/packs.rs`): read from the radio (read only) or a backup, RadioID download with countries and names,
+  several PDFs, .dpk, separate writes with a question each.
+- My channels (`src/channels.rs`): zone / mode filters, all columns (sideways scroll), sort, zone double click,
+  another backup.
+- Health: cable check, read every 30 s. Window place (`src/window.rs`, the C# `window` key), offline help
+  (`src/help.rs`), menu Versions / Help / Language, developer title + local release folder + `--release-folder`,
+  `--show`. Linux / macOS keep-awake for the search log (`ddm32-core` `sys::KeepAwake`).
+- Not done: the wizard's "existing backup" folder picker (release builds keep `BACKUP_FOLDER_PROMPT = DEVELOPER`; the
+  restore page has the folder picker), the C# Health page's "last backup" card, a combined universal mode/zone combo
+  box (pickers instead). Not tried: the keep-awake helpers on a real Linux / Mac, the window place on a multi-monitor
+  PC with mixed DPI.
+
 ### Still to do in stage 2
 
 - Done 2026-11-21 (third run): keyboard order, Enter on the primary button, screen reader names, 150 % / 200 %
