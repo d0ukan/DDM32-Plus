@@ -123,6 +123,8 @@ export component PageHeader inherits Rectangle {
     in property <string> back-text;
     // the owner's mark before the name (Home)
     in property <image> logo;
+    // a small line under the name (Home: the author's mark)
+    in property <string> subtitle;
     callback back-clicked;
     background: Theme.surface;
     min-height: hl.preferred-height;
@@ -147,7 +149,13 @@ export component PageHeader inherits Rectangle {
             accessible-role: image;
             accessible-label: "DDM32+";
         }
-        Title { text: root.heading; vertical-alignment: center; horizontal-stretch: 1; }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 0px;
+            Title { text: root.heading; vertical-alignment: center; }
+            if root.subtitle != "" : Muted { text: root.subtitle; font-size: Theme.font-small; overflow: elide; }
+        }
         @children
     }
     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
