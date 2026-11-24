@@ -480,11 +480,16 @@ impl UpdateProcesses for RealProcesses {
 /// Whether a process id still runs (best effort, no extra dependency).
 fn process_alive(pid: u32) -> bool {
     if cfg!(windows) {
-        std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
+        let mut cmd = std::process::Command::new("tasklist");
+        cmd.args(["/FI", &format!("PID eq {pid}"), "/NH"]);
+        // the helper is a window program: without this every poll (4 a second) would flash a console window
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        cmd.output().map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string())).unwrap_or(false)
     } else {
         Path::new(&format!("/proc/{pid}")).exists()
             || std::process::Command::new("kill").args(["-0", &pid.to_string()]).status().is_ok_and(|s| s.success())

@@ -17,6 +17,21 @@ pub const PORT_AUTO_KEY: &str = "port_auto";
 /// A version the start-up update question was told to skip ("Skip this version"); it can still be chosen by hand.
 pub const SKIP_PROGRAM_KEY: &str = "skip_program_version";
 pub const SKIP_FIRMWARE_KEY: &str = "skip_firmware_version";
+/// The release channel this program offers (0 Latest, 1 Beta, 2 Test / Alpha); the C# program used `include_beta`.
+pub const CHANNEL_KEY: &str = "channel";
+/// Keys only the C# program writes (this program keeps them but never writes them): a settings file holding one of
+/// them came from a C# install, whose `include_beta` default (true) showed the betas.
+pub const NET_ONLY_KEYS: [&str; 9] = [
+    "window",
+    "last_check_utc",
+    "installed_firmware",
+    "installed_sha256",
+    "stock_backups",
+    "restore_previous_backup",
+    "pack_countries",
+    "pack_radioid_name",
+    "pack_air_name",
+];
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -102,6 +117,31 @@ impl Settings {
 
     pub fn set_include_beta(&self, v: bool) -> std::io::Result<()> {
         self.save(INCLUDE_BETA_KEY, Value::Bool(v))
+    }
+
+    /// The release channel: 0 Latest (stable only), 1 Beta (stable and beta), 2 Test / Alpha (all). This program's own
+    /// `channel` when set; otherwise taken over from the C# program, whose `include_beta` (default true) showed the
+    /// betas: `include_beta` itself when present, Beta when the file is one the C# program wrote (one of its own keys
+    /// is there), and Latest only for a fresh install.
+    pub fn channel(&self) -> i32 {
+        let s = self.load();
+        if let Some(c) = s.get(CHANNEL_KEY).and_then(Value::as_i64) {
+            return c.clamp(0, 2) as i32;
+        }
+        match s.get(INCLUDE_BETA_KEY).and_then(Value::as_bool) {
+            Some(b) => b as i32,
+            None if NET_ONLY_KEYS.iter().any(|k| s.contains_key(*k)) => 1,
+            None => 0,
+        }
+    }
+
+    /// Saves the channel and, for the C# program during the hand-over, `include_beta` (Beta and Test show betas).
+    pub fn set_channel(&self, channel: i32) -> std::io::Result<()> {
+        let channel = channel.clamp(0, 2);
+        let mut s = self.load();
+        s.insert(CHANNEL_KEY.into(), Value::from(channel));
+        s.insert(INCLUDE_BETA_KEY.into(), Value::Bool(channel >= 1));
+        self.write(&s)
     }
 
     /// Light unless "dark" was chosen.

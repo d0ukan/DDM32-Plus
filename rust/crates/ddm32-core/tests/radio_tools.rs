@@ -54,6 +54,10 @@ fn inputs_are_the_python_inputs() {
 fn embedded_data_equals_the_csharp_copies() {
     let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let win = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../win/src/DDM32Plus.Core/Radio/Data");
+    if !win.is_dir() {
+        // the C# program was removed: nothing left to compare with (the pinned hashes above still hold the bytes)
+        return;
+    }
     for f in ["ram-monitor.bin", "codec-dm32.json"] {
         assert_eq!(std::fs::read(here.join(f)).unwrap(), std::fs::read(win.join(f)).unwrap(), "{f}");
     }

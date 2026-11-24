@@ -5,6 +5,7 @@
 //! come back to the window as progress. Nothing here retries a failed write. Backups always go to the program's own
 //! `backups` and are found by themselves (ddm32_core::storage::backups); the user never chooses a folder.
 
+pub mod disclaimer;
 pub mod i18n;
 pub mod radio_pages;
 pub mod updates;
@@ -93,6 +94,12 @@ pub struct State {
     pub last_check: Option<std::time::Instant>,
     /// The window's 3 s tick: port rescan, the waiting question, the 24 h re-check
     pub tick: Option<slint::Timer>,
+    /// The test / alpha version the user said Yes for (its download goes ahead without asking again)
+    pub test_ok: Option<String>,
+    /// The window's close button was pressed while the live view or the search log ran: they were told to stop, and
+    /// the window closes when both have ended (or after CLOSE_FALLBACK)
+    pub close_pending: bool,
+    pub close_timer: Option<slint::Timer>,
 }
 
 thread_local! {
@@ -101,6 +108,11 @@ thread_local! {
 
 pub(crate) fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("controller set up")))
+}
+
+/// The controller's state from outside (the tests drive the close guard with it).
+pub fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
+    with(f)
 }
 
 pub(crate) fn tr(key: &str) -> String {
@@ -157,7 +169,10 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
     ui.global::<Tr>().set_lang(lang.clone().into());
     ui.global::<Theme>().set_dark(settings.theme() == SavedTheme::Dark);
     let app = ui.global::<App>();
-    app.set_channel(settings.load().get("channel").and_then(|v| v.as_i64()).unwrap_or(0) as i32);
+    // this program's channel, or the C# program's include_beta during the hand-over (Settings::channel)
+    app.set_channel(settings.channel());
+    let disclaimer_ok = settings.disclaimer_accepted(&disclaimer::version());
+    ui.global::<Radio>().set_disclaimer_ok(disclaimer_ok);
     app.set_auto_check(settings.auto_check());
     app.set_version(ddm32_core::app_info::VERSION.into());
     app.set_key_id(ddm32_core::releases::PUBLIC_KEY_ID.into());
@@ -209,6 +224,9 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             prompt_later: None,
             last_check: None,
             tick: None,
+            test_ok: None,
+            close_pending: false,
+            close_timer: None,
         })
     });
     with(|s| s.port_pref = s.settings.port_pref());
@@ -216,8 +234,18 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
     radio_pages::wire(ui);
     refresh(ui);
     if first_start {
+        // the language first; the disclaimer follows when the first page is left (navigate)
         app.set_page(6);
+    } else if !disclaimer_ok {
+        // never accepted, or its text changed since: asked before anything else
+        open_disclaimer(ui);
     }
+    // the window's own close button (and Alt+F4): refused while a step runs, the readers stopped first
+    let w = ui.as_weak();
+    ui.window().on_close_requested(move || match w.upgrade() {
+        Some(ui) => close_requested(&ui),
+        None => slint::CloseRequestResponse::HideWindow,
+    });
     // the last program update's result, once; old staging folders and zips go
     let updates = with(|s| s.paths.updates());
     // a hand-over started by C# 2.0.0-beta.2 or older wrote its result into the old guncelleme folder
@@ -275,7 +303,11 @@ pub fn busy_state(ui: &AppWindow) -> updates::Busy {
         port_held: app.get_menu_radio_locked(),
         wizard_active: app.get_wizard_active(),
         restore_ready: app.get_restore_ready(),
-        dialog_open: app.get_confirm_open() || app.get_prompt_open() || ui.global::<Radio>().get_picker_open(),
+        dialog_open: app.get_confirm_open()
+            || app.get_prompt_open()
+            || app.get_disc_open()
+            || app.get_test_confirm_open()
+            || ui.global::<Radio>().get_picker_open(),
     }
 }
 
@@ -465,7 +497,8 @@ fn wire(ui: &AppWindow) {
     app.on_set_channel(move |c| {
         let ui = w.unwrap();
         ui.global::<App>().set_channel(c);
-        with(|s| s.settings.save("channel", serde_json::json!(c))).ok();
+        // `channel` and, for the C# program during the hand-over, `include_beta`
+        with(|s| s.settings.set_channel(c)).ok();
         refresh(&ui);
     });
     app.on_set_auto_check(move |v| {
@@ -534,6 +567,29 @@ fn wire(ui: &AppWindow) {
     app.on_app_update(move || app_update(&w.unwrap()));
     let w = ui.as_weak();
     app.on_menu_action(move |a| menu_action(&w.unwrap(), &a));
+    let w = ui.as_weak();
+    app.on_disc_accept(move || accept_disclaimer(&w.unwrap()));
+    let w = ui.as_weak();
+    app.on_disc_reject(move || {
+        // nothing is saved: the radio steps stay off, and Home says how to read it again
+        w.unwrap().global::<App>().set_disc_open(false);
+    });
+    let w = ui.as_weak();
+    app.on_disc_toggle_lang(move || {
+        let ui = w.unwrap();
+        let app = ui.global::<App>();
+        let lang = if app.get_disc_lang() == "en" { "tr" } else { "en" };
+        show_disclaimer(&ui, lang, app.get_disc_readonly());
+    });
+    let w = ui.as_weak();
+    app.on_test_confirm_yes(move || {
+        let ui = w.unwrap();
+        let app = ui.global::<App>();
+        app.set_test_confirm_open(false);
+        let i = app.get_selected_version() as usize;
+        with(|s| s.test_ok = s.shown.get(i).map(|f| f.version().to_string()));
+        wizard_next(&ui);
+    });
     app.on_open_backups_folder(move || {
         let dir = with(|s| s.paths.backups());
         open_folder(&dir);
@@ -561,6 +617,8 @@ fn wire(ui: &AppWindow) {
     app.on_prompt_update_firmware(move || prompt_update_firmware(&w.unwrap()));
     let r = ui.global::<Radio>();
     let w = ui.as_weak();
+    r.on_open_disclaimer(move || open_disclaimer(&w.unwrap()));
+    let w = ui.as_weak();
     r.on_port_choose(move |name| {
         choose_port(&w.unwrap(), &name);
     });
@@ -582,7 +640,11 @@ fn close_prompt(ui: &AppWindow) -> Option<UpdateOffer> {
 /// dialog): the question's buttons do nothing then but close it (it is asked again later).
 fn blocked_besides_prompt(ui: &AppWindow) -> bool {
     let mut b = busy_state(ui);
-    b.dialog_open = ui.global::<App>().get_confirm_open() || ui.global::<Radio>().get_picker_open();
+    let app = ui.global::<App>();
+    b.dialog_open = app.get_confirm_open()
+        || app.get_disc_open()
+        || app.get_test_confirm_open()
+        || ui.global::<Radio>().get_picker_open();
     b.any()
 }
 
@@ -724,6 +786,7 @@ pub enum MenuAction {
     LogsFolder,
     Guide,
     GitHub,
+    Disclaimer,
     Exit,
 }
 
@@ -735,6 +798,7 @@ pub fn parse_menu_action(a: &str) -> Option<MenuAction> {
         "logs-folder" => MenuAction::LogsFolder,
         "guide" => MenuAction::Guide,
         "github" => MenuAction::GitHub,
+        "disclaimer" => MenuAction::Disclaimer,
         "exit" => MenuAction::Exit,
         _ => MenuAction::Page(a.strip_prefix("page:")?.parse().ok().filter(|p| (0..=10).contains(p) && *p != 6)?),
     })
@@ -760,6 +824,7 @@ fn menu_action(ui: &AppWindow, a: &str) {
         }
         MenuAction::Guide => open_folder(Path::new(&format!("{GITHUB_URL}#readme"))),
         MenuAction::GitHub => open_folder(Path::new(GITHUB_URL)),
+        MenuAction::Disclaimer => open_disclaimer(ui),
         MenuAction::Exit => {
             if app.get_menu_radio_locked() {
                 set_message(ui, &tr("m_exit_busy"), "warning");
@@ -795,6 +860,8 @@ fn navigate(ui: &AppWindow, page: i32) {
     if app.get_menu_radio_locked() {
         return;
     }
+    // leaving the first-start (language) page: the disclaimer comes next when it was not accepted yet
+    let from_first_start = app.get_page() == 6 && page != 6;
     set_message(ui, "", "info");
     clear_progress(&app);
     app.set_details("".into());
@@ -803,6 +870,7 @@ fn navigate(ui: &AppWindow, page: i32) {
         with(|s| {
             s.wizard = Wizard::new();
             s.package = None;
+            s.test_ok = None;
         });
         app.set_backup_choice(0);
         app.set_understood(false);
@@ -819,6 +887,141 @@ fn navigate(ui: &AppWindow, page: i32) {
     }
     refresh(ui);
     app.set_page(page);
+    if from_first_start && !ui.global::<Radio>().get_disclaimer_ok() {
+        open_disclaimer(ui);
+    }
+}
+
+// ---- the disclaimer ---------------------------------------------------------------------------------------------------
+
+/// Opens the disclaimer: to be accepted (the box ticked, then "I accept") while it is not, read only once it is.
+pub fn open_disclaimer(ui: &AppWindow) {
+    let lang = with(|s| s.lang.clone());
+    let accepted = ui.global::<Radio>().get_disclaimer_ok();
+    show_disclaimer(ui, &lang, accepted);
+}
+
+/// Fills the dialog in a language and opens it (also the screenshot tests; no state needed).
+pub fn show_disclaimer(ui: &AppWindow, lang: &str, readonly: bool) {
+    let app = ui.global::<App>();
+    let v = disclaimer::view(lang);
+    app.set_disc_lang(lang.into());
+    app.set_disc_title(v.title.into());
+    app.set_disc_intro(v.intro.into());
+    app.set_disc_points(ModelRc::new(VecModel::from(v.points.into_iter().map(SharedString::from).collect::<Vec<_>>())));
+    app.set_disc_outro(v.outro.into());
+    app.set_disc_outro_bold(v.outro_bold);
+    if !app.get_disc_open() {
+        app.set_disc_checked(false);
+    }
+    app.set_disc_readonly(readonly);
+    app.set_disc_open(true);
+}
+
+/// "I accept" with the box ticked: saved as the C# program saves it (settings.json `disclaimer`), the radio steps open.
+fn accept_disclaimer(ui: &AppWindow) {
+    let app = ui.global::<App>();
+    if !app.get_disc_checked() || app.get_disc_readonly() {
+        return;
+    }
+    let saved = with(|s| s.settings.accept_disclaimer(&disclaimer::version(), &client::now_utc()));
+    if let Err(e) = saved {
+        // not saved: the steps stay off rather than open without a record
+        set_message(ui, &trf("msg_failed", &e.to_string()), "danger");
+        app.set_disc_open(false);
+        return;
+    }
+    ui.global::<Radio>().set_disclaimer_ok(true);
+    app.set_disc_open(false);
+    set_message(ui, "", "info");
+    ui.global::<Radio>().set_message("".into());
+    if with(|s| s.prompt_pending) {
+        consider_prompt(ui);
+    }
+}
+
+/// Every radio step asks this first: refused (and said on screen) while the disclaimer is not accepted.
+pub(crate) fn radio_allowed(ui: &AppWindow) -> bool {
+    if ui.global::<Radio>().get_disclaimer_ok() {
+        return true;
+    }
+    let text = tr("disc_not_accepted");
+    set_message(ui, &text, "warning");
+    let r = ui.global::<Radio>();
+    r.set_message(text.into());
+    r.set_message_kind("warning".into());
+    false
+}
+
+// ---- the window's close button ----------------------------------------------------------------------------------------
+
+/// How long the close button waits for the live view and the search log to stop before it closes anyway (their files
+/// are written in the window's own thread, between two events, so none is ever left half written).
+pub const CLOSE_FALLBACK: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The window's close button, Alt+F4 or the OS asking the window to close (the C# OnClosing): refused while a radio
+/// step (backup, install, restore, pack write, health read) or a download runs; the live view and the search log are
+/// told to stop and the window closes once they have ended.
+pub fn close_requested(ui: &AppWindow) -> slint::CloseRequestResponse {
+    let app = ui.global::<App>();
+    let r = ui.global::<Radio>();
+    if app.get_busy() || r.get_busy() {
+        let text = tr("busy_close");
+        set_message(ui, &text, "warning");
+        r.set_message(text.into());
+        r.set_message_kind("warning".into());
+        return slint::CloseRequestResponse::KeepWindowShown;
+    }
+    let readers: Vec<_> = with(|s| [s.live_cancel.clone(), s.slog_cancel.clone()].into_iter().flatten().collect());
+    if readers.is_empty() {
+        return slint::CloseRequestResponse::HideWindow;
+    }
+    for c in &readers {
+        c.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    r.set_message(tr("closing_wait").into());
+    r.set_message_kind("info".into());
+    let first = with(|s| !std::mem::replace(&mut s.close_pending, true));
+    if first {
+        let timer = slint::Timer::default();
+        timer.start(slint::TimerMode::SingleShot, CLOSE_FALLBACK, || {
+            let _ = slint::quit_event_loop();
+        });
+        with(|s| s.close_timer = Some(timer));
+    }
+    slint::CloseRequestResponse::KeepWindowShown
+}
+
+/// A reader (live view, search log) ended: when the close button waits for it and nothing else runs, the window
+/// closes now. True when it does.
+pub fn reader_ended() -> bool {
+    let close = with(|s| s.close_pending && s.live_cancel.is_none() && s.slog_cancel.is_none());
+    if close {
+        let _ = slint::quit_event_loop();
+    }
+    close
+}
+
+// ---- the self-update start marker -------------------------------------------------------------------------------------
+
+/// How long after the window's event loop starts the marker is written (the C# program waits 1.5 s too): the window
+/// is up and drawing, not only created.
+pub const MARKER_DELAY: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// `--update-check FILE`: the file the update helper waits for (90 s), or None.
+pub fn start_marker_path(args: &[String]) -> Option<PathBuf> {
+    let i = args.iter().position(|a| a == ddm32_core::update::self_update::CHECK_ARG)?;
+    args.get(i + 1).filter(|m| !m.is_empty()).map(PathBuf::from)
+}
+
+/// Started by the update helper (`--update-check FILE`): writes the start marker once the event loop has run for
+/// MARKER_DELAY. Without it the helper (this program's or the C# program's) puts the old program back after 90 s.
+pub fn arm_start_marker(args: &[String]) {
+    if let Some(marker) = start_marker_path(args) {
+        slint::Timer::single_shot(MARKER_DELAY, move || {
+            let _ = ddm32_core::update::self_update::write_marker(&marker, ddm32_core::app_info::VERSION);
+        });
+    }
 }
 
 /// The versions the chosen channel offers (Latest: stable only; Beta: stable and beta; Test: all), never legacy.
@@ -1089,16 +1292,23 @@ pub fn cable_text(
 }
 
 fn wizard_next(ui: &AppWindow) {
+    if !radio_allowed(ui) {
+        return;
+    }
     let app = ui.global::<App>();
     match app.get_step() {
         0 => {
             let i = app.get_selected_version() as usize;
             let Some(fv) = with(|s| s.shown.get(i).cloned()) else { return };
-            if catalog::needs_confirmation(catalog::label_for(
+            // a test / alpha version: Yes / No first, No by default (the C# VersionsPage.OnSwitch)
+            let test = catalog::needs_confirmation(catalog::label_for(
                 &fv,
                 &with(|s| s.catalog.clone().unwrap_or_default().firmware),
-            )) {
-                set_message(ui, &tr("ch_test_d"), "warning");
+            ));
+            if test && with(|s| s.test_ok.as_deref() != Some(fv.version())) {
+                app.set_test_confirm_text(trf("ver_test_confirm", fv.version()).into());
+                app.set_test_confirm_open(true);
+                return;
             }
             app.set_busy(true);
             set_message(ui, &tr("msg_downloading"), "info");
@@ -1310,7 +1520,7 @@ fn reader_holds_port(ui: &AppWindow) -> bool {
 }
 
 fn start_backup(ui: &AppWindow) {
-    if reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
     let Some(port) = port() else {
@@ -1341,7 +1551,7 @@ fn start_backup(ui: &AppWindow) {
 }
 
 fn start_install(ui: &AppWindow) {
-    if reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
     let Some(port) = port() else {
@@ -1433,7 +1643,7 @@ fn restore_plan(ui: &AppWindow) {
 }
 
 fn start_restore(ui: &AppWindow) {
-    if reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
     let Some(port) = port() else {
@@ -1536,7 +1746,7 @@ fn pack_air(ui: &AppWindow) {
 }
 
 fn pack_write(ui: &AppWindow) {
-    if reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) {
         return;
     }
     let Some(port) = port() else {
@@ -1574,6 +1784,9 @@ pub fn demo(ui: &AppWindow) {
     app.set_port_missing("".into());
     app.set_check_error("".into());
     app.set_prompt_open(false);
+    app.set_disc_open(false);
+    app.set_test_confirm_open(false);
+    ui.global::<Radio>().set_disclaimer_ok(true);
     demo_ports(ui, &lang);
     app.set_app_update_text(i18n::tf(&lang, "pu_available", "3.1.0").into());
     app.set_app_update_available(true);

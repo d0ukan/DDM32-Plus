@@ -7,7 +7,7 @@ use ddm32_gui::radio_pages::{health_view, live_view, slog_searches, slog_stats_l
 use std::io::Read;
 
 fn fixtures() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../win/tests/DDM32Plus.Core.Tests/Fixtures")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
 }
 
 fn sample() -> Vec<u8> {

@@ -161,3 +161,6 @@ Signing:
    (`update::self_update::helper_main`) and the `--update-check FILE` marker, so the swap, the rollback and the user's
    data rules are the same. `backups`, `settings.json`, `releases`, `updates` and `packs` are never touched.
 4. From then on the Rust program updates itself from `app_rs`.
+5. Checked against the C# code on 2026-11-24 (`docs/handover.md`): no new C# release is needed; the Rust exe links the
+   C runtime statically (a C# user may lack the VC++ runtime) and writes the start marker only once its event loop
+   runs, so a window that cannot come up is rolled back. Still to prove on a real C# 2.0.0 install.

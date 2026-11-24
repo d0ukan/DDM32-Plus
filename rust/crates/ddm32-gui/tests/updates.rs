@@ -341,6 +341,8 @@ fn window(name: &str) -> (AppWindow, PathBuf, Settings) {
     let paths = AppPaths::new(&root);
     let settings = Settings::new(paths.settings_file());
     settings.set_language("en").unwrap();
+    // accepted: an open disclaimer holds the question back (disclaimer_holds_the_question below)
+    settings.accept_disclaimer(&ddm32_gui::disclaimer::version(), "2026-11-24T00:00:00Z").unwrap();
     let ui = AppWindow::new().unwrap();
     ddm32_gui::setup(&ui, paths, false);
     (ui, root, settings)
@@ -455,5 +457,25 @@ fn update_now_never_starts_a_radio_step() {
     app.invoke_app_update();
     assert!(!app.get_busy());
     assert_eq!(ddm32_gui::i18n::t("en", "pu_blocked"), app.get_app_update_text().as_str());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn disclaimer_holds_the_question() {
+    i_slint_backend_testing::init_no_event_loop();
+    let root = std::env::temp_dir().join(format!("ddm32-prompt-disc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let paths = AppPaths::new(&root);
+    Settings::new(paths.settings_file()).set_language("en").unwrap();
+    let ui = AppWindow::new().unwrap();
+    ddm32_gui::setup(&ui, paths, false);
+    let app = ui.global::<App>();
+    assert!(app.get_disc_open(), "not accepted yet: asked first");
+    ddm32_gui::catalog_loaded(&ui, Ok(catalog(&[("v9.0.0", None, Some("9.0.0"))])), true);
+    assert!(!app.get_prompt_open(), "the update question waits behind the disclaimer");
+    app.set_disc_checked(true);
+    app.invoke_disc_accept();
+    assert!(!app.get_disc_open());
+    assert!(app.get_prompt_open(), "and comes once it is accepted");
     let _ = std::fs::remove_dir_all(&root);
 }

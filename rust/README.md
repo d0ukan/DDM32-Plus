@@ -38,7 +38,7 @@ rust/
 
 A plain menu bar across the top of the window (every colour from the theme, light and dark): **Dosya / File** (Home,
 backups folder, logs folder, Settings, Exit), **Telsiz / Radio** (health, live, search log, update, backups and going
-back), **Araçlar / Tools** (my channels, data packs), **Yardım / Help** (user guide, GitHub page, About). It only
+back), **Araçlar / Tools** (my channels, data packs), **Yardım / Help** (user guide, GitHub page, Disclaimer, About). It only
 navigates or opens folders and links, never starts a radio step; no page is left (and the window is not closed) while a radio step, the live
 panel or the search log holds the port; the same gate sits in `navigate()` (`App.menu-radio-locked`, `tests/menu.rs`). It is hidden on the first-start
 language screen. Menu bar: ui/menubar.slint.
@@ -61,6 +61,26 @@ files-only build (no `radio` feature) hides the control. Tests: `tests/ports.rs`
 
 Dialogs (the update question, the cable picker, the no-backup confirmation) are modal for the keyboard too: the
 controls under the shade take no focus or click and read as disabled (`widgets.slint` `Modal`, `tests/modal.rs`).
+
+## Disclaimer, closing the window, test versions
+
+- **Disclaimer**: the C# program's text (tr + en, `src/disclaimer.rs`, byte for byte the resx values) is shown after
+  the first-start language question, again whenever its text changes, and read only from Help > Disclaimer. Until it
+  is accepted (box ticked, then "I accept") every radio step is off: the buttons (update wizard, restore, pack write,
+  health, live, search log) and the same check in Rust before any port is looked for (`radio_allowed`); Home, the
+  wizard, Backups, Data packs and the radio pages say so with a "Read and accept" button. The acceptance is
+  `settings.json` `disclaimer` (`version`, `accepted`, `accepted_utc`) with the version computed as the C# program
+  does (`684c0603763f3987` today), so a C# user who accepted is not asked again. Tests: `tests/disclaimer.rs`.
+- **Close button** (X, Alt+F4, the OS closing the window): refused with a message while a backup, install, restore,
+  pack write, health read or download runs; the live view and the search log are told to stop and the window closes
+  when both have ended (10 s at most; their files are written in the window's thread, so none is left half written).
+  Menu Exit stays refused while anything holds the port. Not covered: a Windows shutdown or log-off (winit gives the
+  program no session-end event), which ends the process as it ended the C# one. Tests: `tests/close.rs`.
+- **Test / alpha versions**: choosing one in the wizard asks Yes / No first ("Yes, I am sure" / "No", No has the
+  focus); nothing is downloaded before Yes.
+- **Release channel** taken over from the C# program: `channel` when set, else its `include_beta`, else Beta for a
+  settings file the C# program wrote (its default showed betas), else Latest for a fresh install; a choice writes both
+  keys. Hand-over from C# 2.0.x through its self-update: `docs/handover.md`.
 
 ## Versions and the update question
 
@@ -156,7 +176,9 @@ cargo build --release -p ddm32-cli -p ddm32-gui --features ddm32-cli/radio,ddm32
 ```
 
 Linux: the window's font lookup links fontconfig, so a build needs `pkg-config` and `libfontconfig-dev`
-(`sudo apt install pkg-config libfontconfig-dev`); the window uses Wayland or X11 through winit (loaded at run time). The tests read the C# program's fixtures from `../win/tests/DDM32Plus.Core.Tests/Fixtures`.
+(`sudo apt install pkg-config libfontconfig-dev`); the window uses Wayland or X11 through winit (loaded at run time). The tests read their fixtures from `rust/tests/fixtures` (a copy of the C# program's, with the Python generators;
+`win/` can be deleted). Windows builds link the C runtime statically (`rust/.cargo/config.toml`), so the program needs
+no Visual C++ Redistributable.
 
 Command line: `ddm32 version | paths | backups | detect --backup DIR | plan ... | releases | download VERSION |
 pack radioid|air|info ... | tool backup|install_plus|restore_stock|fast_install|datapack ARGS` (`ddm32 --help`).

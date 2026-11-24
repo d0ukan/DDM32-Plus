@@ -39,6 +39,19 @@ Windows, Linux and macOS; host-tested only (fakes, no serial port, no network), 
   only listed (on a worker thread), never opened to probe. The port in use is shown on Health, Live, Search log, Data
   packs, Backups and the wizard's radio steps. Hidden in a files-only build.
 - Dialogs are modal for the keyboard too: the controls under them take no focus and read as disabled.
+- Disclaimer (was missing in the Rust window): the C# program's text in Turkish and English, after the language at
+  the first start, again when the text changes, read only from Help > Disclaimer. Every radio step (update wizard,
+  restore, data pack write, health, live view, search log) stays off until it is accepted. Saved as the C# program
+  saves it (`settings.json` `disclaimer`, same version hash), so a C# user who accepted is not asked again.
+- The window's close button and Alt+F4 are guarded like the C# window: refused while a backup, install, restore, pack
+  write, health read or download runs; the live view and the search log are stopped first, then the window closes.
+- A test / alpha version asks Yes / No (No by default) before it is downloaded; it used to warn and download anyway.
+- Beta visibility carries over from the C# program: its `include_beta` (default on) sets the channel when this
+  program has none of its own; choosing a channel writes both keys. Fresh installs stay on Latest.
+- Hand-over from C# 2.0.x (see `rust/docs/handover.md`): the Windows program needs no Visual C++ Redistributable any
+  more (static C runtime), and the self-update start marker is written once the window's event loop runs, so a window
+  that cannot come up is rolled back to the old program. The update helper no longer flashes console windows.
+- Tests read their fixtures from `rust/tests/fixtures` (copied from `win/`); `NET_VERSION` is the C# program's 2.0.0.
 
 ## v1.0.1 (2026-11-24)
 

@@ -21,11 +21,8 @@ fn main() -> Result<(), slint::PlatformError> {
     if demo {
         ddm32_gui::demo(&ui);
     }
-    if let Some(i) = args.iter().position(|a| a == su::CHECK_ARG) {
-        // the new program is up: tell the helper (after the window exists)
-        if let Some(marker) = args.get(i + 1) {
-            let _ = su::write_marker(std::path::Path::new(marker), ddm32_core::app_info::VERSION);
-        }
-    }
+    // started by the update helper (`--update-check FILE`, this program's or the C# program's): the start marker is
+    // written 1.5 s after the event loop runs, so a window that cannot come up makes the helper roll back
+    ddm32_gui::arm_start_marker(&args);
     ui.run()
 }

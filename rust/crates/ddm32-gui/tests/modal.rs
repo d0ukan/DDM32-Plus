@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The dialogs (the update question, the cable picker, the no-backup confirmation) are modal for the keyboard too:
+//! The dialogs (the update question, the cable picker, the no-backup confirmation, the disclaimer, the test / alpha
+//! question) are modal for the keyboard too:
 //! while one is open, Tab never reaches a control under its shade and Enter / Space run only the dialog's own
 //! buttons; the controls under it read as disabled to a screen reader. The question's default button is "Later".
 //! Rendered offscreen; no radio, no network.
@@ -131,4 +132,56 @@ fn dialogs_hold_the_keyboard() {
         radio.set_picker_open(false);
         draw(&window);
     }
+
+    // the disclaimer: Tab and Space reach only its own controls (the language switch, the box, its two buttons)
+    app.on_disc_accept(rec("disc accept"));
+    app.on_disc_reject(rec("disc reject"));
+    app.on_disc_toggle_lang(rec("disc lang"));
+    for n in 1..10 {
+        fired.borrow_mut().clear();
+        ddm32_gui::show_disclaimer(&ui, "en", false);
+        draw(&window);
+        assert!(ui.global::<Modal>().get_open());
+        assert_eq!(Some(false), button(&ui, "Update the radio").accessible_enabled());
+        for _ in 0..n {
+            key(&ui, &window, Key::Tab);
+        }
+        key(&ui, &window, " ");
+        let got = fired.borrow().clone();
+        assert!(
+            got.iter().all(|g| g.starts_with("disc ")),
+            "Tab x{n} in the disclaimer reached a control under it: {got:?}"
+        );
+        app.set_disc_open(false);
+        app.set_disc_checked(false);
+        draw(&window);
+    }
+
+    // the test / alpha question: Enter at once is No (nothing chosen), Tab and Space stay in it
+    app.on_test_confirm_yes(rec("test yes"));
+    fired.borrow_mut().clear();
+    app.set_test_confirm_text("1.2.0-alpha.1".into());
+    app.set_test_confirm_open(true);
+    draw(&window);
+    assert!(ui.global::<Modal>().get_open());
+    key(&ui, &window, Key::Return);
+    assert!(!app.get_test_confirm_open(), "Enter is not No");
+    assert!(fired.borrow().is_empty(), "Enter chose the test version: {:?}", fired.borrow());
+    for n in 1..6 {
+        fired.borrow_mut().clear();
+        app.set_test_confirm_open(true);
+        draw(&window);
+        for _ in 0..n {
+            key(&ui, &window, Key::Tab);
+        }
+        key(&ui, &window, " ");
+        let got = fired.borrow().clone();
+        assert!(
+            got.iter().all(|g| g == "test yes"),
+            "Tab x{n} in the test question reached a control under it: {got:?}"
+        );
+        app.set_test_confirm_open(false);
+        draw(&window);
+    }
+    assert!(!ui.global::<Modal>().get_open());
 }

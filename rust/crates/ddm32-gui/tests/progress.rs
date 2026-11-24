@@ -9,8 +9,7 @@ use std::io::Read;
 
 fn lines(name: &str) -> Vec<String> {
     let f = std::fs::File::open(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(format!("../../../win/tests/DDM32Plus.Core.Tests/Fixtures/radio/{name}.json.gz")),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../tests/fixtures/radio/{name}.json.gz")),
     )
     .unwrap();
     let mut s = String::new();

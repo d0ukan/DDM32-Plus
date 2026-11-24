@@ -241,6 +241,36 @@ fn settings_round_trip_and_damage() {
     assert_eq!(None, s.language());
 }
 
+/// The release channel: this program's `channel`, else the C# program's `include_beta` (default true when the file is
+/// a C# one), else stable only; choosing writes both keys.
+#[test]
+fn channel_takes_over_include_beta() {
+    let t = tmp();
+    let path = t.path().join("settings.json");
+    let s = Settings::new(&path);
+    let with = |text: &str| {
+        std::fs::write(&path, text).unwrap();
+        s.channel()
+    };
+    assert_eq!(0, s.channel(), "no file: a fresh install");
+    assert_eq!(0, with(r#"{"language": "tr", "theme": "dark", "port": "COM14"}"#), "this program's keys only");
+    assert_eq!(1, with(r#"{"include_beta": true}"#));
+    assert_eq!(0, with(r#"{"include_beta": false, "window": {}}"#));
+    for k in ddm32_core::storage::settings::NET_ONLY_KEYS {
+        assert_eq!(1, with(&format!(r#"{{"language": "en", "{k}": 1}}"#)), "{k}: a C# file, include_beta default");
+    }
+    assert_eq!(0, with(r#"{"include_beta": true, "channel": 0}"#), "the own choice wins");
+    assert_eq!(2, with(r#"{"channel": 7}"#), "clamped");
+    std::fs::write(&path, r#"{"language": "en", "disclaimer": {"version": "x", "accepted": true}}"#).unwrap();
+    for (c, beta) in [(1, true), (0, false), (2, true)] {
+        s.set_channel(c).unwrap();
+        assert_eq!(c, s.channel());
+        assert_eq!(beta, s.include_beta());
+        assert_eq!(Some("en".into()), s.language());
+        assert!(s.disclaimer_accepted("x"));
+    }
+}
+
 #[test]
 fn unknown_settings_keys_are_kept() {
     let t = tmp();

@@ -8,7 +8,7 @@ name: rust
 on:
   push:
     branches: [rust-app]
-    paths: ["rust/**", ".github/workflows/rust.yml", "win/tests/DDM32Plus.Core.Tests/Fixtures/**"]
+    paths: ["rust/**", ".github/workflows/rust.yml"]
   workflow_dispatch:
 
 permissions:

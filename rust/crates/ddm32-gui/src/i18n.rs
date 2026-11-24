@@ -14,6 +14,22 @@ pub const TEXTS: &[(&str, &str, &str)] = &[
     ("m_exit_busy", "Telsiz bir işte (yedek, kurulum, canlı izleme veya arama kaydı): önce onu bitirin, sonra çıkın.", "The radio is busy (backup, install, live view or search log): finish or stop that first, then exit."),
     ("m_guide", "Kullanım kılavuzu", "User guide"),
     ("m_github", "GitHub sayfası", "GitHub page"),
+    ("m_disclaimer", "Sorumluluk reddi", "Disclaimer"),
+    // the disclaimer dialog (the C# program's Disc_* strings; the text itself is in disclaimer.rs)
+    ("disc_check", "Okudum, anladım ve kabul ediyorum", "I have read, understood and accept this"),
+    ("disc_accept", "Kabul ediyorum", "I accept"),
+    ("disc_reject", "Kabul etmiyorum", "I do not accept"),
+    ("disc_not_accepted", "Sorumluluk reddi kabul edilmedi: telsiz işlemleri kapalı.", "The disclaimer was not accepted: radio steps are switched off."),
+    ("disc_read_button", "Sorumluluk reddini oku ve kabul et", "Read and accept the disclaimer"),
+    ("disc_accepted", "Bu metni kabul ettiniz; telsiz işlemleri açık.", "You accepted this text; radio steps are on."),
+    // the window's close button (the C# Main_BusyClose) and closing while a reader runs
+    ("busy_close", "Bir adım sürüyor. Bitmeden pencere kapatılamaz (kapatmak işlemi yarıda keser).", "A step is running. The window cannot be closed before it ends (closing would stop it half way)."),
+    ("closing_wait", "Canlı izleme / arama kaydı durduruluyor; pencere ardından kapanır.", "Stopping the live view / search log; the window closes then."),
+    // choosing a test / alpha version (the C# Ver_TestConfirm*): Yes / No, No by default
+    ("ver_test_title", "Test / Alfa sürümü", "Test / Alpha version"),
+    ("ver_test_confirm", "{} bir test / alfa sürümü: telsizde denenmemiş olabilir ve sorun çıkarabilir.\n\nEmin misiniz?", "{} is a test / alpha version: it may not have been tried on a radio and may cause problems.\n\nAre you sure?"),
+    ("ver_test_yes", "Evet, eminim", "Yes, I am sure"),
+    ("b_no", "Hayır", "No"),
     ("home_update", "Telsizi güncelle", "Update the radio"),
     ("home_backups", "Yedekler ve geri dönüş", "Backups and going back"),
     ("home_packs", "Veri paketleri", "Data packs"),

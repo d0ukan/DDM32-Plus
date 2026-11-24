@@ -93,6 +93,10 @@ fn scaled_150_and_200_percent() {
         ("settings", 4, 0, ""),
         ("update-prompt", -1, 0, "prompt"),
         ("cable-picker", -1, 0, "picker"),
+        ("disclaimer", -1, 0, "disclaimer"),
+        ("disclaimer-read", -1, 0, "disclaimer-read"),
+        ("test-confirm", -1, 0, "test-confirm"),
+        ("home-not-accepted", 0, 0, "gate"),
     ];
     for lang in ["tr", "en"] {
         ui.global::<Tr>().set_lang(lang.into());
@@ -117,6 +121,17 @@ fn scaled_150_and_200_percent() {
                                 firmware: Some(("1.0.0".into(), "1.0.1".into())),
                             };
                             ddm32_gui::show_prompt(&ui, lang, &offer);
+                        }
+                        match dialog {
+                            "disclaimer" => ddm32_gui::show_disclaimer(&ui, lang, false),
+                            "disclaimer-read" => ddm32_gui::show_disclaimer(&ui, lang, true),
+                            "test-confirm" => {
+                                let text = ddm32_gui::i18n::tf(lang, "ver_test_confirm", "1.2.0-alpha.1");
+                                app.set_test_confirm_text(text.into());
+                                app.set_test_confirm_open(true);
+                            }
+                            "gate" => ui.global::<ddm32_gui::Radio>().set_disclaimer_ok(false),
+                            _ => {}
                         }
                         if dialog == "picker" {
                             ui.global::<ddm32_gui::Radio>().set_picker_open(true);

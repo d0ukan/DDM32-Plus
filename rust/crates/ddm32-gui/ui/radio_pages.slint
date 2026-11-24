@@ -56,6 +56,9 @@ export global Radio {
     in property <[PortRow]> port-others;
     in-out property <bool> picker-open;
     in-out property <bool> picker-advanced;
+    // the disclaimer was accepted (lib.rs radio_allowed): every radio step stays off until it is
+    in property <bool> disclaimer-ok;
+    callback open-disclaimer();
 
     callback read-health();
     callback live-start();
@@ -71,6 +74,17 @@ export global Radio {
     // "" = Auto (CH340)
     callback port-choose(string);
     callback port-rescan();
+}
+
+// the disclaimer was not accepted: said on every page with a radio step, with the way to read and accept it
+export component DisclaimerGate inherits VerticalLayout {
+    spacing: 8px;
+    vertical-stretch: 0;
+    Notice { text: Tr.t(Tr.lang, "disc_not_accepted"); kind: "warning"; }
+    HorizontalLayout {
+        alignment: start;
+        Button { text: Tr.t(Tr.lang, "disc_read_button"); kind: "primary"; clicked => { Radio.open-disclaimer(); } }
+    }
 }
 
 // a radio page: the header row across the window (home stays closed while the live reader runs), then the content
@@ -91,6 +105,7 @@ component Screen inherits VerticalLayout {
         spacing: Theme.gap;
         vertical-stretch: 1;
         if root.show-port && Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
+        if root.show-port && !Radio.disclaimer-ok : DisclaimerGate {}
         @children
     }
 }
@@ -140,7 +155,7 @@ export component HealthPage inherits Screen {
             big: true;
             default-focus: true;
             // the search log holds the port while it runs (radio_pages.rs slog_holds_port)
-            enabled: !Radio.busy && !Radio.slog-running;
+            enabled: !Radio.busy && !Radio.slog-running && Radio.disclaimer-ok;
             clicked => { Radio.read-health(); }
         }
     }
@@ -175,7 +190,7 @@ export component LivePage inherits Screen {
             kind: Radio.live-running ? "secondary" : "primary";
             big: true;
             horizontal-stretch: 0;
-            enabled: !Radio.busy && (Radio.live-running || !Radio.slog-running);
+            enabled: !Radio.busy && (Radio.live-running || (!Radio.slog-running && Radio.disclaimer-ok));
             clicked => {
                 if Radio.live-running {
                     Radio.live-stop();
@@ -343,7 +358,7 @@ export component SearchLogPage inherits Screen {
             text: Radio.slog-running ? Tr.t(Tr.lang, "b_live_stop") : Tr.t(Tr.lang, "b_slog_start");
             kind: Radio.slog-running ? "secondary" : "primary";
             big: true;
-            enabled: Radio.slog-running || (!Radio.busy && !Radio.live-running && !root.app-busy);
+            enabled: Radio.slog-running || (!Radio.busy && !Radio.live-running && !root.app-busy && Radio.disclaimer-ok);
             horizontal-stretch: 0;
             clicked => {
                 if Radio.slog-running {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The read-only debug link of the running firmware (the pinned tools/rfoundry_debug.py, RadioFoundry MIT; the C#
 //! Radio/DebugLink.cs): the frame, its guard and the two readers, health (plus_txdiag --health) and live (plus_live).
-//! Held to the recorded conversations of win/tests/DDM32Plus.Core.Tests/Fixtures/live-results.json.
+//! Held to the recorded conversations of rust/tests/fixtures/live-results.json (a copy of the C# program's fixture).
 
 use super::error::{ToolError, ToolResult};
 use super::port::{RadioPort, RawSerial};

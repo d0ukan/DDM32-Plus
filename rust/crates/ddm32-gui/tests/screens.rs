@@ -127,6 +127,10 @@ fn every_screen_in_both_themes() {
         ("home-cable-picker", 0, 0, 0, "picker"),
         ("home-check-error", 0, 0, 0, "check-error"),
         ("home-port-missing", 0, 0, 0, "port-missing"),
+        ("home-disclaimer", 0, 0, 0, "disclaimer"),
+        ("home-disclaimer-read", 0, 0, 0, "disclaimer-read"),
+        ("home-not-accepted", 0, 0, 0, "gate"),
+        ("health-not-accepted", 7, 0, 0, "gate"),
         ("update-1-version", 1, 0, 0, ""),
         ("update-2-backup-choice", 1, 1, 0, ""),
         ("update-2-no-backup-warning", 1, 1, 2, "understood"),
@@ -143,6 +147,8 @@ fn every_screen_in_both_themes() {
         ("health", 7, 0, 0, ""),
         ("live", 8, 0, 0, ""),
         ("channels", 9, 0, 0, ""),
+        // a dialog takes the keyboard focus: last, so the wizard shots above keep their focused Next
+        ("update-1-test-confirm", 1, 0, 0, "test-confirm"),
     ];
     let dir = shots();
     for lang in ["tr", "en"] {
@@ -206,6 +212,16 @@ fn every_screen_in_both_themes() {
                     }
                     "check-error" => app
                         .set_check_error(i18n::tf(lang, "check_failed", "NetError: api.github.com: timed out").into()),
+                    "disclaimer" => {
+                        ui.global::<ddm32_gui::Radio>().set_disclaimer_ok(false);
+                        ddm32_gui::show_disclaimer(&ui, lang, false);
+                    }
+                    "disclaimer-read" => ddm32_gui::show_disclaimer(&ui, lang, true),
+                    "gate" => ui.global::<ddm32_gui::Radio>().set_disclaimer_ok(false),
+                    "test-confirm" => {
+                        app.set_test_confirm_text(i18n::tf(lang, "ver_test_confirm", "1.2.0-alpha.1").into());
+                        app.set_test_confirm_open(true);
+                    }
                     _ => {}
                 }
                 // switch the theme live on this very page
@@ -214,7 +230,10 @@ fn every_screen_in_both_themes() {
                 // the window background follows the theme at once (Home's bottom corner is its facts bar, a surface)
                 let bg = if *page == 0 { theme.get_surface() } else { theme.get_window() };
                 let corner = buf[(H as usize - 2) * W as usize + 2];
-                let modal = matches!(*extra, "confirm" | "prompt" | "picker");
+                let modal = matches!(
+                    *extra,
+                    "confirm" | "prompt" | "picker" | "disclaimer" | "disclaimer-read" | "test-confirm"
+                );
                 if !modal {
                     assert_eq!(
                         (bg.red(), bg.green(), bg.blue()),
@@ -236,6 +255,10 @@ fn every_screen_in_both_themes() {
                             | "update-3-backup-power"
                             | "home-update-prompt"
                             | "home-cable-picker"
+                            | "home-disclaimer"
+                            | "home-disclaimer-read"
+                            | "home-not-accepted"
+                            | "update-1-test-confirm"
                     )
                 {
                     let file = format!("{name}-{}-{lang}.png", if dark { "dark" } else { "light" });

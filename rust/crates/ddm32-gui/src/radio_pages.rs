@@ -3,7 +3,7 @@
 //! the newest verified backup). Health and live talk to the running firmware through the debug link's read-only guard
 //! (ddm32_core::radio::debug), one button each; my channels reads a backup file only.
 
-use crate::{i18n, port, tr, trf, with, App, AppWindow, Fact, Radio, TableRow};
+use crate::{i18n, port, radio_allowed, reader_ended, tr, trf, with, App, AppWindow, Fact, Radio, TableRow};
 use ddm32_core::codeplug::{self, Codeplug, Table};
 use ddm32_core::radio::codec::Codec;
 use ddm32_core::radio::debug::{health_tool, live_tool, searchlog_tool, SEARCHLOG_WAITING};
@@ -194,6 +194,9 @@ pub fn slog_holds_port() -> bool {
 }
 
 fn read_health(ui: &AppWindow) {
+    if !radio_allowed(ui) {
+        return;
+    }
     if slog_holds_port() {
         message(ui, &tr("slog_busy"), "warning");
         return;
@@ -296,6 +299,9 @@ fn live_line(ui: &AppWindow, line: String) {
 }
 
 fn live_start(ui: &AppWindow) {
+    if !radio_allowed(ui) {
+        return;
+    }
     if slog_holds_port() {
         message(ui, &tr("slog_busy"), "warning");
         return;
@@ -318,6 +324,10 @@ fn live_start(ui: &AppWindow) {
     run_debug(ui, "live", vec!["--port".into(), p, "--interval".into(), interval], cancel, live_line, |ui, err| {
         ui.global::<Radio>().set_live_running(false);
         with(|s| s.live_cancel = None);
+        // the window's close button waited for this reader
+        if reader_ended() {
+            return;
+        }
         match err {
             None => message(ui, &tr("live_stopped"), "info"),
             Some(e) if e.py_type == "SystemExit" && e.message == "3" => message(ui, &tr("live_silent"), "warning"),
@@ -669,6 +679,9 @@ fn slog_line(ui: &AppWindow, line: String) {
 }
 
 fn slog_start(ui: &AppWindow) {
+    if !radio_allowed(ui) {
+        return;
+    }
     let Some(p) = port() else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -703,6 +716,10 @@ fn slog_start(ui: &AppWindow) {
             s.slog_nofw
         });
         show_slog(ui, Some(tr("live_stopped")));
+        // the window's close button waited for this reader (the CSV was written in this thread, between events)
+        if reader_ended() {
+            return;
+        }
         match err {
             _ if nofw => message(ui, &tr("slog_nofw"), "warning"),
             None => {}

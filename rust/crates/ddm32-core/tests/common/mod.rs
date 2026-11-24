@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Test data shared by the acceptance tests: the C# program's fixtures (win/tests/DDM32Plus.Core.Tests/Fixtures,
-//! synthetic only, written by the Python generators there), the same input builders as the C# TestData /
+//! Test data shared by the acceptance tests: the fixtures in rust/tests/fixtures (a copy of the C# program's
+//! win/tests/DDM32Plus.Core.Tests/Fixtures, synthetic only, written by the Python generators there), the same input builders as the C# TestData /
 //! RadioFixtures, a fake network, the recorded-run replay port and the fake radios. No serial port exists here.
 #![allow(dead_code)]
 
@@ -19,7 +19,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 
 pub fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../win/tests/DDM32Plus.Core.Tests/Fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
 }
 
 pub fn fixture(parts: &[&str]) -> PathBuf {

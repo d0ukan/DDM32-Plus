@@ -5,7 +5,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, Progress, PageHeader, Modal } from "widgets.slint";
 import { MenuBar } from "menubar.slint";
-import { Radio, Fact, TableRow, PortRow, HealthPage, LivePage, ChannelsPage, SearchLogPage } from "radio_pages.slint";
+import { Radio, Fact, TableRow, PortRow, HealthPage, LivePage, ChannelsPage, SearchLogPage, DisclaimerGate } from "radio_pages.slint";
 export { Theme, Tr, Radio, Fact, TableRow, PortRow, Modal }
 
 export struct VersionRow { version: string, label: string, notes: string, local: bool }
@@ -41,6 +41,24 @@ export global App {
     // a chosen port is gone: "COM15 not found; using COM14", on Home until dismissed
     in property <string> port-missing;
     callback dismiss-port-missing();
+    // the disclaimer (lib.rs open_disclaimer): accepted with the box ticked; read only once accepted. Its own
+    // language switch, as the C# dialog
+    in-out property <bool> disc-open;
+    in property <bool> disc-readonly;
+    in property <string> disc-lang: "tr";
+    in-out property <bool> disc-checked;
+    in property <string> disc-title;
+    in property <string> disc-intro;
+    in property <[string]> disc-points;
+    in property <string> disc-outro;
+    in property <bool> disc-outro-bold;
+    callback disc-accept();
+    callback disc-reject();
+    callback disc-toggle-lang();
+    // choosing a test / alpha version: Yes / No, No by default
+    in-out property <bool> test-confirm-open;
+    in property <string> test-confirm-text;
+    callback test-confirm-yes();
     // the wizard: 0 version, 1 backup choice, 2 backup, 3 check, 4 install, 5 done
     in-out property <int> step: 0;
     in property <[VersionRow]> versions;
@@ -116,6 +134,8 @@ export global App {
 component Page inherits VerticalLayout {
     in property <string> heading;
     in property <bool> back: true;
+    // the page has radio steps: the disclaimer's gate shows while it is not accepted
+    in property <bool> gated: false;
     padding: 0;
     spacing: 0;
     PageHeader {
@@ -128,6 +148,7 @@ component Page inherits VerticalLayout {
     VerticalLayout {
         padding: Theme.pad;
         spacing: Theme.gap;
+        if root.gated && !Radio.disclaimer-ok : DisclaimerGate {}
         @children
     }
 }
@@ -148,6 +169,7 @@ component Home inherits VerticalLayout {
         vertical-stretch: 1;
         // the cable and the version on offer
         Notice { text: App.radio-text; kind: App.radio-kind; }
+        if !Radio.disclaimer-ok : DisclaimerGate {}
         if App.update-text != "" : Muted { text: App.update-text; font-size: Theme.font; }
         // a failed update check: one small line, dismissable
         if App.port-missing != "" : HorizontalLayout {
@@ -251,6 +273,7 @@ component StepBar inherits HorizontalLayout {
 
 component Wizard inherits Page {
     heading: Tr.t(Tr.lang, "home_update");
+    gated: true;
     StepBar {}
     ScrollView {
         vertical-stretch: 1;
@@ -310,7 +333,7 @@ component Wizard inherits Page {
                     alignment: start;
                     Button {
                         text: Tr.t(Tr.lang, "b_start_backup"); kind: "primary"; big: true;
-                        enabled: !App.busy && !App.step-done && App.radio-access && !Radio.slog-running;
+                        enabled: !App.busy && !App.step-done && App.radio-access && !Radio.slog-running && Radio.disclaimer-ok;
                         clicked => { App.start-backup(); }
                     }
                 }
@@ -331,7 +354,7 @@ component Wizard inherits Page {
                     alignment: start;
                     Button {
                         text: Tr.t(Tr.lang, "b_start_install"); kind: App.backup-choice == 2 ? "danger" : "primary"; big: true;
-                        enabled: !App.busy && !App.step-done && App.radio-access && !Radio.slog-running;
+                        enabled: !App.busy && !App.step-done && App.radio-access && !Radio.slog-running && Radio.disclaimer-ok;
                         clicked => { App.start-install(); }
                     }
                 }
@@ -380,7 +403,7 @@ component Wizard inherits Page {
         }
         if App.step < 5 : Button {
             text: Tr.t(Tr.lang, "b_next"); kind: "primary"; default-focus: true;
-            enabled: !App.busy && (App.step == 0 ? App.versions.length > 0
+            enabled: !App.busy && Radio.disclaimer-ok && (App.step == 0 ? App.versions.length > 0
                 : App.step == 1 ? (App.backup-choice != 2 || App.understood)
                 : App.step-done);
             clicked => { App.wizard-next(); }
@@ -391,6 +414,7 @@ component Wizard inherits Page {
 
 component Backups inherits Page {
     heading: Tr.t(Tr.lang, "home_backups");
+    gated: true;
     Muted { text: Tr.t(Tr.lang, "backups_where") + " " + App.backups-folder; }
     if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
     ScrollView {
@@ -420,7 +444,7 @@ component Backups inherits Page {
         Button { text: Tr.t(Tr.lang, "b_open_folder"); clicked => { App.open-backups-folder(); } }
         Button {
             text: Tr.t(Tr.lang, "b_restore"); kind: "primary";
-            enabled: App.restore-ready && !App.busy && App.radio-access && !Radio.slog-running;
+            enabled: App.restore-ready && !App.busy && App.radio-access && !Radio.slog-running && Radio.disclaimer-ok;
             clicked => { App.restore(); }
         }
     }
@@ -428,6 +452,7 @@ component Backups inherits Page {
 
 component Packs inherits Page {
     heading: Tr.t(Tr.lang, "home_packs");
+    gated: true;
     Label { text: Tr.t(Tr.lang, "packs_intro"); }
     if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
     HorizontalLayout {
@@ -442,7 +467,7 @@ component Packs inherits Page {
         alignment: start;
         Button {
             text: Tr.t(Tr.lang, "b_pack_write"); kind: "primary";
-            enabled: App.pack-ready && !App.busy && App.radio-access && !Radio.slog-running;
+            enabled: App.pack-ready && !App.busy && App.radio-access && !Radio.slog-running && Radio.disclaimer-ok;
             clicked => { App.pack-write(); }
         }
     }
@@ -566,14 +591,14 @@ export component AppWindow inherits Window {
     background: Theme.window;
     default-font-size: Theme.font;
     // a dialog is open: the controls under it take no keyboard focus and no click (widgets.slint Modal)
-    property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open;
+    property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open || App.disc-open || App.test-confirm-open;
     changed modal => { Modal.open = self.modal; }
 
     VerticalLayout {
         padding: 0;
         spacing: 0;
         if App.page != 6 : MenuBar {
-            radio-locked: App.menu-radio-locked || App.confirm-open;
+            radio-locked: App.menu-radio-locked || App.confirm-open || App.disc-open || App.test-confirm-open;
             cable-text: Radio.access ? Radio.port-head : "";
             cable-locked: App.port-locked;
             action(a) => { App.menu-action(a); }
@@ -693,6 +718,84 @@ export component AppWindow inherits Window {
                     spacing: Theme.gap; alignment: end;
                     Button { text: Tr.t(Tr.lang, "b_rescan"); in-dialog: true; clicked => { Radio.port-rescan(); } }
                     Button { text: Tr.t(Tr.lang, "b_close"); kind: "primary"; in-dialog: true; default-focus: true; clicked => { Radio.picker-open = false; } }
+                }
+            }
+        }
+    }
+
+    // a test / alpha version was chosen: Yes / No before anything is downloaded, No has the focus (Enter = No)
+    if App.test-confirm-open : Rectangle {
+        background: Theme.scrim;
+        TouchArea {}
+        Card {
+            width: min(parent.width - 48px, 560px);
+            height: min(tv.preferred-height, parent.height - 32px);
+            tv := VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap * 1.5;
+                Title { text: Tr.t(Tr.lang, "ver_test_title"); }
+                Label { text: App.test-confirm-text; }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    Button { text: Tr.t(Tr.lang, "b_no"); in-dialog: true; default-focus: true; clicked => { App.test-confirm-open = false; } }
+                    Button { text: Tr.t(Tr.lang, "ver_test_yes"); kind: "danger"; in-dialog: true; clicked => { App.test-confirm-yes(); } }
+                }
+            }
+        }
+    }
+
+    // the disclaimer: at the first start (after the language), whenever its text changed, and from Help. While it is
+    // not accepted every radio step is off (lib.rs radio_allowed).
+    if App.disc-open : Rectangle {
+        background: Theme.scrim;
+        TouchArea {}
+        Card {
+            width: min(parent.width - 32px, 720px);
+            height: parent.height - 32px;
+            VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap;
+                HorizontalLayout {
+                    spacing: Theme.gap;
+                    Title { text: App.disc-title; vertical-alignment: center; horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: start;
+                        horizontal-stretch: 0;
+                        Button { text: App.disc-lang == "en" ? "Türkçe" : "English"; in-dialog: true; clicked => { App.disc-toggle-lang(); } }
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: Theme.radius;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    background: Theme.window;
+                    ScrollView {
+                        width: parent.width;
+                        height: parent.height;
+                        dv := VerticalLayout {
+                            padding: Theme.pad; spacing: 8px;
+                            alignment: start;
+                            Label { text: App.disc-intro; vertical-alignment: top; }
+                            for p in App.disc-points : HorizontalLayout {
+                                spacing: 8px;
+                                padding-left: 12px;
+                                Text { text: "•"; color: Theme.text; font-size: Theme.font; horizontal-stretch: 0; vertical-alignment: top; }
+                                Label { text: p; vertical-alignment: top; horizontal-stretch: 1; }
+                            }
+                            Label { text: App.disc-outro; vertical-alignment: top; font-weight: App.disc-outro-bold ? 600 : 400; }
+                        }
+                    }
+                }
+                if !App.disc-readonly : Check { text: Tr.t(Tr.lang, "disc_check"); in-dialog: true; checked <=> App.disc-checked; }
+                if App.disc-readonly : Notice { text: Tr.t(Tr.lang, "disc_accepted"); kind: "success"; }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    if !App.disc-readonly : Button { text: Tr.t(Tr.lang, "disc_reject"); in-dialog: true; clicked => { App.disc-reject(); } }
+                    if !App.disc-readonly : Button {
+                        text: Tr.t(Tr.lang, "disc_accept"); kind: "primary"; in-dialog: true;
+                        enabled: App.disc-checked;
+                        clicked => { App.disc-accept(); }
+                    }
+                    if App.disc-readonly : Button { text: Tr.t(Tr.lang, "b_close"); kind: "primary"; in-dialog: true; default-focus: true; clicked => { App.disc-open = false; } }
                 }
             }
         }

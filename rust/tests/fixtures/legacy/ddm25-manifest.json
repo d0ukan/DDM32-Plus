@@ -1,0 +1,36 @@
+{
+  "format": "ddm25-manifest/1",
+  "repo": "d0ukan/DDM25-Plus",
+  "release": "v1.0.0-beta.1",
+  "created_utc": "2026-11-20T08:32:51Z",
+  "firmware": [
+    {
+      "version": "1.0.0-beta.1",
+      "channel": "beta",
+      "file": "ddm25-plus-1.0.0-beta.1.zip",
+      "url": "https://github.com/d0ukan/DDM25-Plus/releases/download/v1.0.0-beta.1/ddm25-plus-1.0.0-beta.1.zip",
+      "sha256": "096fe69aa64d057fafea351f7553523613c4e7871666b49ec479d3b53c367a08",
+      "size": 543240,
+      "application_sha256": "edc7ea68e8e3a86dcd059f85a98cfec69cc3c885ea1ffb05ff301186fd1a3e51",
+      "application_size": 784084,
+      "settings_format": 1,
+      "codeplug_format": 1,
+      "min_compatible_version": "1.0.0-beta.1",
+      "notes": {
+        "tr": "İlk ön sürüm (beta). Telsizde henüz geniş çapta denenmedi.",
+        "en": "First pre-release (beta). Not yet widely field-tested on a radio."
+      }
+    }
+  ],
+  "app": {
+    "version": "1.0.0-beta.1",
+    "file": "DDM25Plus-1.0.0-beta.1.zip",
+    "url": "https://github.com/d0ukan/DDM25-Plus/releases/download/v1.0.0-beta.1/DDM25Plus-1.0.0-beta.1.zip",
+    "sha256": "f07d05bf9ff3a8aee6cb0af7d887a09c46032d1e71e0e5927fbb0d82172a96d0",
+    "size": 37567660,
+    "notes": {
+      "tr": "İlk ön sürüm.",
+      "en": "First pre-release."
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Windows: link the C runtime statically, so DDM32Plus.exe and ddm32.exe need no Visual C++ Redistributable
+# (vcruntime140.dll). The C# program it replaces was self-contained; a PC without the redistributable must still start
+# the new program, or a self-update hand-over could never write its start marker (see docs/handover.md).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

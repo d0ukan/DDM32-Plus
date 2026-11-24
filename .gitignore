@@ -658,6 +658,15 @@ __pycache__/
 !/rust/packaging/**/*.desktop
 !/rust/packaging/**/*.plist
 !/rust/packaging/art/*.png
+# the static C runtime on Windows (no VC++ redistributable needed) and the test fixtures copied from win/tests
+!/rust/.cargo/config.toml
+!/rust/tests/fixtures/README.md
+!/rust/tests/fixtures/*.py
+!/rust/tests/fixtures/*.json
+!/rust/tests/fixtures/*.json.gz
+!/rust/tests/fixtures/legacy/*
+!/rust/tests/fixtures/radio/*.json
+!/rust/tests/fixtures/radio/*.json.gz
 !/.github/workflows/rust.yml
 /rust/target/
 # status strip signal bars filled only while something is heard (tools/plus_sigbar.py)

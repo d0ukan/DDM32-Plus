@@ -14,7 +14,7 @@ pub const WINDOWS_EXE_FILE: &str = "DDM32Plus.exe";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The C# (.NET) program this one follows; its last version, for the self-update hand-over.
-pub const NET_VERSION: &str = "2.0.0-beta.1";
+pub const NET_VERSION: &str = "2.0.0";
 
 pub const AUTHOR: &str = "d0ukan · TA2DOU";
 pub const REPO_URL: &str = "https://github.com/d0ukan/DDM32-Plus";

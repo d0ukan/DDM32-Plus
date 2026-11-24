@@ -248,4 +248,11 @@ fn program_version_is_in_one_place() {
         ReleaseVersion::parse(ddm32_core::app_info::VERSION).unwrap()
             > ReleaseVersion::parse(ddm32_core::app_info::NET_VERSION).unwrap()
     );
+    assert_eq!("2.0.0", ddm32_core::app_info::NET_VERSION);
+    // while the C# program is still in the tree: NET_VERSION is its AppInfo.Version
+    let cs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../win/src/DDM32Plus.Core/AppInfo.cs");
+    if let Ok(text) = std::fs::read_to_string(cs) {
+        let want = format!("public const string Version = \"{}\";", ddm32_core::app_info::NET_VERSION);
+        assert!(text.contains(&want), "NET_VERSION differs from win/src/DDM32Plus.Core/AppInfo.cs");
+    }
 }

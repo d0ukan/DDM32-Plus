@@ -1,0 +1,1558 @@
+{
+ "source": "pc/radiotools/plus_live.py, plus_txdiag.py --health, pinned tools/rfoundry_debug.py, pc/ddm32_app/parsers.py",
+ "native_fields": [
+  "version",
+  "state",
+  "reason",
+  "session",
+  "owned",
+  "mode",
+  "frequency_hz",
+  "blocks",
+  "duration_ms",
+  "lease_ms",
+  "rx_count",
+  "tx_count",
+  "rx_seen",
+  "rx_saved",
+  "rx_dropped",
+  "rx_read",
+  "tx_loaded",
+  "tx_sent",
+  "phy_irqs",
+  "tx_slot_irqs",
+  "rx_slot_irqs",
+  "rf_irqs",
+  "abnormal_irqs",
+  "duplicate_irqs",
+  "ignored_irqs",
+  "pa_keys",
+  "quiets",
+  "faults",
+  "rejected",
+  "max_gap_us",
+  "last_gap_us",
+  "restore_failures",
+  "started_us",
+  "boundary_us",
+  "p25_sync",
+  "key_requested",
+  "keyed"
+ ],
+ "native_states": [
+  "idle",
+  "armed",
+  "receive",
+  "transmit",
+  "draining",
+  "stopped",
+  "fault"
+ ],
+ "native_reasons": [
+  "ok",
+  "user_stop",
+  "rx_limit",
+  "tx_complete",
+  "rx_duration",
+  "lease_expired",
+  "deadline",
+  "stalled",
+  "late_boundary",
+  "early_boundary",
+  "underrun",
+  "io",
+  "rx_overflow",
+  "abnormal_slot",
+  "denied",
+  "interrupted",
+  "restore_failed",
+  "unexpected_rf"
+ ],
+ "scan_fields": [
+  "version",
+  "stops",
+  "carriers",
+  "cooled",
+  "takes",
+  "synced",
+  "voiced",
+  "ended",
+  "tails",
+  "quiet",
+  "foreign",
+  "sync_ms",
+  "voice_ms"
+ ],
+ "live_allowed": [
+  [
+   9,
+   "00"
+  ],
+  [
+   9,
+   "14"
+  ],
+  [
+   9,
+   "15"
+  ],
+  [
+   9,
+   "17"
+  ],
+  [
+   33,
+   "00"
+  ],
+  [
+   33,
+   "0c"
+  ]
+ ],
+ "frames": [
+  {
+   "cmd": 9,
+   "seq": 1,
+   "payload": "00",
+   "frame": "a55a0901010000f4f8"
+  },
+  {
+   "cmd": 9,
+   "seq": 2,
+   "payload": "14",
+   "frame": "a55a09020100149d31"
+  },
+  {
+   "cmd": 33,
+   "seq": 255,
+   "payload": "0c",
+   "frame": "a55a21ff01000cf60e"
+  },
+  {
+   "cmd": 137,
+   "seq": 7,
+   "payload": "00616263",
+   "frame": "a55a89070400006162638517"
+  },
+  {
+   "cmd": 255,
+   "seq": 3,
+   "payload": "04",
+   "frame": "a55aff03010004cba7"
+  },
+  {
+   "cmd": 1,
+   "seq": 0,
+   "payload": "",
+   "frame": "a55a0100000074f2"
+  }
+ ],
+ "crc16": [
+  {
+   "data": "",
+   "crc": 65535
+  },
+  {
+   "data": "313233343536373839",
+   "crc": 10673
+  },
+  {
+   "data": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+   "crc": 64815
+  }
+ ],
+ "cases": [
+  {
+   "name": "live_ok",
+   "tool": "live",
+   "count": 2,
+   "interval": 2,
+   "steps": [
+    {
+     "write": "a55a090101001560ba",
+     "reply": "a55a8901220000514001000563726173682e6275696c743d310a63726173682e76616c69643d300a1231"
+    },
+    {
+     "write": "a55a0902010017fe01",
+     "reply": "a55a89025c0000524001000572657365742e6275696c743d310a72657365742e63617573653d706f7765720a72657365742e666c6167733d307830303030303030310a72657365742e757074696d655f6d733d300a72657365742e7761726d3d300a50da"
+    },
+    {
+     "write": "a55a09030100009c15",
+     "reply": "a55a8903e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a8bec"
+    },
+    {
+     "write": "a55a09040100140416",
+     "reply": "a55a8904d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ac609"
+    },
+    {
+     "write": "a55a21050100009c38",
+     "reply": "a55aa1059500000100000002000000000000000000000000000000000000001021e219000000000000000000000000280000000000000029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000cf38"
+    },
+    {
+     "write": "a55a210601000ccc62",
+     "reply": "a55aa1063500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000f228"
+    },
+    {
+     "write": "a55a09070100006ddf",
+     "reply": "a55a8907e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a090a"
+    },
+    {
+     "write": "a55a09080100143659",
+     "reply": "a55a8908d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ae91f"
+    },
+    {
+     "write": "a55a2109010000ae77",
+     "reply": "a55aa1099500000100000002000000000000000000000000000000000000001021e2190000000000000000000000002800000000000000290000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000006442"
+    },
+    {
+     "write": "a55a210a01000cfe2d",
+     "reply": "a55aa10a3500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000b511"
+    }
+   ],
+   "output": "--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=0\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=power\nreset.flags=0x00000001\nreset.uptime_ms=0\nreset.warm=0\n=== poll 1\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=2\nreason=0\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=receive\nreason_name=ok\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 1\n=== poll 2\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=2\nreason=0\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=receive\nreason_name=ok\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 2\n",
+   "exit": 0,
+   "summaries": [
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "receive",
+      "reason": "ok",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    },
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "receive",
+      "reason": "ok",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "live_scan_unavailable",
+   "tool": "live",
+   "count": 1,
+   "interval": 2,
+   "steps": [
+    {
+     "write": "a55a090101001560ba",
+     "reply": "a55a8901220000514001000563726173682e6275696c743d310a63726173682e76616c69643d300a1231"
+    },
+    {
+     "write": "a55a0902010017fe01",
+     "reply": "a55a89025c0000524001000572657365742e6275696c743d310a72657365742e63617573653d706f7765720a72657365742e666c6167733d307830303030303030310a72657365742e757074696d655f6d733d300a72657365742e7761726d3d300a50da"
+    },
+    {
+     "write": "a55a09030100009c15",
+     "reply": "a55a8903e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a8bec"
+    },
+    {
+     "write": "a55a09040100140416",
+     "reply": "a55a8904d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ac609"
+    },
+    {
+     "write": "a55a21050100009c38",
+     "reply": "a55aa1059500000100000002000000000000000000000000000000000000001021e219000000000000000000000000280000000000000029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000cf38"
+    },
+    {
+     "write": "a55a210601000ccc62",
+     "reply": "a55aa10601000414c1"
+    }
+   ],
+   "output": "--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=0\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=power\nreset.flags=0x00000001\nreset.uptime_ms=0\nreset.warm=0\n=== poll 1\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=2\nreason=0\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=receive\nreason_name=ok\n--- scan (0x21/12) status 4\nerror=DebugLinkError: command 0x21: unavailable\n=== end 1\n",
+   "exit": 0,
+   "summaries": [
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "receive",
+      "reason": "ok",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": null,
+     "scan_status": 4,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "live_idle_vfo_crash",
+   "tool": "live",
+   "count": 1,
+   "interval": 2,
+   "steps": [
+    {
+     "write": "a55a090101001560ba",
+     "reply": "a55a89015c0000514001000563726173682e6275696c743d310a63726173682e76616c69643d310a63726173682e7461736b3d75690a63726173682e70633d307830303031613262340a63726173682e757074696d655f6d733d333630353030300a9160"
+    },
+    {
+     "write": "a55a0902010017fe01",
+     "reply": "a55a89025f0000524001000572657365742e6275696c743d310a72657365742e63617573653d7761746368646f670a72657365742e666c6167733d307830303030303030340a72657365742e757074696d655f6d733d300a72657365742e7761726d3d310a7ecd"
+    },
+    {
+     "write": "a55a09030100009c15",
+     "reply": "a55a8903d30000504001000573656374696f6e3d636f72650a766965773d350a73746174653d69646c650a74785f64656e793d6e6f6e650a6d6f64653d666d0a76666f3d310a7a6f6e655f696e6465783d300a7a6f6e655f706f733d300a7a6f6e655f6e616d653d0a6368616e6e656c5f6e756d6265723d300a6368616e6e656c5f6e616d653d0a72785f687a3d3134353530303030300a74785f687a3d3134353530303030300a737175656c63683d330a6d6f6e69746f723d310a746f6e655f6f6b3d310a727373695f64626d3d300a6e6f6973653d330a5d38"
+    },
+    {
+     "write": "a55a09040100140416",
+     "reply": "a55a8904d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ac609"
+    },
+    {
+     "write": "a55a21050100009c38",
+     "reply": "a55aa1059500000100000002000000000000000000000000000000000000001021e219000000000000000000000000280000000000000029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000cf38"
+    },
+    {
+     "write": "a55a210601000ccc62",
+     "reply": "a55aa1063500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000f228"
+    }
+   ],
+   "output": "--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=1\ncrash.task=ui\ncrash.pc=0x0001a2b4\ncrash.uptime_ms=3605000\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=watchdog\nreset.flags=0x00000004\nreset.uptime_ms=0\nreset.warm=1\n=== poll 1\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=idle\ntx_deny=none\nmode=fm\nvfo=1\nzone_index=0\nzone_pos=0\nzone_name=\nchannel_number=0\nchannel_name=\nrx_hz=145500000\ntx_hz=145500000\nsquelch=3\nmonitor=1\ntone_ok=1\nrssi_dbm=0\nnoise=3\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=2\nreason=0\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=receive\nreason_name=ok\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 1\n",
+   "exit": 0,
+   "summaries": [
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": null,
+      "noise": 3,
+      "state": "idle",
+      "mode": "fm",
+      "zone": "",
+      "channel": "",
+      "channel_number": 0,
+      "vfo": true,
+      "rx_hz": 145500000,
+      "tx_hz": 145500000,
+      "squelch": 3,
+      "monitor": true,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "receive",
+      "reason": "ok",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": true,
+      "crash_built": "1",
+      "crash_task": "ui",
+      "crash_pc": "0x0001a2b4",
+      "crash_uptime_ms": 3605000,
+      "reset_cause": "watchdog",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "live_silent",
+   "tool": "live",
+   "count": 0,
+   "interval": 2,
+   "steps": [
+    {
+     "write": "a55a090101001560ba",
+     "reply": ""
+    },
+    {
+     "write": "a55a0902010017fe01",
+     "reply": ""
+    },
+    {
+     "write": "a55a09030100009c15",
+     "reply": ""
+    },
+    {
+     "write": "a55a09040100140416",
+     "reply": ""
+    },
+    {
+     "write": "a55a21050100009c38",
+     "reply": ""
+    },
+    {
+     "write": "a55a210601000ccc62",
+     "reply": ""
+    },
+    {
+     "write": "a55a09070100006ddf",
+     "reply": ""
+    },
+    {
+     "write": "a55a09080100143659",
+     "reply": ""
+    },
+    {
+     "write": "a55a2109010000ae77",
+     "reply": ""
+    },
+    {
+     "write": "a55a210a01000cfe2d",
+     "reply": ""
+    },
+    {
+     "write": "a55a090b0100005f90",
+     "reply": ""
+    },
+    {
+     "write": "a55a090c010014c793",
+     "reply": ""
+    },
+    {
+     "write": "a55a210d0100005fbd",
+     "reply": ""
+    },
+    {
+     "write": "a55a210e01000c0fe7",
+     "reply": ""
+    }
+   ],
+   "output": "--- view crash (21) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- view reset (23) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n=== poll 1\n--- view core (0) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- view tasks (20) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- native (0x21/0) status -1\nerror=DebugLinkError: no answer to command 0x21 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- scan (0x21/12) status -1\nerror=DebugLinkError: no answer to command 0x21 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n=== end 1\n=== poll 2\n--- view core (0) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- view tasks (20) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- native (0x21/0) status -1\nerror=DebugLinkError: no answer to command 0x21 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- scan (0x21/12) status -1\nerror=DebugLinkError: no answer to command 0x21 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n=== end 2\n=== poll 3\n--- view core (0) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- view tasks (20) status -1\nerror=DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- native (0x21/0) status -1\nerror=DebugLinkError: no answer to command 0x21 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- scan (0x21/12) status -1\nerror=DebugLinkError: no answer to command 0x21 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n=== end 3\nNo answer from the radio for 3 polls; stopping.\n",
+   "exit": 3,
+   "summaries": [
+    {
+     "signal": {
+      "ok": false,
+      "rssi_dbm": null,
+      "noise": null,
+      "state": null,
+      "mode": null,
+      "zone": null,
+      "channel": null,
+      "channel_number": null,
+      "vfo": false,
+      "rx_hz": null,
+      "tx_hz": null,
+      "squelch": null,
+      "monitor": false,
+      "uptime_ms": null
+     },
+     "native": {
+      "ok": false,
+      "status": -1,
+      "state": null,
+      "reason": null,
+      "frequency_hz": null,
+      "rx_count": null,
+      "rx_seen": null,
+      "p25_sync": null,
+      "faults": null
+     },
+     "scan": null,
+     "scan_status": -1,
+     "health": {
+      "uptime_ms": null,
+      "heap_free": null,
+      "heap_min_free": null,
+      "min_task": null,
+      "min_free": null,
+      "crash_valid": false,
+      "crash_built": null,
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": null,
+      "tasks": {},
+      "ok": false
+     }
+    },
+    {
+     "signal": {
+      "ok": false,
+      "rssi_dbm": null,
+      "noise": null,
+      "state": null,
+      "mode": null,
+      "zone": null,
+      "channel": null,
+      "channel_number": null,
+      "vfo": false,
+      "rx_hz": null,
+      "tx_hz": null,
+      "squelch": null,
+      "monitor": false,
+      "uptime_ms": null
+     },
+     "native": {
+      "ok": false,
+      "status": -1,
+      "state": null,
+      "reason": null,
+      "frequency_hz": null,
+      "rx_count": null,
+      "rx_seen": null,
+      "p25_sync": null,
+      "faults": null
+     },
+     "scan": null,
+     "scan_status": -1,
+     "health": {
+      "uptime_ms": null,
+      "heap_free": null,
+      "heap_min_free": null,
+      "min_task": null,
+      "min_free": null,
+      "crash_valid": false,
+      "crash_built": null,
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": null,
+      "tasks": {},
+      "ok": false
+     }
+    },
+    {
+     "signal": {
+      "ok": false,
+      "rssi_dbm": null,
+      "noise": null,
+      "state": null,
+      "mode": null,
+      "zone": null,
+      "channel": null,
+      "channel_number": null,
+      "vfo": false,
+      "rx_hz": null,
+      "tx_hz": null,
+      "squelch": null,
+      "monitor": false,
+      "uptime_ms": null
+     },
+     "native": {
+      "ok": false,
+      "status": -1,
+      "state": null,
+      "reason": null,
+      "frequency_hz": null,
+      "rx_count": null,
+      "rx_seen": null,
+      "p25_sync": null,
+      "faults": null
+     },
+     "scan": null,
+     "scan_status": -1,
+     "health": {
+      "uptime_ms": null,
+      "heap_free": null,
+      "heap_min_free": null,
+      "min_task": null,
+      "min_free": null,
+      "crash_valid": false,
+      "crash_built": null,
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": null,
+      "tasks": {},
+      "ok": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "live_noise_and_late",
+   "tool": "live",
+   "count": 2,
+   "interval": 2,
+   "steps": [
+    {
+     "write": "a55a090101001560ba",
+     "reply": "0011a522a55a8901220000514001000563726173682e6275696c743d310a63726173682e76616c69643d300a1200a55a89000500006c6174659e5ea55a8901220000514001000563726173682e6275696c743d310a63726173682e76616c69643d300a1231"
+    },
+    {
+     "write": "a55a0902010017fe01",
+     "reply": "0011a522a55a89025c0000524001000572657365742e6275696c743d310a72657365742e63617573653d706f7765720a72657365742e666c6167733d307830303030303030310a72657365742e757074696d655f6d733d300a72657365742e7761726d3d300a5000a55a89010500006c6174654d19a55a89025c0000524001000572657365742e6275696c743d310a72657365742e63617573653d706f7765720a72657365742e666c6167733d307830303030303030310a72657365742e757074696d655f6d733d300a72657365742e7761726d3d300a50da"
+    },
+    {
+     "write": "a55a09030100009c15",
+     "reply": "0011a522a55a8903e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a8b00a55a89020500006c61746538d1a55a8903e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a8bec"
+    },
+    {
+     "write": "a55a09040100140416",
+     "reply": "0011a522a55a8904d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ac600a55a89030500006c617465eb96a55a8904d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ac609"
+    },
+    {
+     "write": "a55a21050100009c38",
+     "reply": "0011a522a55aa1059500000100000002000000000000000000000000000000000000001021e219000000000000000000000000280000000000000029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000cf00a55aa1040500006c617465f0dfa55aa1059500000100000002000000000000000000000000000000000000001021e219000000000000000000000000280000000000000029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000cf38"
+    },
+    {
+     "write": "a55a210601000ccc62",
+     "reply": "0011a522a55aa1063500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000f200a55aa1050500006c6174652398a55aa1063500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000f228"
+    },
+    {
+     "write": "a55a09070100006ddf",
+     "reply": "0011a522a55a8907e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a0900a55a89060500006c61746555dea55a8907e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a090a"
+    },
+    {
+     "write": "a55a09080100143659",
+     "reply": "0011a522a55a8908d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ae900a55a89070500006c6174658699a55a8908d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ae91f"
+    },
+    {
+     "write": "a55a2109010000ae77",
+     "reply": "0011a522a55aa1099500000100000002000000000000000000000000000000000000001021e2190000000000000000000000002800000000000000290000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000006400a55aa1080500006c61746547cea55aa1099500000100000002000000000000000000000000000000000000001021e2190000000000000000000000002800000000000000290000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000006442"
+    },
+    {
+     "write": "a55a210a01000cfe2d",
+     "reply": "0011a522a55aa10a3500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000b500a55aa1090500006c6174659489a55aa10a3500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000b511"
+    }
+   ],
+   "output": "--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=0\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=power\nreset.flags=0x00000001\nreset.uptime_ms=0\nreset.warm=0\n=== poll 1\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=2\nreason=0\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=receive\nreason_name=ok\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 1\n=== poll 2\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=2\nreason=0\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=receive\nreason_name=ok\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 2\n",
+   "exit": 0,
+   "summaries": [
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "receive",
+      "reason": "ok",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    },
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "receive",
+      "reason": "ok",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "live_native_flaky",
+   "tool": "live",
+   "count": 4,
+   "interval": 2,
+   "steps": [
+    {
+     "write": "a55a090101001560ba",
+     "reply": "a55a8901220000514001000563726173682e6275696c743d310a63726173682e76616c69643d300a1231"
+    },
+    {
+     "write": "a55a0902010017fe01",
+     "reply": "a55a89025c0000524001000572657365742e6275696c743d310a72657365742e63617573653d706f7765720a72657365742e666c6167733d307830303030303030310a72657365742e757074696d655f6d733d300a72657365742e7761726d3d300a50da"
+    },
+    {
+     "write": "a55a09030100009c15",
+     "reply": "a55a8903e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a8bec"
+    },
+    {
+     "write": "a55a09040100140416",
+     "reply": "a55a8904d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ac609"
+    },
+    {
+     "write": "a55a21050100009c38",
+     "reply": "a55aa1059500000100000002000000000000000000000000000000000000001021e219000000000000000000000000280000000000000029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000cf38"
+    },
+    {
+     "write": "a55a210601000ccc62",
+     "reply": "a55aa1063500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000f228"
+    },
+    {
+     "write": "a55a09070100006ddf",
+     "reply": "a55a8907e20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a090a"
+    },
+    {
+     "write": "a55a09080100143659",
+     "reply": "a55a8908d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ae91f"
+    },
+    {
+     "write": "a55a2109010000ae77",
+     "reply": ""
+    },
+    {
+     "write": "a55a210a01000cfe2d",
+     "reply": "a55aa10a3500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a4010000b511"
+    },
+    {
+     "write": "a55a090b0100005f90",
+     "reply": "a55a890be20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320aae31"
+    },
+    {
+     "write": "a55a090c010014c793",
+     "reply": "a55a890cd0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380a13e2"
+    },
+    {
+     "write": "a55a210d0100005fbd",
+     "reply": "a55aff0d0100037675"
+    },
+    {
+     "write": "a55a210e01000c0fe7",
+     "reply": "a55aa10e3500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a40100008806"
+    },
+    {
+     "write": "a55a090f010000ae5a",
+     "reply": "a55a890fe20000504001000573656374696f6e3d636f72650a766965773d350a73746174653d72780a74785f64656e793d6e6f6e650a6d6f64653d7032350a76666f3d300a7a6f6e655f696e6465783d300a7a6f6e655f706f733d320a7a6f6e655f6e616d653d5a6f6e6520410a6368616e6e656c5f6e756d6265723d340a6368616e6e656c5f6e616d653d503235203635390a72785f687a3d3433343235303030300a74785f687a3d3433343235303030300a737175656c63683d330a6d6f6e69746f723d300a746f6e655f6f6b3d310a727373695f64626d3d2d38370a6e6f6973653d31320a2cd7"
+    },
+    {
+     "write": "a55a091001001452c7",
+     "reply": "a55a8910d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380ab733"
+    },
+    {
+     "write": "a55a2111010000cae9",
+     "reply": "a55aa1119500000100000006000000070000000000000000000000000000001021e219000000000000000000000000280000000000000029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000cffd"
+    },
+    {
+     "write": "a55a211201000c9ab3",
+     "reply": "a55aa1123500000100000007000000050000000100000004000000040000000300000002000000010000000000000001000000b4000000a40100003b63"
+    }
+   ],
+   "output": "--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=0\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=power\nreset.flags=0x00000001\nreset.uptime_ms=0\nreset.warm=0\n=== poll 1\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=2\nreason=0\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=receive\nreason_name=ok\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 1\n=== poll 2\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status -1\nerror=DebugLinkError: no answer to command 0x21 within 1 s on COM9 (firmware without the debug link? another program has the port?)\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 2\n=== poll 3\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 3\nerror=DebugLinkError: command 0x21: busy\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 3\n=== poll 4\n--- view core (0) status 0\nuptime_ms=82000\nsection=core\nview=5\nstate=rx\ntx_deny=none\nmode=p25\nvfo=0\nzone_index=0\nzone_pos=2\nzone_name=Zone A\nchannel_number=4\nchannel_name=P25 659\nrx_hz=434250000\ntx_hz=434250000\nsquelch=3\nmonitor=0\ntone_ok=1\nrssi_dbm=-87\nnoise=12\n--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- native (0x21/0) status 0\nversion=1\nstate=6\nreason=7\nsession=0\nowned=0\nmode=0\nfrequency_hz=434250000\nblocks=0\nduration_ms=0\nlease_ms=0\nrx_count=40\ntx_count=0\nrx_seen=41\nrx_saved=0\nrx_dropped=0\nrx_read=0\ntx_loaded=0\ntx_sent=0\nphy_irqs=0\ntx_slot_irqs=0\nrx_slot_irqs=0\nrf_irqs=0\nabnormal_irqs=0\nduplicate_irqs=0\nignored_irqs=0\npa_keys=0\nquiets=0\nfaults=0\nrejected=0\nmax_gap_us=0\nlast_gap_us=0\nrestore_failures=0\nstarted_us=0\nboundary_us=0\np25_sync=1\nkey_requested=0\nkeyed=0\nstate_name=fault\nreason_name=stalled\n--- scan (0x21/12) status 0\nversion=1\nstops=7\ncarriers=5\ncooled=1\ntakes=4\nsynced=4\nvoiced=3\nended=2\ntails=1\nquiet=0\nforeign=1\nsync_ms=180\nvoice_ms=420\n=== end 4\n",
+   "exit": 0,
+   "summaries": [
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "receive",
+      "reason": "ok",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    },
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": false,
+      "status": -1,
+      "state": null,
+      "reason": null,
+      "frequency_hz": null,
+      "rx_count": null,
+      "rx_seen": null,
+      "p25_sync": null,
+      "faults": null
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    },
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": false,
+      "status": 3,
+      "state": null,
+      "reason": null,
+      "frequency_hz": null,
+      "rx_count": null,
+      "rx_seen": null,
+      "p25_sync": null,
+      "faults": null
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    },
+    {
+     "signal": {
+      "ok": true,
+      "rssi_dbm": -87,
+      "noise": 12,
+      "state": "rx",
+      "mode": "p25",
+      "zone": "Zone A",
+      "channel": "P25 659",
+      "channel_number": 4,
+      "vfo": false,
+      "rx_hz": 434250000,
+      "tx_hz": 434250000,
+      "squelch": 3,
+      "monitor": false,
+      "uptime_ms": 82000
+     },
+     "native": {
+      "ok": true,
+      "status": 0,
+      "state": "fault",
+      "reason": "stalled",
+      "frequency_hz": 434250000,
+      "rx_count": 40,
+      "rx_seen": 41,
+      "p25_sync": 1,
+      "faults": 0
+     },
+     "scan": {
+      "version": 1,
+      "stops": 7,
+      "carriers": 5,
+      "cooled": 1,
+      "takes": 4,
+      "synced": 4,
+      "voiced": 3,
+      "ended": 2,
+      "tails": 1,
+      "quiet": 0,
+      "foreign": 1,
+      "sync_ms": 180,
+      "voice_ms": 420
+     },
+     "scan_status": 0,
+     "health": {
+      "uptime_ms": 82000,
+      "heap_free": 6104,
+      "heap_min_free": 4048,
+      "min_task": "p25_lab",
+      "min_free": 150,
+      "crash_valid": false,
+      "crash_built": "1",
+      "crash_task": null,
+      "crash_pc": null,
+      "crash_uptime_ms": null,
+      "reset_cause": "power",
+      "tasks": {
+       "p25_lab": 150,
+       "IDLE": 452,
+       "ui": 884,
+       "host": 1200
+      },
+      "ok": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "health_ok",
+   "tool": "health",
+   "steps": [
+    {
+     "write": "a55a090101001441aa",
+     "reply": "a55a8901cd000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3435320a7461736b732e6d696e5f7461736b3d49444c450a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3634300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380aaa09"
+    },
+    {
+     "write": "a55a0902010015bc21",
+     "reply": "a55a8902220000514001000563726173682e6275696c743d310a63726173682e76616c69643d300aee3d"
+    },
+    {
+     "write": "a55a09030100174a77",
+     "reply": "a55a89035c0000524001000572657365742e6275696c743d310a72657365742e63617573653d706f7765720a72657365742e666c6167733d307830303030303030310a72657365742e757074696d655f6d733d300a72657365742e7761726d3d300a3fca"
+    }
+   ],
+   "output": "--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=452\ntasks.min_task=IDLE\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=640\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=0\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=power\nreset.flags=0x00000001\nreset.uptime_ms=0\nreset.warm=0\n",
+   "error": null,
+   "summary": {
+    "uptime_ms": 82000,
+    "heap_free": 6104,
+    "heap_min_free": 4048,
+    "min_task": "IDLE",
+    "min_free": 452,
+    "crash_valid": false,
+    "crash_built": "1",
+    "crash_task": null,
+    "crash_pc": null,
+    "crash_uptime_ms": null,
+    "reset_cause": "power",
+    "tasks": {
+     "IDLE": 452,
+     "p25_lab": 640,
+     "ui": 884,
+     "host": 1200
+    },
+    "ok": true
+   },
+   "verdict": "green"
+  },
+  {
+   "name": "health_low_stack",
+   "tool": "health",
+   "steps": [
+    {
+     "write": "a55a090101001441aa",
+     "reply": "a55a8901d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380a5243"
+    },
+    {
+     "write": "a55a0902010015bc21",
+     "reply": "a55a8902220000514001000563726173682e6275696c743d310a63726173682e76616c69643d300aee3d"
+    },
+    {
+     "write": "a55a09030100174a77",
+     "reply": "a55a89035c0000524001000572657365742e6275696c743d310a72657365742e63617573653d706f7765720a72657365742e666c6167733d307830303030303030310a72657365742e757074696d655f6d733d300a72657365742e7761726d3d300a3fca"
+    }
+   ],
+   "output": "--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=0\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=power\nreset.flags=0x00000001\nreset.uptime_ms=0\nreset.warm=0\n",
+   "error": null,
+   "summary": {
+    "uptime_ms": 82000,
+    "heap_free": 6104,
+    "heap_min_free": 4048,
+    "min_task": "p25_lab",
+    "min_free": 150,
+    "crash_valid": false,
+    "crash_built": "1",
+    "crash_task": null,
+    "crash_pc": null,
+    "crash_uptime_ms": null,
+    "reset_cause": "power",
+    "tasks": {
+     "p25_lab": 150,
+     "IDLE": 452,
+     "ui": 884,
+     "host": 1200
+    },
+    "ok": true
+   },
+   "verdict": "amber"
+  },
+  {
+   "name": "health_crash",
+   "tool": "health",
+   "steps": [
+    {
+     "write": "a55a090101001441aa",
+     "reply": "a55a8901d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380a5243"
+    },
+    {
+     "write": "a55a0902010015bc21",
+     "reply": "a55a89025c0000514001000563726173682e6275696c743d310a63726173682e76616c69643d310a63726173682e7461736b3d75690a63726173682e70633d307830303031613262340a63726173682e757074696d655f6d733d333630353030300a2050"
+    },
+    {
+     "write": "a55a09030100174a77",
+     "reply": "a55a89035f0000524001000572657365742e6275696c743d310a72657365742e63617573653d7761746368646f670a72657365742e666c6167733d307830303030303030340a72657365742e757074696d655f6d733d300a72657365742e7761726d3d310a0995"
+    }
+   ],
+   "output": "--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n--- view crash (21) status 0\nuptime_ms=82001\ncrash.built=1\ncrash.valid=1\ncrash.task=ui\ncrash.pc=0x0001a2b4\ncrash.uptime_ms=3605000\n--- view reset (23) status 0\nuptime_ms=82002\nreset.built=1\nreset.cause=watchdog\nreset.flags=0x00000004\nreset.uptime_ms=0\nreset.warm=1\n",
+   "error": null,
+   "summary": {
+    "uptime_ms": 82000,
+    "heap_free": 6104,
+    "heap_min_free": 4048,
+    "min_task": "p25_lab",
+    "min_free": 150,
+    "crash_valid": true,
+    "crash_built": "1",
+    "crash_task": "ui",
+    "crash_pc": "0x0001a2b4",
+    "crash_uptime_ms": 3605000,
+    "reset_cause": "watchdog",
+    "tasks": {
+     "p25_lab": 150,
+     "IDLE": 452,
+     "ui": 884,
+     "host": 1200
+    },
+    "ok": true
+   },
+   "verdict": "red"
+  },
+  {
+   "name": "health_view_error",
+   "tool": "health",
+   "steps": [
+    {
+     "write": "a55a090101001441aa",
+     "reply": "a55a8901d0000050400100057461736b732e636f756e743d340a7461736b732e756e747261636b65643d300a7461736b732e6d696e5f667265653d3135300a7461736b732e6d696e5f7461736b3d7032355f6c61620a7461736b732e667265652e49444c453d3435320a7461736b732e667265652e686f73743d313230300a7461736b732e667265652e75693d3838340a7461736b732e667265652e7032355f6c61623d3135300a7461736b732e686561705f667265653d363130340a7461736b732e686561705f6d696e5f667265653d343034380a5243"
+    },
+    {
+     "write": "a55a0902010015bc21",
+     "reply": "a55aff02010001da81"
+    }
+   ],
+   "output": "--- view tasks (20) status 0\nuptime_ms=82000\ntasks.count=4\ntasks.untracked=0\ntasks.min_free=150\ntasks.min_task=p25_lab\ntasks.free.IDLE=452\ntasks.free.host=1200\ntasks.free.ui=884\ntasks.free.p25_lab=150\ntasks.heap_free=6104\ntasks.heap_min_free=4048\n",
+   "error": "DebugLinkError: command 0x09: unknown command",
+   "summary": {
+    "uptime_ms": 82000,
+    "heap_free": 6104,
+    "heap_min_free": 4048,
+    "min_task": "p25_lab",
+    "min_free": 150,
+    "crash_valid": false,
+    "crash_built": null,
+    "crash_task": null,
+    "crash_pc": null,
+    "crash_uptime_ms": null,
+    "reset_cause": null,
+    "tasks": {
+     "p25_lab": 150,
+     "IDLE": 452,
+     "ui": 884,
+     "host": 1200
+    },
+    "ok": true
+   },
+   "verdict": "amber"
+  },
+  {
+   "name": "health_silent",
+   "tool": "health",
+   "steps": [
+    {
+     "write": "a55a090101001441aa",
+     "reply": ""
+    }
+   ],
+   "output": "",
+   "error": "DebugLinkError: no answer to command 0x09 within 1 s on COM9 (firmware without the debug link? another program has the port?)",
+   "summary": {
+    "uptime_ms": null,
+    "heap_free": null,
+    "heap_min_free": null,
+    "min_task": null,
+    "min_free": null,
+    "crash_valid": false,
+    "crash_built": null,
+    "crash_task": null,
+    "crash_pc": null,
+    "crash_uptime_ms": null,
+    "reset_cause": null,
+    "tasks": {},
+    "ok": false
+   },
+   "verdict": null
+  }
+ ],
+ "s_meter": [
+  [
+   null,
+   ""
+  ],
+  [
+   0,
+   ""
+  ],
+  [
+   -40,
+   "S9+53"
+  ],
+  [
+   -73,
+   "S9+20"
+  ],
+  [
+   -92,
+   "S9+1"
+  ],
+  [
+   -93,
+   "S9"
+  ],
+  [
+   -94,
+   "S9"
+  ],
+  [
+   -96,
+   "S9"
+  ],
+  [
+   -99,
+   "S8"
+  ],
+  [
+   -105,
+   "S7"
+  ],
+  [
+   -120,
+   "S5"
+  ],
+  [
+   -141,
+   "S1"
+  ],
+  [
+   -160,
+   "S0"
+  ]
+ ],
+ "format_mhz": [
+  [
+   null,
+   "-"
+  ],
+  [
+   0,
+   "-"
+  ],
+  [
+   434250000,
+   "434,25000 MHz"
+  ],
+  [
+   145500000,
+   "145,50000 MHz"
+  ],
+  [
+   446106250,
+   "446,10625 MHz"
+  ]
+ ],
+ "format_uptime": [
+  [
+   null,
+   "-"
+  ],
+  [
+   0,
+   "0:00:00"
+  ],
+  [
+   999,
+   "0:00:00"
+  ],
+  [
+   82000,
+   "0:01:22"
+  ],
+  [
+   3605000,
+   "1:00:05"
+  ],
+  [
+   90061000,
+   "25:01:01"
+  ]
+ ]
+}
