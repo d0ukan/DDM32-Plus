@@ -217,6 +217,15 @@ def p25_extras_tests(flags, worker_flags, codec):
         objects.append(obj)
     run(['clang++','-fsanitize=address,undefined',*objects,codec,'-o',OUT/'test_p25x_worker'],cwd=ROOT)
     run([OUT/'test_p25x_worker'],cwd=ROOT)
+    # Home's caller line carries the NAC the call came on (NAC Any channels), with BER and the Turkish words: the same
+    # worker with CONFIG_SIGNAL_QUALITY / CONFIG_LANG_TR, its own main replaced (tests/plus/test_p25rxnac.c)
+    rxnac_obj=p25x_out/'test_p25rxnac.o'
+    run(['clang',*p25x_flags,'-DCONFIG_SIGNAL_QUALITY=1','-DCONFIG_LANG_TR=1','-c',ROOT/'tests/plus/test_p25rxnac.c',
+         '-o',rxnac_obj],cwd=ROOT)
+    sigq_obj=p25x_out/'sigq.o'
+    run(['clang',*p25x_flags,'-DCONFIG_SIGNAL_QUALITY=1','-c',APP/'core/radio/sigq.c','-o',sigq_obj],cwd=ROOT)
+    run(['clang++','-fsanitize=address,undefined',*objects[:-1],rxnac_obj,sigq_obj,codec,'-o',OUT/'test_p25rxnac'],cwd=ROOT)
+    run([OUT/'test_p25rxnac'],cwd=ROOT)
     # The call history's P25 rows in the real UI (upstream's simulator; the worker's queries stubbed), on the DM-32's
     # narrow rows and on a full 240x320 screen
     command=run(['make','-Bn','uiFlowTest','SANITIZE=1'],cwd=host,capture_output=True,text=True).stdout

@@ -16,6 +16,9 @@ Firmware. Host-tested only (simulator flows in English and Turkish, normal and L
 
 Firmware (host-tested only; not yet run on a radio).
 
+- P25 on a channel with NAC Any: Home's caller line keeps the NAC the call came on (decoded from the NID) in its short
+  forms, " $1C8" after TG and ID ("TG101 ID77285 $1C8 BER1.2%"); the last form is "TG65535 ID16777215 $1C8" (no BER) so
+  the worst case still fits the 220 px row. A channel with its own NAC is unchanged (it already says it).
 - More free RAM for the coming software P25 receive probe: 4,792 B more static RAM free (1,968 -> 6,760 B; the
   1,500 B floor kept), no feature removed and no task stack touched (branch `ramsave`, `tools/plus_ramsave.py`; two of
   the three savings of RadioFoundry 454a5b76, MIT; the third, the start-up stack in the RTOS heap, was already in):
