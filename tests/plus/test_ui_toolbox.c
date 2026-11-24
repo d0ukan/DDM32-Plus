@@ -35,7 +35,6 @@
 #include "ui/ui_gpsdash.h"
 #include "ui/ui_clock.h"
 #include "ui/i18n.h"
-#include "ui/i18n.h"
 #include "radio/beep.h"
 #include "codeplug/codeplug.h"
 #include "ui_sim_toolbox.h"
@@ -602,7 +601,7 @@ static void almanac_rows(bool turkish)
 	const font_t *m = ui_layout.medium, *sm = ui_layout.small;
 	/* the row labels left of the widest time columns ("00:00  00:00", 12 characters at the right edge) */
 	int cols = gfx_text_width(m, "00:00  00:00"), w = gfx_width();
-	check(gfx_text_width(m, tr("Sun")) + 6 <= w - cols && gfx_text_width(m, tr("Dawn")) + 6 <= w - cols,
+	check(gfx_text_width(m, tr("Sun")) + 6 <= w - cols && gfx_text_width(m, tr("Twil.")) + 6 <= w - cols,
 	      "a row label runs into the time columns");
 	/* the Day line: its longest form (the polar night / day) */
 	char day[64];

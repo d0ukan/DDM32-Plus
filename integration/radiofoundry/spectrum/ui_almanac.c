@@ -96,7 +96,7 @@ static void almanac_draw(void)
 	gfx_text(s, 0, y, buf, ui_col.dim);
 	y += s->h + 4;
 	y = row(y, TR("Sun"), a.rise_min, a.set_min);
-	y = row(y, TR("Dawn"), a.dawn_min, a.dusk_min);
+	y = row(y, TR("Twil."), a.dawn_min, a.dusk_min);
 	sb_init(&b, buf, sizeof buf);
 	sb_str(&b, TR("Day "));
 	if (a.rise_min != ALMANAC_NONE && a.set_min != ALMANAC_NONE) {

@@ -165,8 +165,8 @@ msgid "Sun"
 msgstr "Güneş"
 
 #: core/ui/ui_almanac.c
-msgid "Dawn"
-msgstr "Şafak"
+msgid "Twil."
+msgstr "Alaca"
 
 #: core/ui/ui_almanac.c
 msgid "Day "
