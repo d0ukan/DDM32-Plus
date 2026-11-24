@@ -31,6 +31,9 @@
 #if CONFIG_QSO_LOG
 #include "ui/qso_log.h"
 #endif
+#if CONFIG_XBAND
+#include "radio/xband.h"
+#endif
 #include "debuglink/debuglink_proto.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -915,6 +918,11 @@ int native_lab_request(radio_sm_t *sm, const radio_req_t *r)
     }
 #if CONFIG_P25_CHANNELS
     if(r->type==RREQ_PTT && (r->arg==NATIVE_PHYSICAL_PTT_DOWN || r->arg==NATIVE_PHYSICAL_PTT_UP))return 1;
+#if CONFIG_XBAND
+    /* DDM32 Plus cross-band: while a session runs PTT is the radio core's (refused with the deny tone there), even on
+     * its P25 channel; only the session's own keying of a P25 over comes here (radio_xband.inc, xband_native_key) */
+    if(r->type==RREQ_PTT && (xband_on() || xband_held) && !xband_native_key)return 0;
+#endif
 #if CONFIG_HOTSPOT
     /* DM32 Plus: in hotspot mode (the channel already handed back) every request is the radio core's: PTT is denied
      * there (TXDENY_HOTSPOT: the host link transmits), never a P25 transmission on the channel underneath */

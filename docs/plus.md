@@ -3690,13 +3690,15 @@ encrypted P25 call; empty list; RAM only; the layout on every page), run by `too
 **Real-time cross-band is impossible on this radio** (docs/r14.md 46: one FD6818 transceiver with one synthesizer,
 both LNAs off while it transmits). Tools > Cross-band is therefore a store-and-forward relay between two frequencies
 A and B: an over heard on one is recorded whole, then transmitted on the other (A to B and B to A); while nothing is
-heard the receiver goes between A and B, a second on each (held while bursts are heard). **DMR only.**
+heard the receiver goes between A and B, a second on each (held while bursts are heard). Since 2026-11-24 **each side
+has its own mode** (section "A mode per side" below: DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM, P25 -> P25); the table
+is the DMR relay as first built.
 
 | Mode | Can | Cannot |
 |---|---|---|
 | DMR | relay whole overs between two simplex frequencies in the amateur bands, the same colour code and slot on both: the over's AMBE+2 air frames are kept as heard (9 bytes a 20 ms frame) and sent again through the call stack's voice source, so the voice is bit for bit what was heard (no decode / encode); sent as a new call from our own DMR ID to the talkgroup (or unit) it was heard for; up to **37.98 s an over** (the memory: 1,899 frames); longer overs are cut with the alert tone and "!" on Home (the 3-minute rule is in the engine too, but the memory always cuts first) | keep the caller's own ID (we transmit, so the call is ours), relay encrypted calls (no clear voice), hear the other side while it sends, catch the start of an over that begins while it listens on the other frequency (up to about a second can be lost: the dwell, then DMR late entry), different colour codes or slots on A and B (one pair of settings) |
-| FM | - | **not built.** As PCM an over needs 16 KB/s: the memory holds 1 s. Through the AMBE codec (the r14 study's idea) it needs the owner's stock codec to encode FM audio, which no host test can run (the owner's condition was "only if it works in host tests"), and the FM audio-to-encoder path has never been measured. Through our own IMBE codec it would need the P25 worker's codec context and FIFO, which are the very memory the recording uses |
-| P25 | - | **not built.** Its frames come through the P25 worker, whose buffers are the recording's memory (both cannot run at once); the worker has no path to transmit stored IMBE frames (its transmitter encodes the microphone live), and without the worker's buffers only the call replay's 4.4 KB (8 s) would be left |
+| FM | send only (2026-11-24): a DMR or NXDN over decoded into FM | receive (FM -> anything is not built: storing FM needs a codec step at receive, docs/xband-multiproto-study.md step 4) |
+| P25 | P25 -> P25 (2026-11-24): the IMBE parameters as heard | P25 <-> DMR / FM (transcoding, over the CPU budget; study step 6) |
 
 Owner's rules (2026-11-20) and how they are kept:
 
@@ -3714,6 +3716,12 @@ Owner's rules (2026-11-20) and how they are kept:
   each with half a 12.5 kHz channel around it); the satellite segments (145.800-146.000, 435-438 MHz); APRS 144.800;
   A = B; any input or output of the repeater list (Tools > Repeaters' table); a channel whose RX and TX differ when
   picked from a zone; frequencies the radio cannot transmit on.
+- **A typed frequency** is MHz, its first three digits the MHz (2026-11-25): 4335, 43350 and 433500 are 433.500, 433 is
+  433.000, 4335125 is 433.5125; fewer than three digits are refused with "Type the MHz:
+  433500" ("MHz yazın: 433500") and the frequency stays. Before, only six or seven digits counted and any other entry was
+  dropped silently, so A or B went back to an older frequency (maybe a refused one, e.g. a satellite frequency typed
+  earlier) while the user believed the typed one was set: the owner's 1.0.2 report "Satellite segment" on 432.275 /
+  433.500 (that pair itself passes every rule; `tests/plus/test_ui_xband.c` `owner_pair`, typed and picked, EN + TR).
 - **CW ID every 10 minutes**: the callsign (the radio name, `radio_cwid_callsign`: refused to start without one) in
   Morse on each frequency transmitted on since the last ID: after the first over, then again once 10 minutes have passed
   and there was traffic (as the SFR repeater's ID); the CW beacon's keyer (FM carrier, the settings' speed and tone).
@@ -3764,6 +3772,50 @@ cross-band session runs) covers them, and Tools > Cross-band refuses to start wh
 (`dota_on()`). The last calls' hook into `ui_dual.c` now anchors right after multi-watch's part (air watch's follows
 it). Both builds: **830,568 B flash, 209,368 B static RAM: 2,088 B free** (the base with both compiled out 821,412 B / 209,072 B: round 14 xband +9,156 B / +296 B);
 zero warnings, forced rebuild identical, stacks unchanged (UI 184 B, radio 760 B, start 348 B free: as the base).
+
+### A mode per side (2026-11-24, branch `xbmulti`; docs/xband-multiproto-study.md steps 2 and 3)
+
+The form has **A mode** and **B mode** rows (DMR, FM, P25, NXDN; a channel picked brings its mode, a YSF or dPMR channel
+is refused). An over goes from one side to the other only where the pair is built (`xband_pair_ok`); a pair built one
+way listens on its source side only (no dwell to the other side), and comes back there after each over and CW ID.
+
+| Pair | How | Over length | Proven |
+|---|---|---|---|
+| DMR -> DMR | as above: AMBE+2 air frames as heard (9 B) | 37.98 s | host; XB-1..8 not yet on the radio |
+| NXDN -> DMR | the NXDN receiver's voice fields (each a DMR air frame, docs/nxdn.md) recorded as they play (`radio_nxdn.c` hands them to the engine), sent through the call stack as a DMR over from our ID to the NXDN destination number (group or unit as heard) | 37.98 s | host (engine); the NXDN receiver itself never heard a real NXDN source |
+| DMR -> FM, NXDN -> FM | the frames kept as heard; while the over is sent they go to the DMR voice bridge's sink one per 20 ms (as an NXDN call's do), so the stock AMBE+2 codec decodes them in the audio task on its own stack (not the radio task: the codec needs about 4 KB of stack); the decoded blocks are taken from the bridge's mixer hook (`ambeVoiceSetMixer`) into 8 blocks (160 ms) of the lent memory and played into the FM modulator through the SSTV / APRS tone path (`hal_afsk_t.tx_pcm`, level 50 as SSTV); the carrier through `ptt_down` (no sub-tone: the session channel has none) | 32.3 s (1,615 frames: the 2,560 B of decoded blocks come out of the memory) | host with a fake codec and tone path; the stock decoder in FM board mode and the level on the air: radio only |
+| P25 -> P25 | the native receiver owns the session's P25 channel (any NAC, any talkgroup, our DMR ID as the unit ID); the worker plays nothing and hands every IMBE frame it would play (admitted clear voice, decoded) to a 16-frame ring at the start of its lent FIFO; the over is sent by the native transmitter's own PTT path (`native_lab_request`, radio_sm_tx_check, battery, time-out) with the ring in place of the microphone (`p25_voice_tx_imbe`: the encoder skipped), the heard NAC, the talkgroup heard and our ID; PTT is let go when the worker says sent | 18.2 s (909 frames of 11 B: the FIFO past the ring and the call replay's frames; the worker's voice context stays its own) | host: the real worker sends the ring bit for bit and hears it back (`test_xband_worker.c`), the real native receiver / transmitter with a fake worker (`test_xband_radio.inc`); on the air: radio only |
+
+Refused (`XB_R_MODE`, "Mode pair not supported"): FM -> anything (no FM receive is kept), anything -> NXDN (no NXDN
+transmitter), P25 <-> DMR / FM / NXDN (transcoding), NXDN -> NXDN, FM -> FM; YSF is no mode here. Every refusal before
+it stays as it was (amateur bands, PMR446, repeater segments and the list, satellite segments, APRS, A = B, a repeater
+channel, the callsign, the DMR ID, a band the radio cannot transmit on, a DOTA session), and so do the question, the
+lock, CROSS and the CW ID. No new TX or band limit was added.
+
+How the radio core keeps the guards: DMR and FM overs key through `ptt_down` (TX inhibit, the battery, the band, the
+radio's time-out); a P25 over through the native transmitter's PTT path, the same one a user's P25 PTT takes. While a
+session runs, `native_lab_request` passes no PTT to the native transmitter except the session's own (`xband_native_key`):
+a user's PTT on the session's P25 channel gets the deny tone like any other. The radio task does not run the radio
+core's poll while the native receiver owns the radio, so the session is polled from `radio_sm_native_maintenance`
+then. Before the CW ID on a P25 side and at the session's end the channel becomes an FM placeholder, so the native
+receiver lets go first (`xband_in_t.id_wait` holds the engine meanwhile; an ID that never got keyed beeps and does not
+count); the memory is given back and the user's channel tuned only after it let go (5 s at most).
+
+Cost (`--plus`, over `ddm25` b2ece2e with rxnac, about 890,276 B / 204,968 B): **FLASH 893,908 B (about +3,630; 7,212
+B left of 901,120), static RAM 205,016 B (+48; 6,440 B free)**; zero warnings, forced rebuild identical, every task
+fits (the radio task's deepest path now runs through the P25 keying into `native_lab_request`: 324 B free).
+
+Host tests: `tests/plus/test_xband.c` (every pair accepted or refused, the sides heard, PMR446 / repeater refusals with
+mixed modes, NXDN -> DMR and DMR -> FM one way both directions, P25 frames of 11 B intact and their capacity, an ID that
+was never keyed), `tests/plus/test_xband_radio.inc` (DMR -> FM through the real radio core and voice bridge with a
+fake tone path: the FM carrier on B without a tone, every frame to the bridge, the blocks played out, the ID, a tone
+path that refuses; P25 -> P25 through the real native receiver and transmitter: the channel taken, PTT refused with the
+deny tone and never handed on, 300 frames recorded and handed back in order with the heard NAC, talkgroup and our ID,
+the ID after the native receiver let go, the stop), `tests/plus/test_xband_worker.c` (the real P25 worker: the lend,
+no microphone, 120 frames from the ring out bit for bit in LDUs, the same blocks heard back into the ring, nothing
+played, the lent memory untouched, the give back), `tests/plus/test_ui_xband.c` (the mode rows, every pair refused
+with its toast, DMR -> FM still refused on a repeater segment and PMR446). Radio rows: XB-9..XB-13. **Nothing of
+this has been on the air.**
 
 Tests: `tests/plus/test_xband.c` (the rules at every segment's edge; an over recorded and sent in order; B to A, a
 private call; the dwell, held by bursts; a key-up and an encrypted call not relayed; a recording whose end never comes;

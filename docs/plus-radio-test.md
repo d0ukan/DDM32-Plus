@@ -607,9 +607,20 @@ one on B (70 cm), or the SDR; an FM radio or the SDR on B to hear the CW ID.
 | XB-3 | Radio 1 on 145.500 (CC 1, TS 1) talks 10 s to TG 9 | the DM-32 plays it; "Record A 0:10"; at its end "Send B 0:10": radio 2 on 433.500 hears the over from the DM-32's DMR ID to TG 9, the voice as radio 1 said it; then the CW ID (the callsign, 20 wpm) on 433.500 in FM; then "Listen B" |
 | XB-4 | Radio 2 answers on 433.500; within 10 minutes a third over; after 10 minutes another one | the answer sent on 145.500; no ID for the second and third overs; after the 10 minutes the CW ID on each frequency it transmitted on since the last ID |
 | XB-5 | Radio 1 talks 45 s | the alert tone and "!" on Home at about 38 s (the memory full); 38 s sent on B, the rest not |
-| XB-6 | Refusals: B 446.00625, 439.000, 145.600, 435.500, 144.800, 145.500 (= A), 162.550; the picker's repeater channel; Mode FM and P25; a radio name that is not a callsign | the toasts "PMR446: no repeaters allowed", "Repeater frequency" (x2), "Satellite segment", "APRS frequency", "A and B are the same", "Not an amateur band", "Repeater channel (RX and TX differ)", "DMR only for now", "Set your callsign ..."; nothing transmits |
+| XB-6 | Refusals: B 446.00625, 439.000, 145.600, 435.500, 144.800, 145.500 (= A), 162.550; the picker's repeater channel; modes FM / FM, P25 / DMR, DMR / P25, NXDN / NXDN; a radio name that is not a callsign | the toasts "PMR446: no repeaters allowed", "Repeater frequency" (x2), "Satellite segment", "APRS frequency", "A and B are the same", "Not an amateur band", "Repeater channel (RX and TX differ)", "Mode pair not supported" (x4), "Set your callsign ..."; nothing transmits |
 | XB-7 | Back while it sends (XB-3) | off the air at once, "Cross-band off"; the user's channel back (frequency, mode, power) |
 | XB-8 | Start from a P25 channel while it receives; stop after one relay | it starts within 2 s; after the stop the P25 channel receives again; Tools > Last call's P25 replay: nothing kept (the memory came back cleared) |
+
+A mode per side (docs/plus.md "A mode per side"). Same rules as above (transmits, attended, amateur frequencies). Do
+XB-1..XB-3 first: these build on the DMR relay.
+
+| # | Do | Expect |
+|---|---|---|
+| XB-9 | A 145500 **DMR**, B 433500 **FM**, Start; radio 1 (DMR, CC 1, TS 1) talks 10 s on A; an FM radio or the SDR on 433.500 | Home stays on "Listen A" (no "Listen B": FM is never heard); "Record A 0:10", then "Send B": an FM carrier on 433.500 without a sub-tone carrying radio 1's voice (stock codec decoded; note level and clarity), unkeyed about 0.3 s after the voice ends; the CW ID on 433.500; then "Listen A" |
+| XB-10 | XB-9 with radio 1 talking 40 s | cut at about 32 s with the alert tone and "!" |
+| XB-11 | A 145500 **NXDN** (needs an NXDN48 source on A), B 433500 **DMR**; the source calls group 100 | "Record A", then a DMR over on 433.500 from the DM-32's ID to TG 100 with the NXDN voice; with B **FM** instead: the voice in FM. An encrypted NXDN call: not relayed |
+| XB-12 | A 145500 **P25**, B 433500 **P25**; the factory P25 radio on A (NAC 659, TG 101) talks 10 s | nothing heard on the speaker while recording ("Record A 0:10"); then on 433.500 a P25 call NAC 659, TG 101 from the DM-32's DMR ID with the voice as heard (the factory radio on B decodes it); the CW ID on 433.500 (FM); then "Listen B"; the factory radio answers on B: sent on A the same way |
+| XB-13 | During XB-12's session: PTT; Back while it sends | PTT: the deny tone, no P25 key-up; Back: off the air, "Cross-band off", the user's channel back (a P25 channel receives again) |
 
 DMR receive audio (Tools > Diagnostics, docs/plus.md "DMR receive audio diagnostics"). Receive only. Needs a steady
 DMR source on a channel: the other radio a few metres away on Low (its frequency, colour code, slot and talkgroup on

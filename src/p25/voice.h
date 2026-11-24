@@ -88,6 +88,11 @@ int p25_voice_tx_begin(p25_voice *v, const p25_call *call);
  * Returns 0 on invalid state, codec failure or queue overflow. Abort/unkey.
  * Producer must be paced by microphone time, not called in an unbounded loop. */
 int p25_voice_tx_pcm(p25_voice *v, int16_t pcm[160]);
+#if defined(CONFIG_XBAND) && CONFIG_XBAND
+/* DDM32 Plus cross-band: one frame's eight IMBE parameters as heard (a P25 receive's, unchanged) in place of a
+ * microphone block: the encoder is skipped. Paced and refused as p25_voice_tx_pcm */
+int p25_voice_tx_imbe(p25_voice *v, const uint16_t u[8]);
+#endif
 /* Release: encode the codec tail, then pad the incomplete nine-frame LDU
  * and append a TDU. Queue backpressure defers finishing until tx_read drains;
  * new PCM is rejected after release. Empty PTT is canceled. Task context only. */
