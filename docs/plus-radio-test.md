@@ -910,3 +910,22 @@ Receive only: nothing is transmitted. English menus. SK2 is the lower of the two
 | VS-3 | Set a step with SK2 (say 5 kHz), then press Up three times; then Settings > Talk > VFO step; then switch the radio off and on, back to the VFO | Up moves the frequency 5 kHz a press; the menu row shows 5 kHz; after the power cycle the step is still 5 kHz |
 | VS-4 | On a channel (not the VFO): look at the bottom row; press SK2 briefly; then press SK2 held | no "SK2 step"; short SK2 starts dual watch as before (Back ends it); held SK2 as before |
 | VS-5 | VFO on Home: hold SK2 (dual watch starts, the VFO is a letter); press SK2 briefly twice; Back; in the VFO type "4 3 3" and press SK2; start a scan (SK2 is not the scan key: use the scan key) and press SK2 | in dual watch short SK2 selects the other letter, the step does not change; typing and scanning: SK2 does not step |
+
+## RAM saving: the safe-area frame buffer (branch `ramsave`, docs/plus.md "RAM budget", v1.0.2 candidate)
+
+The frame buffer now holds only the 220 x 310 area inside the bezel; the radio paints the 10 px left / right and
+5 px top / bottom edges in the background color itself (`fill_insets`). The host tests show the panel gets the same
+pixels on every simulator screen, but only the real panel proves the LCD side (window addressing, the edge fill, wake
+from sleep). Installing needs the owner's approval in chat; nothing here transmits. Look closely at all four edges
+and the corners in every step: any stripe, garbage, a 1 px line of another color, or a picture shifted by 10 / 5 px
+is a failure (photo it).
+
+| # | Do | Expect |
+|---|---|---|
+| FB-1 | Power on; boot splash, then Home on an FM channel, a DMR channel and the VFO | as v1.0.1: the edges in the background color, nothing shifted, text not cut at the left / top |
+| FB-2 | Menu, Channels (a long list: scroll to the end and back), Zones, Contacts, Settings pages, Tools and three tool screens (Spectrum with the waterfall, the map, SSTV) | every screen whole; the focus bar and the scroll bar reach the same place as before; no garbage left at the edges after scrolling |
+| FB-3 | Settings > Display: dark, light, high-contrast theme; the filled status bar off and on; Large text on Home | the edges change to each theme's background at once (no dark frame around a light screen, no light frame after going back to dark) |
+| FB-4 | Receive a call (FM and DMR) and transmit (licence permitting) | the RX / TX banner and the status bar (bars, battery, icons) draw as before |
+| FB-5 | Let the backlight time out / the screen sleep, wait a minute, press a key; also the power-save sleep if used | the screen comes back whole: no stripes or old content at the edges, the edges in the current theme's color |
+| FB-6 | Pop-ups: open and close quick settings, the lock (long Quick 5), a message banner | banners and pop-ups draw whole |
+| FB-7 | Only if the owner uses the debug link screenshot (`rfoundry_debug.py screenshot`): take one of Home | a whole 240 x 320 picture (the packed form now answers "unavailable", so the tool reads the slower RGB565 form; the picture is the same) |

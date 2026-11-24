@@ -109,6 +109,69 @@ Largest remaining RAM users: `ucHeap` 41.5 KB, frame buffer 38.4 KB, P25 encoder
 decoder 6.1 KB, P25 audio FIFO 5.8 KB, APRS state 7.2 KB + rings 6.2 KB. More digital modes later
 need mode-exclusive sharing of these (owner agrees modes run one at a time).
 
+### RAM map and the v1.0.2 saving (branch `ramsave`, 2026-11-24)
+
+For the software P25 receive probe (about 4 KB wanted; `docs/upstream-survey-2026-11-24.md` finding 4) two of the
+three savings of RadioFoundry 454a5b76 (#792, MIT) were ported (`tools/plus_ramsave.py`, switches `PLUS_FB_SAFE_BYTES`
+and `PLUS_SHARED_SLOT_BUF` in `plus_features.PLUS_RAM_TRIM`, Plus builds only); the third, the start-up stack in the
+RTOS heap, was already in (`prepare_startup_stack`). No feature removed, no task stack changed.
+
+| Change | Freed | How |
+|---|---:|---|
+| Frame buffer of the safe area only | 4,300 B | `gfx.c` `fb_words` holds the 220 x 310 area inside the bezel (34,100 B) instead of the 240 x 320 panel (38,400 B). Nothing was ever drawn in the 10 / 5 px insets (every drawing call is clipped to the safe area, `gfx_clear` leaves them palette entry 0); now `display_dm32.c` writes the rows to that window (`st7789_write_window_indexed`) and paints the insets in the clear color (`fill_insets`) with the first frame, after `gfx_invalidate` and when the clear color changes. `gfx_read_rgb565` still returns the whole panel. The debug link's packed screenshot answers "unavailable" for it (the host reads the RGB565 form: same picture). `display_dm32.c` checks at build time that `PLUS_FB_SAFE_BYTES` is exactly the safe area's size and refuses web control / HTTP (not ported) |
+| One settings slot buffer | 256 B | `settings.c` `next_slot` and `put_record`'s read-back share `slot_buf` (next_slot's scan ends before the read-back; under the storage lock) |
+| One storage slot buffer | 256 B | `storage.c` `scan_region` and `mark` share `region_slot` (mark runs after the scan loop, or from `storage_claim`; under the storage lock) |
+
+Measured (`--plus --stack-check --verify-rebuild`, zero warnings, forced rebuild identical, every task's stack
+fits with the same free bytes as before, the least free prvIdleTask 136 B): `ddm25` ab45bbe FLASH 882,432 B, RAM
+209,488 B (1,968 free); `ramsave` FLASH 883,264 B (+832), RAM 204,696 B (**-4,792 B, 6,760 B free**; the 1,500 B floor
+kept). Tests: `tools/test_ramsave.py` (in classic-test): every UI simulator gallery, audit and worst-case screen (718
+runs, DM-32 and DM-1701 classes, every theme) drawn with the whole-panel and the safe-area frame buffer, the emulated
+panel compared after every tick (identical; a broken inset repaint fails 48 of them); gfx unit checks (odd insets,
+more than 16 colors, edges, `gfx_invalidate`), the array's last byte under ASan, the panel driver's window write,
+upstream's settingsTest and codeplugTest output line for line the same with the shared buffers. Only the panel itself
+can prove the LCD side: docs/plus-radio-test.md FB-1 .. FB-7.
+
+The 30 largest static RAM users after it (`csky-elf-nm -S --size-sort`, `.data` / `.bss`):
+
+| B | Symbol | File |
+|---:|---|---|
+| 34,900 | ucHeap (RTOS heap: task stacks, queues) | boards/dm32/board.c |
+| 34,100 | fb_words (frame buffer; was 38,400) | core/ui/gfx.c |
+| 7,328 | a (APRS state) | core/aprs/aprs.c |
+| 7,168 | enc_state | platform/hrc7000/vocoder.c |
+| 6,144 | dec_state | platform/hrc7000/vocoder.c |
+| 5,788 | fifo (P25 audio) | core/p25/p25_lab.c |
+| 5,372 | voice | core/p25/p25_lab.c |
+| 4,400 | rp_buf (call replay; lent to cross-band) | core/p25/p25_lab.c |
+| 4,096 | buffer (sector) | core/storage/storage.c |
+| 3,796 | sm | core/radio/radio_task.c |
+| 2,296 | eng | platform/hrc7000/dmr_glue.c |
+| 2,096 | test | core/native_modem/native_lab.c |
+| 2,048 | req | core/cps/cps_openfw.c |
+| 1,728 | txBursts | core/dmr/dmrDataService.c |
+| 1,728 | data_store | core/hotspot/hotspot.c |
+| 1,640 | b | core/radio/dota.c |
+| 1,280 | spk_q | platform/hrc7000/audio_pcm.c |
+| 1,280 | row_hash | core/ui/gfx.c |
+| 1,032 | reply | core/debuglink/debuglink.c |
+| 1,024 | rx_buf | platform/hrc7000/uart.c |
+| 1,024 | full_sine (.data) | libdm32_imbe.a (fft.o) |
+| 1,024 | fault_stack | platform/hrc7000/irq.c |
+| 960 | recent | core/ui/ui_app.c |
+| 960 | events | core/hotspot/hotspot.c |
+| 900 | sfr_runner | core/dmr/sfrRunner.c |
+| 848 | sector | drivers/cal/baofeng/baofeng_cal.c |
+| 824 | ui_st | core/ui/ui_app.c |
+| 816 | st_static | core/radio/radio_nxdn.c |
+| 796 | s | core/dmr/call/dmr_call.c |
+| 768 | r | core/codeplug/codeplug.c |
+
+Left alone (a future job): the six 740 B `radio_view_t` copies (`ui.c` view, `debuglink.c` view, `ui_svc_radio.c`,
+`ui_svc_storage.c`, `radio_task.c` shared_view, `ui_dual.c`), 4.4 KB together, but owned by different tasks: sharing
+them needs a locking design. The interrupt-entry rows of the stack check (fifo_tick, sys, ts_*, rftx, guard, pa) share
+the one interrupt stack, so they give nothing back.
+
 ### P25 scan (`CONFIG_P25_SCAN`, ours)
 
 Classic skips P25 channels in a zone scan. Plus scans them on the FM path (the receiver's noise reading

@@ -1007,5 +1007,8 @@ def main():
     # DDM32 Plus round 16 polish: the Turkish catalogue complete (tools/test_polish.py)
     import test_polish
     test_polish.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus v1.0.2 RAM saving: the safe-area frame buffer, one slot buffer each (tools/test_ramsave.py)
+    import test_ramsave
+    test_ramsave.main(ROOT,APP,OUT,flags,host)
 
 if __name__=='__main__':main()

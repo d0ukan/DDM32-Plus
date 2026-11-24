@@ -732,3 +732,9 @@ __pycache__/
 !/tools/test_vfostep.py
 !/integration/radiofoundry/vfostep/ui_vfostep.c
 !/tests/plus/test_ui_vfostep.c
+# branch ramsave: v1.0.2 RAM saving, safe-area frame buffer and shared slot buffers (tools/plus_ramsave.py)
+!/tools/plus_ramsave.py
+!/tools/test_ramsave.py
+!/tests/plus/test_fbsafe_gfx.c
+!/tests/plus/test_fbsafe_gallery.c
+!/tests/plus/test_fbsafe_st7789.c
