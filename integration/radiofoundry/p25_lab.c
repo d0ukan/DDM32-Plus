@@ -81,6 +81,11 @@ static uint32_t live_sid;
 static p25_call channel_call;
 static uint16_t channel_rx_nac;
 static uint8_t channel_selective;
+#if CONFIG_P25_RXGL
+/* DDM32 Plus P25 RX group list of the channel (p25_lab_set_groups): with Selective its talkgroups play too */
+static uint16_t channel_groups[P25_LAB_GROUPS];
+static uint8_t channel_group_count;
+#endif
 static uint32_t channel_voice_ms;
 static bool channel_voice_seen;
 #if CONFIG_P25_SCAN
@@ -162,9 +167,26 @@ int p25_lab_set_channel(uint16_t receive_nac,uint16_t transmit_nac,uint16_t talk
 #if CONFIG_P25_TRUNK
     if(ok)trunk_rx=false;   /* a channel of its own: no TSDUs (p25_lab_set_trunk after this for trunk following) */
 #endif
+#if CONFIG_P25_RXGL
+    if(ok)channel_group_count=0;   /* no RX group list (p25_lab_set_groups after this) */
+#endif
     taskEXIT_CRITICAL();
     return ok;
 }
+#if CONFIG_P25_RXGL
+int p25_lab_set_groups(const uint16_t *talkgroups,uint8_t count)
+{
+    if(count>P25_LAB_GROUPS)count=P25_LAB_GROUPS;
+    taskENTER_CRITICAL();
+    int ok=state!=1;
+    if(ok){
+        for(unsigned i=0;i<count;i++)channel_groups[i]=talkgroups[i];
+        channel_group_count=count;
+    }
+    taskEXIT_CRITICAL();
+    return ok;
+}
+#endif
 void p25_lab_channel_stop(void) { stop_requested=1; }
 #if CONFIG_P25_SEARCH
 /* DM32 Plus P25 search: valid P25 frames heard on the channel receive (encrypted or not), when the last one came,
@@ -1136,6 +1158,10 @@ static int receive_run(void)
 #if CONFIG_DEV_TX && CONFIG_P25_CHANNELS && CONFIG_P25_EXTRAS
     /* DM32 Plus P25 extras: our unit ID on this channel; a unit-to-unit call for it plays on a talkgroup channel too */
     if(request_mode==5)voice.own_unit=channel_call.source_id;
+#endif
+#if CONFIG_DEV_TX && CONFIG_P25_CHANNELS && CONFIG_P25_RXGL
+    /* DDM32 Plus: the channel's RX group list widens its talkgroup filter (none without one: Normal, search, trunk) */
+    if(request_mode==5 && group){voice.rx_groups=channel_groups;voice.rx_group_count=channel_group_count;}
 #endif
 #if CONFIG_CALL_REPLAY
     voice.tap=request_mode==5 ? replay_tap : NULL;  /* P25 channel receive only (a YSF one never decodes IMBE here) */

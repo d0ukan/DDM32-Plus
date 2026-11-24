@@ -32,6 +32,13 @@ typedef struct {
      * group_filter 0 (any talkgroup) every one plays. Set own_unit after p25_voice_init. */
     uint32_t active_target, own_unit;
 #endif
+#if defined(CONFIG_P25_RXGL) && CONFIG_P25_RXGL
+    /* DDM32 Plus P25 RX group list: with a talkgroup filter (group_filter != 0) a group call on one of these
+     * rx_group_count talkgroups plays too. The caller's storage, unchanged while the receiver runs; set after
+     * p25_voice_init (which clears it) */
+    const uint16_t *rx_groups;
+    uint8_t rx_group_count;
+#endif
     uint16_t voice[9][8];
     p25_voice_packet queue[P25_VOICE_QUEUE];
     uint16_t packet_symbol;
