@@ -92,14 +92,17 @@ Part A fits clearly (well under 8 KB flash and 1 KB RAM, no new storage) and is 
 `tests/plus/test_p25rxgl.c` (real codeplug over a simulated flash: list / Any / None and TG persist over a save and
 a reboot, the record byte, the filter rule, the talkgroups taken, the worker hand-over faked; run by
 `tools/test_p25rxgl.py` from `tools/test_classic.py`). Not tested on the radio. Part B waits for the owner.
-**The build and the host suites have not run yet (WSL failed, section 6). Do not merge until they pass.**
+Built and host-tested in WSL (section 6); still not tested on the radio.
 
 ## 6. Measured
 
-Not yet measured. The base was built in WSL (`~/ddm32-rxgl`, research data linked: FLASH 885,400 B, RAM 204,784 B,
-zero warnings, forced rebuild identical). Before the feature build could run, WSL failed: drive C: had about 114 MB
-free, its disk gave I/O errors, and then it would not start (`Wsl/Service/CreateInstance/E_FAIL`). Still to do: the
-`--plus --stack-check --verify-rebuild` build (FLASH / RAM delta, zero warnings, forced rebuild identical, stack
-check), `tools/test_voice.py` and `tools/test_classic.py` (with `tools/test_p25rxgl.py`). Checked on Windows only:
-`voice.c` and `tests/test_voice.c` compile with gcc `-Wall -Wextra -Werror` both with and without `CONFIG_P25_RXGL`,
-and the changed Python tools byte-compile.
+2026-11-24, WSL, `--plus --stack-check --verify-rebuild`, real research data:
+
+| Tree | FLASH (of 901,120 B) | RAM (of 211,456 B) | Notes |
+|---|---|---|---|
+| ddm25 fa379fa (base) | 885,400 B | 204,784 B (6,672 free) | |
+| rxgl on fa379fa | 885,936 B (+536) | 204,944 B (+160; 6,512 free) | 0 warnings after the verifier's brace fix, forced rebuild identical |
+| rxgl merged with ddm25 5a611ed (swprobe) | 888,488 B | 204,960 B (6,496 free) | 0 warnings, forced rebuild identical |
+
+`tools/test_voice.py` (with and without `CONFIG_P25_RXGL`) and `tools/test_classic.py` (with `tools/test_p25rxgl.py`)
+pass on both trees.
