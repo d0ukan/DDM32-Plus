@@ -89,6 +89,15 @@ static void fsc_begin(radio_sm_t *sm, uint32_t now_ms)
 	fsc_tick_listen = false;
 }
 
+// The band of the stop (scanst.cost BANDS): the air band (108-137 MHz, or AM receive), VHF, UHF
+static uint8_t fsc_band(const radio_sm_t *sm)
+{
+	uint32_t hz = sm->view.ch.rx_hz;
+	if (sm->view.am || (hz >= 108000000u && hz < 137000000u))
+		return FS_B_AIR;
+	return hz < 300000000u ? FS_B_VHF : FS_B_UHF;
+}
+
 // A new stop since the last look (scan_tuned), or the same one tuned anew (a pause's end: a fresh listen)
 static void fsc_observe(radio_sm_t *sm)
 {
@@ -104,7 +113,8 @@ static void fsc_observe(radio_sm_t *sm)
 		uint8_t m = fsc_mode_of(sm);
 		bool chan = sc->kind == SCAN_ZONE && !sm->view.vfo;
 		fs_stop_about(chan ? sm->view.channel_number : 0, chan && sm->view.zone_index != fsc_zone,
-			      fsc_mode != FS_MODES && (fsc_mode == FS_M_DMR) != (m == FS_M_DMR));
+			      fsc_mode != FS_MODES && (fsc_mode == FS_M_DMR) != (m == FS_M_DMR), fsc_band(sm),
+			      sm->view.am);
 		fsc_mode = m;
 	} else if (s->state != FS_ST_OFF && s->tuned_ms != sc->tuned_ms) {
 		s->tuned_ms = s->first_ms = s->last_ms = sc->tuned_ms;
@@ -119,24 +129,25 @@ static uint16_t fsc_line(const radio_sm_t *sm)
 	return (uint16_t)((uint16_t)radio_sm_squelch_open_below(sq) + FS_NOISE_MARGIN);
 }
 
-// One reading: clearly nothing the scan would stop or probe for
-static bool fsc_quiet(const radio_sm_t *sm, const radio_status_t *st)
+// One reading: 0 when clearly nothing the scan would stop or probe for, else why not (FS_FB_*: scanst's fall-back
+// reason)
+static uint8_t fsc_not_quiet(const radio_sm_t *sm, const radio_status_t *st)
 {
 	if ((uint16_t)st->noise < fsc_line(sm))
-		return false;
+		return FS_FB_NOISE;
 	if (fsc_mode == FS_M_FM)
-		return true;
+		return 0;
 #if CONFIG_DMR
 	if (st->rssi_dbm == 0 || dmr_strength_heard(sm, (int16_t)(st->rssi_dbm + FS_RSSI_MARGIN)))
-		return false;
+		return FS_FB_STRENGTH;
 	if (fsc_mode == FS_M_DMR) {
 		uint32_t heard_ms;
 		if (sm->view.dmr.state != RDMR_IDLE ||
 		    (dmr_call_last_activity(&heard_ms) && (int32_t)(heard_ms - sm->scan.tuned_ms) >= 0))
-			return false;
+			return FS_FB_DMR;
 	}
 #endif
-	return true;
+	return 0;
 }
 
 // radio_sm_tick: read the stop, step when it is quiet
@@ -147,13 +158,14 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 		fsc_tick_listen = false;
 		return;
 	}
+	fsc_observe(sm);
 	// The radio task's gap since the last tick, both in a listen phase (a hold, the native receiver's or a pause's
-	// time is not the task's): what reading the next channel and retuning cost, whoever stepped
+	// time is not the task's): what reading the next channel and retuning cost, whoever stepped (counted to the stop
+	// stepped to)
 	if (fsc_tick_listen && sc->phase == SCAN_PH_LISTEN)
 		fs_radio_cost(now_ms - fsc_tick_ms, 0);
 	fsc_tick_ms = now_ms;
 	fsc_tick_listen = sc->phase == SCAN_PH_LISTEN;
-	fsc_observe(sm);
 	fs_stop_t *s = fs_cur();
 	if (s->state != FS_ST_SAMPLING || sc->phase != SCAN_PH_LISTEN || sm->view.monitor || sm->ptt || sm->hotspot ||
 	    sm->view.state == RS_TX || sm->view.state == RS_TX_DENIED || now_ms - sc->tuned_ms < FS_SETTLE_MS ||
@@ -167,12 +179,15 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 	if (sm->save_asleep)
 		return;
 #endif
-	bool idle = sm->view.state == RS_IDLE && !sm->view.am && !sm->view.bcast, quiet = idle;
+	bool idle = sm->view.state == RS_IDLE && !sm->view.am && !sm->view.bcast;
+	// Not idle: AM or broadcast receive (never read quiet), or the squelch already open
+	uint8_t why = sm->view.am || sm->view.bcast ? FS_FB_AM : FS_FB_OPEN;
 	radio_status_t st = { 0 };
 	if (idle) {
 		board.radio->status(&st);
-		quiet = fsc_quiet(sm, &st);
+		why = fsc_not_quiet(sm, &st);
 	}
+	bool quiet = why == 0;
 	uint8_t v = fs_feed(s, now_ms, quiet, fsc_mode == FS_M_DMR ? FS_SPAN_DMR_MS : FS_SPAN_MS);
 	if (v == FS_WAIT)
 		return;
@@ -180,7 +195,7 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 	if (v != FS_QUIET) {
 		// What handed it to the classic rules (noise 0: the squelch was already open, or AM / broadcast)
 		uint16_t line = fsc_line(sm);
-		fs_fallback_reading(fsc_mode, idle ? st.noise : 0u, (uint8_t)(line > 255u ? 255u : line),
+		fs_fallback_reading(fsc_mode, why, idle ? st.noise : 0u, (uint8_t)(line > 255u ? 255u : line),
 				    idle ? st.rssi_dbm : 0);
 		return;
 	}
@@ -189,20 +204,24 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 		(void)native_lab_scan_stop(native_lab_scan_key(sm), (uint8_t)sc->steps, false);	// its stop count
 #endif
 	scan_step(sm, now_ms);
-	fs_radio_cost(0, hal_millis() - now_ms);	// reading the next channel and retuning
+	uint32_t took = hal_millis() - now_ms;	// reading the next channel and retuning
 	fsc_stepped = true;
 	fsc_stepped_ms = sc->tuned_ms;
 	outputs(sm);
 	fsc_observe(sm);
+	fs_radio_cost(0, took);			// the stop stepped to
 }
 
 // radio_sm_poll's squelch: true while the receiver's last retune was the tick's step and is younger than a classic
 // stop is at its first poll (the squelch doesn't open yet). By the retune, not the phase or the algorithm: a quiet
 // priority look ended on the tick tunes back to its wait (RESUME), and the switch to classic takes effect at the stop
 // the tick has just stepped to, which is as young
-// v1.0.2: also after a step the poll made (classic, a priority stop), FS_RETUNE_GUARD_MS: a classic stop's first poll
-// is 22 ms or more after its retune when the step took no time (as in v1.0.0: never held back then); after a slow step
-// it can come sooner, inside the noise reading's dip
+// v1.0.2: also after any other step (the poll's: classic, a priority stop; a request's: the scan's start, a nuisance
+// skip), FS_RETUNE_GUARD_MS. A classic step the poll made on time meets its first poll 22 ms or more later, so the
+// guard holds back only a first poll that comes sooner: after a slow step, a step a request made between two polls,
+// or polls off their grid. Not with a scan dwell under FS_RETUNE_GUARD_DWELL_MS: there a poll the guard held back could
+// be the last before the dwell's end, and a channel that opens the squelch at once (FM, no tone) be stepped past on
+// its first open; those dwells keep v1.0.1's squelch exactly
 static bool fsc_guard(const radio_sm_t *sm, uint32_t now_ms)
 {
 	const scan_t *sc = &sm->scan;
@@ -211,5 +230,6 @@ static bool fsc_guard(const radio_sm_t *sm, uint32_t now_ms)
 	int32_t age = (int32_t)(now_ms - fsc_retuned(sc));
 	if (fsc_stepped && sc->tuned_ms == fsc_stepped_ms)
 		return age < (int32_t)FS_POLL_GUARD_MS;
-	return sc->tuned_ms == fsc_retune_tag && age < (int32_t)FS_RETUNE_GUARD_MS;
+	return sc->tuned_ms == fsc_retune_tag && sc->cfg.dwell_ms >= FS_RETUNE_GUARD_DWELL_MS &&
+	       age < (int32_t)FS_RETUNE_GUARD_MS;
 }

@@ -15,7 +15,8 @@ Firmware. Host-tested only (simulator flows in English and Turkish, normal and L
   is not the step key. See docs/plus.md "VFO step key".
 
 - Zone scan slow in a zone you made, classic and fast (owner's report 2026-11-24, v1.0.1; host-tested only, rows
-  ZS-1..ZS-5; docs/plus.md "A zone scans slowly"). The scan has no zone-specific path: a stored zone, "All channels"
+  ZS-1..ZS-5; docs/plus.md "A zone scans slowly"). **The cause is not proven** until rows ZS-1 / ZS-2 are run on the
+  radio; what follows is a mechanism found in the code and removed. The scan has no zone-specific path: a stored zone, "All channels"
   included, is read once when chosen. What cost time is reading channels on the radio task: a stop read three (the
   scan's start channel at every stop, needed only for the priority revisits, and the channel picked twice), and with
   any P25 channel in the codeplug each read walks the codeplug settings area on the data chip (several walks for a P25
@@ -28,8 +29,11 @@ Firmware. Host-tested only (simulator flows in English and Turkish, normal and L
   depends on its channels and on the channel the scan starts from: row ZS-1 (1.0.1's counters for both zones) is the
   proof on the radio. New `scanst` lines say where a scan's time goes: `slow` (the longest stop, its channel and why),
   `fb` (the reading that handed the last stop to classic), `cost` (the radio task's longest tick gap and step,
-  stops in another zone, FM / DMR switches); `pc/radiotools/plus_live.py --scan-stats` reads them (read only). No new
-  limits. FLASH +1,004 B (883,436 B, 98.04 %), RAM +56 B (1,912 B free), stacks fit (--stack-check passed; radio task 656 B free).
+  stops in another zone, FM / DMR switches, band jumps VHF / UHF / air band, AM stops), with the fall-back's reason
+  (noise, am, open, strength, dmr) and the slow stop's cause class (held, heard, the reason, dmrcfg, step, quiet);
+  `pc/radiotools/plus_live.py --scan-stats` reads them (read only). The new 20 ms squelch guard also holds back a
+  first poll that comes early after a step a request made (the scan's start, a nuisance skip); it is off with a scan
+  dwell under 75 ms, so short dwells keep v1.0.1's squelch. No new limits. FLASH +1,500 B (884,576 B, 98.16 %), RAM +64 B (1,880 B free), stacks fit (--stack-check passed).
 
 ## v1.1.0 (candidate, not released yet)
 

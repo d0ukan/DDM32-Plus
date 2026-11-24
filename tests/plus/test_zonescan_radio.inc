@@ -24,10 +24,14 @@ typedef struct {
 	unsigned stops;
 } zn_res_t;
 
+static bool zn_vhf;	/* every other channel on 2 m (the band counter's case) */
+
 /* fx_codeplug's 16 channels (zone 0, renamed "All channels"), then zone 1 "Mine" */
 static void zn_codeplug(void)
 {
 	fx_codeplug();
+	for (uint16_t n = 2; zn_vhf && n <= 16; n += 2)
+		chans[n].rx_hz = chans[n].tx_hz = 145000000u + 12500u * n;
 	strcpy(zones[0].name, "All channels");
 	memset(&zones[1], 0, sizeof zones[1]);
 	strcpy(zones[1].name, "Mine");
@@ -179,6 +183,21 @@ static void test_zonescan_figures(void)
 	CHECK(r.st.slow_ch == 9 && (r.st.slow_why & (FS_WHY_HELD | FS_WHY_FALLBACK)) == (FS_WHY_HELD | FS_WHY_FALLBACK));
 	CHECK(r.st.slow_ms >= 3000u);
 	CHECK(r.st.fb_ch == 9 && r.st.fb_mode == FS_M_FM && (r.st.fb_noise == 0 || r.st.fb_noise < r.st.fb_line));
+	CHECK(r.st.fb_why == FS_FB_NOISE || r.st.fb_why == FS_FB_OPEN);
+	CHECK(((r.st.slow_why >> FS_WHY_FB_SHIFT) & 7u) == r.st.fb_why);
+
+	/* The band counter: Mine with every even channel on 2 m (12, 16, 2, 14, 10, 6 VHF; 3, 9, 1, 5, 7, 11 UHF) */
+	zn_vhf = true;
+	fx_setup(16, true, FX_NONE, 0, 0, 0, 0);
+	zn_res_t band_run = zn_run(true, 1, 0, 0, 4, 10000);
+	zn_vhf = false;
+	printf("Mine across VHF / UHF: %u band changes in %u stops, %u AM stops\n", (unsigned)band_run.st.bands,
+	       (unsigned)band_run.st.stops, (unsigned)band_run.st.am_stops);
+	CHECK(band_run.st.bands > band_run.st.stops / 3u && band_run.st.bands <= band_run.st.stops && band_run.st.am_stops == 0);
+	CHECK(band_run.st.noticed == 0 && band_run.st.fallback == 0);
+	fx_setup(16, true, FX_NONE, 0, 0, 0, 0);
+	zn_res_t one = zn_run(true, 1, 0, 0, 4, 10000);
+	CHECK(one.st.bands == 0);
 
 	/* fx's mixed zone (channels 4, 8, 12, 16 DMR, 6, 14 P25): Mine holds DMR 12 and 16 among FM and P25 ones */
 	fx_setup(16, false, FX_NONE, 0, 0, 0, 0);
@@ -187,12 +206,57 @@ static void test_zonescan_figures(void)
 	CHECK(mixed.st.switches > 0 && mixed.st.switches <= mixed.st.stops);
 }
 
+/* A short scan dwell (60 ms, the setting's range starts at 50): classic, no read time, an FM signal without a tone on
+ * one channel of Mine. The retune guard is off under FS_RETUNE_GUARD_DWELL_MS, so classic catches what it caught */
+static void test_zonescan_short_dwell(void)
+{
+	unsigned overs = 0, caught = 0;
+	for (uint32_t seed = 1; seed <= 4; seed++) {
+		fx_setup(16, true, FX_FM, 8, -105, 0, 0);
+		fx.rand = seed * 7919u;
+		zn_codeplug();
+		start();
+		native_lab_init();
+		fake_power.switch_on = classic_on;
+		fake_power.battery_mv = classic_battery;
+		classic_busy = classic_stop = classic_receiving = false;
+		fs_set_fast(false);
+		req(RREQ_ZONE, 1);
+		sm.set.scan_dwell_ms = 60;
+		fx.overs = 0;
+		for (uint32_t t = 1500u; fx.overs < 4; t += 6000u) {
+			fx.t0[fx.overs] = now + t + fx_rand(1000);
+			fx.len[fx.overs++] = 2000u;
+		}
+		bool got[4] = { false };
+		fx_begin_scan();
+		CHECK(sm.scan.cfg.dwell_ms == 60);
+		while ((int32_t)(now - fx.t0[3] - 2500u) < 0) {
+			fx_ms();
+			/* caught: held (or probed) on channel 9 while its over is on (fx's own count is by zone 0's position) */
+			int k = fx_over_now();
+			if (k >= 0 && hw.rx_hz == fx_hz(8) &&
+			    (sm.scan.phase == SCAN_PH_HOLD || sm.scan.phase == SCAN_PH_PROBE))
+				got[k] = true;
+		}
+		for (int k = 0; k < 4; k++) {
+			overs++;
+			caught += got[k];
+		}
+		req(RREQ_SCAN, RSCAN_STOP);
+		fs_set_fast(true);
+	}
+	printf("Classic, scan dwell 60 ms: %u of %u overs caught\n", caught, overs);
+	CHECK(caught == overs);
+}
+
 int main(void)
 {
 	int before = failures;
 	test_zonescan_same();
 	test_zonescan_priority();
 	test_zonescan_figures();
+	test_zonescan_short_dwell();
 	printf("Zone scan, a zone made vs All channels: %d checks, %d failures\n", checks, failures - before);
 	return failures != before;
 }
