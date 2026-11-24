@@ -134,6 +134,10 @@ NXDN gönderme, FM dinleme, YSF yok). Kurallar (telsiz uygular):
   **CROSS** işareti görünür.
 - Yalnız amatör simpleks frekanslar (144-146, 430-440 MHz); röle ve uydu bölümleri, APRS 144.800, PMR446 ve röle
   listesindeki frekanslar reddedilir. A ve B aynı renk kodu ve slotu kullanır.
+- **# tuşu (bölümler serbest)**: Çapraz bant ekranında **#** uydu bölümleri, röle giriş / çıkış bölümleri, röle
+  listesi ve APRS 144.800 yasağını kaldırır ya da geri koyar. Açıkken başlığın altında **Bölümler serbest** yazar;
+  alt satırda "# bölüm: açık / kapalı" görünür. Amatör bant dışı, PMR446, A = B, röle kanalı, çağrı işareti ve diğer
+  kurallar her zaman geçerlidir. Ayar kaydedilmez: telsiz her açılışta kapalı başlar. Çalışırken değiştirilemez.
 - Bir konuşma en çok yaklaşık 38 saniye (FM tarafı varsa 32, P25'te 18 saniye) kaydedilir; daha uzunu kesilir. Her
   10 dakikada çağrı işaretiniz CW ile gönderilir (telsiz adı çağrı işareti olmalı).
 - P25 ilerken P25 sizin DMR ID'niz ve duyulan NAC / konuşma grubu ile gider; kaydedilirken hoparlörden duyulmaz.

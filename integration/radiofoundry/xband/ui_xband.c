@@ -14,6 +14,7 @@
 #include "ui_svc.h"
 #include "ui_app.h"
 #include "fmt.h"
+#include "gfx.h"
 #include "i18n.h"
 #include "board.h"
 #include "radio/radio.h"
@@ -63,12 +64,12 @@ static const char *why_text(uint8_t why)
 	return why < XB_R_COUNT && text[why] != NULL ? tr(text[why]) : NULL;
 }
 
-/* One frequency: the band plan (xband_check_hz), then the repeater list's */
-static uint8_t hz_why(uint32_t hz)
+/* One frequency: the band plan, then the repeater list's; free: the segments free (Cross-band's #, never DOTA's) */
+static uint8_t hz_why(uint32_t hz, bool free)
 {
-	uint8_t why = xband_check_hz(hz);
+	uint8_t why = xband_check_hz_free(hz, free);
 #if CONFIG_REPEATERS
-	if (why == XB_R_OK && known_repeater(hz))
+	if (why == XB_R_OK && !free && known_repeater(hz))
 		why = XB_R_REPEATER;
 #endif
 	return why;
@@ -76,7 +77,7 @@ static uint8_t hz_why(uint32_t hz)
 
 const char *ui_xband_refusal(uint32_t hz)
 {
-	return why_text(hz_why(hz));
+	return why_text(hz_why(hz, false));
 }
 #endif
 
@@ -105,7 +106,7 @@ static bool checks(void)
 		why = XB_R_MODE;	/* no NXDN receiver in this build */
 #endif
 	for (uint8_t k = 0; why == XB_R_OK && k < 2; k++)
-		why = hz_why(r->hz[k]);	/* the repeater list's (the band plan's passed in xband_check) */
+		why = hz_why(r->hz[k], xband_segs_free());	/* the repeater list's (the band plan's passed in xband_check) */
 	if (why == XB_R_OK && ui_view()->dmr.own_id == 0)
 		why = XB_R_ID;
 	const char *t = why_text(why);
@@ -179,6 +180,8 @@ static void xband_draw(void)
 	ui_list_t l;
 	memset(&l, 0, sizeof l);
 	l.prefix = TR("Cross-band");
+	if (xband_segs_free())
+		l.header = TR("Segments free");	/* the band plan's segment refusals are lifted (#) */
 	if (page == 1) {
 		l.body = TR("Attended only: stay at the radio while it relays. Start?");
 		l.hint = TR("OK yes  Back no");
@@ -187,7 +190,13 @@ static void xband_draw(void)
 		l.focus = focus;
 		l.top = &form_top;
 		l.item = form_item;
-		l.hint = TR("OK pick  <> change");
+		/* the # group last; the shortest form fits 24 characters (9 px each, 220 px): it is never dropped */
+		l.hint = xband_segs_free() ? TR(TEXT_ALT_OPEN "OK pick  <> change  # segs: on" TEXT_ALT_NEXT
+						"OK pick  <>  # segs: on" TEXT_ALT_NEXT
+						"OK  <>  # segs: on" TEXT_ALT_CLOSE) :
+					     TR(TEXT_ALT_OPEN "OK pick  <> change  # segs: off" TEXT_ALT_NEXT
+						"OK pick  <>  # segs: off" TEXT_ALT_NEXT
+						"OK  <>  # segs: off" TEXT_ALT_CLOSE);
 	}
 	ui_draw_list(ui_view(), &ui_st, &l);
 }
@@ -255,6 +264,10 @@ static bool xband_key(const input_event_t *ev)
 		digits[ndigits] = '\0';
 	} else if (ev->gesture != GESTURE_PRESS) {
 		return false;
+	} else if (act == ACT_CONTEXT) {
+		/* # : the segments free or not (owner, 2026-11-25); never while a session runs */
+		if (!xband_set_segs_free(!xband_segs_free()))
+			ui_toast(TR("Cross-band on: stop it first"));
 	} else if (act == ACT_BACK) {
 		if (!ndigits)
 			return false;	/* leaves */

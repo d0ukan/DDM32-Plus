@@ -3828,6 +3828,37 @@ the FM channel and the memory, a refused transmission, a P25 worker that keeps i
 (10 flows, English and Turkish: the form, every refusal, the picker, the question, Home while it relays, the lock, the
 stop, an end by itself; the layout). Radio rows: `docs/plus-radio-test.md` "Round 14 xband", XB-*.
 
+### Segments free: the # key (2026-11-25, branch `xbfree`)
+
+Owner decision (2026-11-25, in chat): on the Tools > Cross-band form **#** switches "segments free" on and off. While
+it is on, the band plan's **segment** refusals are lifted: the satellite segments (145.800-146.000, 435-438 MHz), the
+repeater input / output segments, the repeater list's frequencies, APRS 144.800. **Always kept**: outside 144-146 /
+430-440 MHz, PMR446, A = B, a repeater channel (RX and TX differ) from the picker, the callsign, the DMR ID, a pair of
+modes not built, a band the radio cannot transmit on, a DOTA session, the attended-only question, the lock, CROSS, the
+CW ID and every TX time-out.
+
+- **RAM only, off at every power-on**, never written to the settings (`segs_free` in `xband.c`); it stays as set while
+  the radio runs (leaving and opening the screen again keeps it).
+- **Shown**: the hint names the key and its state, "# segs: off" / "# segs: on" (Turkish "# bölüm: kapalı" /
+  "# bölüm: açık"), as text alternates whose shortest form ("OK  <>  # bölüm: kapalı", 23 characters) fits 220 px
+  even with the 9 px large-text font, so the # group is never dropped; while on, the line "Segments free" ("Bölümler
+  serbest") stands under the title, on the question page too.
+- **Not during a session**: `xband_set_segs_free` refuses while `xband_on()` (from the start request until the end);
+  the lock catches # on Home anyway ("Cross-band on: Back stops"), and # on the form during a session would toast
+  "Cross-band on: stop it first". So every check of a session (the start's `xband_check`, `xband_begin`'s check again)
+  reads the value it started with; nothing caches a result.
+- **DOTA is not affected**: `xband_check_hz` (DOTA's band plan, `radio_dota.inc`, `ui_dota.c`) and `ui_xband_refusal`
+  always check with the segments; only `xband_check` and the form's repeater-list check read the flag
+  (`xband_check_hz_free`).
+- Host tests: `tests/plus/test_xband.c` `test_segs_free` (off at power-on; 10 segment frequencies refused off and
+  accepted on, the band plan unchanged for both; PMR446, 150.000, 440.500, 143.990, 162.550, A = B, the callsign and a
+  mode pair refused either way; a 435.500 session starts only while on; the setter refused between the start and the
+  radio core's take and while it runs), `tests/plus/test_ui_xband.c` `segs_free` (EN + TR: the hint and the marker,
+  the layout; 435.500, 436.275-like satellite, 145.800, 144.800, 145.600, 439.000, the list's 432.000 / 430.400 reach
+  the question while DOTA's refusal still refuses them; 446.100, 150.000, 440.500, A = B, no callsign, the picker's
+  repeater channel still refused; # again: refused again; # during a session changes nothing). Radio row XB-14.
+- Cost: FLASH 894,664 B (about +500 B; 6,456 B left of 901,120).
+
 ## DMR receive audio diagnostics (`CONFIG_DMR_AUDIO_DIAG`, ours; branch `fix-dmr-audio`)
 
 Owner's report on v1.0.0-beta.3 (public build): received DMR audio sounds crackly / scratchy and artificial; our

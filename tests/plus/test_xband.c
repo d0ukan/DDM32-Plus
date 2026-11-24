@@ -577,6 +577,68 @@ static void test_id_wait(void)
 	xband_release();
 }
 
+/* Tools > Cross-band's # (owner, 2026-11-25): off at power-on; on lifts the satellite, repeater and APRS segments,
+ * never outside the bands, PMR446, A = B, the callsign or the modes; the band plan as DOTA reads it never changes; it
+ * cannot change while a session runs, and the start's check reads it */
+static void test_segs_free(void)
+{
+	CHECK(!xband_segs_free(), "off at power-on");
+	static const uint32_t seg[] = { 435500000, 436275000, 145800000, 145900000, 144800000, 145000000, 145600000,
+					431050000, 438650000, 439000000 };
+	static const struct { uint32_t hz; uint8_t why; } kept[] = {
+		{ 446100000, XB_R_PMR446 }, { 446006250, XB_R_PMR446 }, { 150000000, XB_R_BAND }, { 440500000, XB_R_BAND },
+		{ 143990000, XB_R_BAND }, { 162550000, XB_R_BAND },
+	};
+	xband_req_t r;
+	memset(&r, 0, sizeof r);
+	r.hz[0] = 433500000;
+	r.mode[0] = r.mode[1] = XB_MODE_DMR;
+	strcpy(r.call, "TA2DOU");
+	for (int on = 0; on < 2; on++) {
+		CHECK(xband_set_segs_free(on != 0) && xband_segs_free() == (on != 0), "set %d", on);
+		for (unsigned i = 0; i < sizeof seg / sizeof seg[0]; i++) {
+			r.hz[1] = seg[i];
+			uint8_t plan = xband_check_hz(seg[i]);
+			CHECK(plan != XB_R_OK, "%u Hz: the band plan (DOTA's) refuses it whatever #", (unsigned)seg[i]);
+			CHECK(xband_check(&r) == (on ? XB_R_OK : plan), "%u Hz, free %d: %u", (unsigned)seg[i], on,
+			      (unsigned)xband_check(&r));
+			CHECK(xband_check_hz_free(seg[i], on != 0) == (on ? XB_R_OK : plan), "%u Hz free %d", (unsigned)seg[i], on);
+		}
+		for (unsigned i = 0; i < sizeof kept / sizeof kept[0]; i++) {
+			r.hz[1] = kept[i].hz;
+			CHECK(xband_check(&r) == kept[i].why && xband_check_hz(kept[i].hz) == kept[i].why,
+			      "%u Hz still refused, free %d", (unsigned)kept[i].hz, on);
+		}
+		r.hz[1] = 433500000;
+		CHECK(xband_check(&r) == XB_R_SAME, "A = B, free %d", on);
+		r.hz[1] = 435500000;
+		strcpy(r.call, "TA2");
+		CHECK(xband_check(&r) == (on ? XB_R_CALL : XB_R_SATELLITE), "the callsign, free %d", on);
+		strcpy(r.call, "TA2DOU");
+		r.mode[0] = XB_MODE_P25;
+		CHECK(xband_check(&r) == XB_R_MODE, "P25 -> DMR, free %d", on);
+		r.mode[0] = XB_MODE_DMR;
+	}
+	/* a session on a satellite frequency: starts only while free; # refused while it runs; its begin reads the flag */
+	CHECK(xband_set_segs_free(false), "off");
+	memset(&f, 0, sizeof f);
+	xband_req_t *q = xband_req();
+	q->hz[0] = 145500000;
+	q->hz[1] = 435500000;
+	q->mode[0] = q->mode[1] = XB_MODE_DMR;
+	strcpy(q->call, "TA2DOU");
+	CHECK(!xband_start() && !xband_on(), "435.500 refused while off");
+	CHECK(xband_set_segs_free(true), "on");
+	CHECK(xband_start() && xband_on(), "435.500 starts while free");
+	CHECK(!xband_set_segs_free(false) && xband_segs_free(), "# refused between the start and the radio core's take");
+	CHECK(xband_begin(now), "the radio core takes it (its check reads free)");
+	CHECK(!xband_set_segs_free(false) && xband_segs_free(), "# refused while it runs");
+	xband_stop();
+	poll_ms(25);
+	xband_release();
+	CHECK(!xband_on() && xband_set_segs_free(false) && !xband_segs_free(), "after the end: # works again");
+}
+
 int main(void)
 {
 	test_rules();
@@ -587,6 +649,7 @@ int main(void)
 	test_one_way();
 	test_p25();
 	test_id_wait();
+	test_segs_free();
 	free(mem);
 	printf("cross-band engine: %s\n", fails ? "FAILED" : "ok");
 	return fails != 0;

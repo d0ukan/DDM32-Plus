@@ -22,6 +22,7 @@
 #include "ui/i18n.h"
 #include "ui/rpt.h"
 #include "radio/xband.h"
+#include "ui/ui_xband.h"
 #include "codeplug/codeplug.h"
 
 /* Tools > Repeaters' table: one repeater outside the band plan's segments (430.400, input 432.000) */
@@ -440,11 +441,94 @@ static void ended_itself(void)
 	expect("hides=CROSS");
 }
 
+/* # on the form (owner, 2026-11-25): "Segments free" lifts the band plan's segment refusals and the repeater list's;
+ * the hint names # and its state; outside the bands, PMR446, A = B, a repeater channel stay refused; DOTA's refusal
+ * (ui_xband_refusal) never changes; # does nothing while a session runs */
+static void segs_free(void)
+{
+	start("segments free");
+	check(!xband_segs_free(), "off when the screen opens (power-on)");
+	expect(T("shows=#_segs:_off", "shows=_kapal hides=serbest"));
+	expect_tr("hides", "Segments free");
+	layout();
+	pair(145500000, 435500000);
+	press_start();
+	expect_tr("toast", "Satellite segment");
+	ok_run("wait:3000");
+	ok_run("ctx wait:100");
+	check(xband_segs_free(), "# sets it");
+	expect(T("shows=#_segs:_on", "hides=_kapal shows=serbest"));
+	expect_tr("shows", "Segments free");
+	layout();
+	ok_run("shot:xband-free");
+	static const uint32_t ok[] = { 435500000, 436275000, 145800000, 144800000, 145600000, 439000000,
+				       432000000 /* the list's repeater input */, 430400000 };
+	for (unsigned i = 0; i < sizeof ok / sizeof ok[0]; i++) {
+		pair(145500000, ok[i]);
+		press_start();
+		expect(T("shows=Attended", "shows=Yaln"));
+		expect_tr("shows", "Segments free");	/* the question says it too */
+		layout();
+		ok_run("back wait:100");
+		check(!xband_on(), "the question: Back");
+		check(ui_xband_refusal(ok[i]) != NULL, "DOTA's band plan still refuses it");
+	}
+	static const struct { uint32_t b; const char *why; } t[] = {
+		{ 446100000, "PMR446: no repeaters allowed" },
+		{ 150000000, "Not an amateur band" },
+		{ 440500000, "Not an amateur band" },
+		{ 145500000, "A and B are the same" },
+	};
+	for (unsigned i = 0; i < sizeof t / sizeof t[0]; i++) {
+		pair(145500000, t[i].b);
+		press_start();
+		expect("screen=xband");
+		expect_tr("toast", t[i].why);
+		ok_run("wait:3000");
+	}
+	pair(145500000, 433500000);
+	strcpy(radio_name, "Dogan");
+	press_start();
+	expect_tr("toast", "Set your callsign (the radio name) in qdmr.");
+	ok_run("wait:3000");
+	strcpy(radio_name, "TA2DOU");
+	/* a repeater channel from the picker: still refused */
+	ok_run("up up up up up up up up ok wait:200 ok wait:100");
+	expect("screen=xband-pick");
+	expect_tr("toast", "Repeater channel (RX and TX differ)");
+	ok_run("wait:3000 back wait:100");
+	expect("screen=xband");
+	/* # again: off, the satellite segment refused again */
+	ok_run("ctx wait:100");
+	check(!xband_segs_free(), "# clears it");
+	pair(145500000, 435500000);
+	press_start();
+	expect_tr("toast", "Satellite segment");
+	ok_run("wait:3000");
+	/* free, a satellite pair started: # refused while it runs */
+	ok_run("ctx wait:100");
+	press_start();
+	ok_run("ok wait:200");
+	expect("screen=home shows=CROSS");
+	check(xband_on(), "started on 435.500");
+	engine_take(true);	/* (its begin checks the request again, the segments free) */
+	engine_poll();
+	check(xband_owns_radio(), "the radio core took it");
+	ok_run("ctx wait:100");
+	check(xband_segs_free(), "# on Home during the session: nothing");
+	check(!xband_set_segs_free(false) && xband_segs_free(), "the setter refuses during a session");
+	/* the screen stack is gone, the session stopped: the flag is kept (RAM), never saved */
+	ok_run("back wait:100");
+	engine_poll();
+	ok_run("wait:300");
+	check(!xband_on() && xband_segs_free(), "kept while the radio runs");
+}
+
 typedef void (*case_fn)(void);
 
 int main(void)
 {
-	static const case_fn all[] = { form, refusals, picker, owner_pair, question_and_run, ended_itself };
+	static const case_fn all[] = { form, refusals, picker, owner_pair, question_and_run, ended_itself, segs_free };
 	int bad = 0, run = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		for (unsigned i = 0; i < sizeof all / sizeof all[0]; i++) {

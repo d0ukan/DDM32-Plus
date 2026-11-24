@@ -94,14 +94,21 @@ typedef struct {
 } xband_view_t;
 
 /* --- The rules (any task) --- */
+/* The band plan (DOTA's too): the amateur bands, PMR446, the repeater, satellite and APRS segments */
 uint8_t xband_check_hz(uint32_t hz);
+/* free: the segment refusals lifted (XB_R_REPEATER, XB_R_SATELLITE, XB_R_APRS); outside the bands and PMR446 stay */
+uint8_t xband_check_hz_free(uint32_t hz, bool free);
+/* "Segments free" (Tools > Cross-band's # key, owner 2026-11-25): xband_check lifts the band plan's segment refusals
+ * while it is set. RAM only: off at power-on, never saved. The setter refuses (false) while a session runs */
+bool xband_segs_free(void);
+bool xband_set_segs_free(bool on);
 /* An over heard in mode from can be sent in mode to (the pairs built) */
 bool xband_pair_ok(uint8_t from, uint8_t to);
 /* The sides an over is heard on: bit 0 A (relayed to B), bit 1 B (relayed to A); 0: the pair is refused */
 uint8_t xband_listens(const xband_req_t *r);
 /* The bytes a frame of r's session takes: XB_P25_FRAME_BYTES for P25, else XB_FRAME_BYTES */
 uint8_t xband_frame_bytes(const xband_req_t *r);
-/* Both frequencies, the pair, the modes, the callsign */
+/* Both frequencies (the segments as xband_segs_free says), the pair, the modes, the callsign */
 uint8_t xband_check(const xband_req_t *r);
 /* A power class (1 low, 2 mid, 3 high) as the board's level */
 uint8_t xband_power_level(uint8_t cls, uint8_t power_count);
