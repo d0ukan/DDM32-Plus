@@ -42,7 +42,7 @@ fn window(root: &Path, mut settings: Value) -> AppWindow {
     std::fs::write(root.join("settings.json"), settings.to_string()).unwrap();
     init();
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, AppPaths::new(root), false);
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(root), false, ddm32_gui::no_env);
     ui
 }
 
@@ -292,8 +292,8 @@ fn radioid_pack(dir: &Path) -> PathBuf {
     let csv = dir.join("user.csv");
     std::fs::write(
         &csv,
-        "RADIO_ID,CALLSIGN,FIRST_NAME,LAST_NAME,CITY,STATE,COUNTRY\n2862001,TA2DOU,Dogukan,X,Ankara,,Turkey\n\
-         2862002,TA1AAA,Ali,Y,Istanbul,,Turkey\n3101234,K1ABC,John,Z,Boston,MA,United States\n",
+        "RADIO_ID,CALLSIGN,FIRST_NAME,LAST_NAME,CITY,STATE,COUNTRY\n2869999,TA1TST,Test,X,Test City,,Turkey\n\
+         2869998,TA1TSU,Test,Y,Test City,,Turkey\n3109999,K1TST,Test,Z,Test City,MA,United States\n",
     )
     .unwrap();
     let pk =
@@ -441,7 +441,7 @@ fn another_backup_opens_and_a_zone_double_click_filters() {
     ui.global::<App>().invoke_navigate(9);
     channels::open_backup(&ui, &b);
     assert!(r.get_table_loaded());
-    assert_eq!("Source: dm32-x (the last backup; the radio is not asked)", r.get_channels_source().as_str());
+    assert_eq!("Source: dm32-x (the folder you opened; the radio is not asked)", r.get_channels_source().as_str());
     let cp = Codeplug::decode(&sample_image(), &EN).unwrap();
     assert_eq!(format!("Showing {0} of {0} rows", cp.channels.len()), r.get_table_count().as_str());
     // the zones tab, a double click on its first zone: the channels tab with that zone's channels
@@ -512,7 +512,8 @@ fn read_every_30_s_only_on_the_health_page_with_a_free_port() {
 fn window_size_and_place_in_the_csharp_format() {
     // what the C# program writes (doubles, "max")
     let saved = json!({"x": 120.0, "y": 80.5, "w": 1024.0, "h": 768.0, "max": false});
-    let screen = Some(window::Rect { x: 0.0, y: 0.0, w: 1920.0, h: 1040.0 });
+    let one = [window::Rect { x: 0.0, y: 0.0, w: 1920.0, h: 1040.0 }];
+    let screen = &one[..];
     assert_eq!(
         (Some(window::Rect { x: 120.0, y: 80.5, w: 1024.0, h: 768.0 }), false),
         window::restore_plan(Some(&saved), screen)
@@ -527,6 +528,17 @@ fn window_size_and_place_in_the_csharp_format() {
     assert_eq!(None, window::restore_plan(Some(&json!({"x": 0, "y": 0, "w": 300, "h": 200})), screen).0);
     assert_eq!((None, false), window::restore_plan(Some(&json!({"x": "a"})), screen));
     assert_eq!((None, false), window::restore_plan(None, screen));
+    // the title bar above the monitor's top, or below its bottom: it could not be grabbed
+    assert_eq!(None, window::restore_plan(Some(&json!({"x": 100, "y": -30, "w": 900, "h": 700})), screen).0);
+    assert_eq!(None, window::restore_plan(Some(&json!({"x": 100, "y": 1010, "w": 900, "h": 700})), screen).0);
+    // two monitors side by side, a smaller one on the right lower down: the gap above it is no place for a title bar
+    let two = [one[0], window::Rect { x: 1920.0, y: 300.0, w: 1280.0, h: 720.0 }];
+    assert_eq!(None, window::restore_plan(Some(&json!({"x": 2100, "y": 100, "w": 900, "h": 700})), &two).0);
+    let right = window::restore_plan(Some(&json!({"x": 2100, "y": 320, "w": 900, "h": 900})), &two).0.unwrap();
+    assert_eq!(720.0, right.h, "cut to the monitor it is on");
+    // no monitors known (Linux, macOS): only an absurd place is refused
+    assert!(window::restore_plan(Some(&saved), &[]).0.is_some());
+    assert!(window::restore_plan(Some(&json!({"x": 1e9, "y": 0, "w": 900, "h": 700})), &[]).0.is_none());
     // larger than the screens: cut to them
     let big = json!({"x": 0, "y": 0, "w": 4000, "h": 3000});
     assert_eq!(Some(window::Rect { x: 0.0, y: 0.0, w: 1920.0, h: 1040.0 }), window::restore_plan(Some(&big), screen).0);
@@ -596,5 +608,181 @@ fn the_language_menu_and_show_flags() {
     assert_eq!(8, app.get_help_items().row_count());
     assert!(!ddm32_gui::show_from_args(&ui, "nothing"));
     assert_eq!(12, app.get_page());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---- second round (verifier) ------------------------------------------------------------------------------------------
+
+/// A lookup that answers LOCALAPPDATA / APPDATA with folders inside the test's own temporary folder: whatever the
+/// window finds as "another program's backups" must lie under it.
+fn sandbox_env(name: &str) -> Option<String> {
+    SANDBOX.with(|s| s.borrow().as_ref().map(|r| r.join(name).display().to_string()))
+}
+
+thread_local! {
+    static SANDBOX: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[test]
+fn every_test_window_stays_in_its_own_folder() {
+    // the tests never use the real environment (the owner's backups): every window of the test files is made with
+    // setup_with_env and no_env (or this sandbox)
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    for e in std::fs::read_dir(&tests).unwrap() {
+        let p = e.unwrap().path();
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            !text.contains(&format!("ddm32_gui::{}(", "setup")),
+            "{}: a window with the real environment",
+            p.display()
+        );
+        assert!(!text.contains(&format!("{}_env", "real")), "{}", p.display());
+    }
+    // a C# install and a Python folder inside the sandbox: found, and nothing outside it
+    let root = root("sandbox");
+    SANDBOX.with(|s| *s.borrow_mut() = Some(root.join("env")));
+    let net =
+        root.join("env").join("LOCALAPPDATA").join("Programs").join("DDM32 Plus").join("backups").join("dm32-net");
+    fake_backup(&net, &sample_image());
+    let data = root.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(
+        data.join("settings.json"),
+        json!({"language": "en", "disclaimer": {"version": DISCLAIMER, "accepted": true}}).to_string(),
+    )
+    .unwrap();
+    init();
+    let ui = AppWindow::new().unwrap();
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(&data), false, sandbox_env);
+    ui.global::<App>().invoke_navigate(2);
+    ui.global::<App>().invoke_navigate(9);
+    let found = ddm32_gui::with_state(|s| s.found.iter().map(|b| b.folder.clone()).collect::<Vec<_>>());
+    if cfg!(windows) {
+        assert!(!found.is_empty(), "the sandboxed C# backup is found");
+    }
+    for f in &found {
+        assert!(f.starts_with(&root), "{} is outside the test's folder", f.display());
+    }
+    if let Some(src) = ddm32_gui::with_state(|s| s.channels.source.clone()) {
+        assert!(src.starts_with(&root), "{}", src.display());
+    }
+    SANDBOX.with(|s| *s.borrow_mut() = None);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn only_the_wizard_records_stock_backups() {
+    let root = root("stock-record");
+    let ui = window(&root, json!({"language": "en"}));
+    // a folder shown with "Choose another backup folder" is planned, never recorded (whatever its layout)
+    let other = root.join("elsewhere").join("dm32-x");
+    fake_backup(&other, b"x");
+    restore::other_folder(&ui, &other);
+    assert!(restore::stock_backups(&Settings::new(root.join("settings.json"))).is_empty());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_damaged_settings_file_never_turns_into_a_csharp_one() {
+    let root = root("damaged");
+    let path = root.join("settings.json");
+    std::fs::write(&path, b"{ \"language\": \"en\", \"disc").unwrap();
+    let damaged = std::fs::read(&path).unwrap();
+    // start: nothing is written over it
+    init();
+    let ui = AppWindow::new().unwrap();
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(&root), false, ddm32_gui::no_env);
+    assert_eq!(0, ui.global::<App>().get_channel());
+    // close: the window's place (a C# key) is refused, the file stays as it was
+    window::save(&ui);
+    ddm32_gui::catalog_loaded(&ui, Ok(catalog(&[("1.0.1", "stable")])), false);
+    assert_eq!(damaged, std::fs::read(&path).unwrap());
+    // start again: still Latest
+    let ui = AppWindow::new().unwrap();
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(&root), false, ddm32_gui::no_env);
+    assert_eq!(0, ui.global::<App>().get_channel());
+    // a readable file without `channel` gets it with the first C# key, as it read before (Latest here)
+    let s = Settings::new(&path);
+    std::fs::write(&path, r#"{"language": "en"}"#).unwrap();
+    s.save("window", json!({"x": 1, "y": 2, "w": 900, "h": 700, "max": false})).unwrap();
+    assert_eq!(0, s.load()["channel"]);
+    assert_eq!(0, s.channel());
+    // and a C# file keeps its Beta
+    std::fs::write(&path, r#"{"language": "en", "stock_backups": []}"#).unwrap();
+    s.save("last_check_utc", json!("2026-11-24T00:00:00Z")).unwrap();
+    assert_eq!(1, s.load()["channel"]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_late_yes_starts_nothing_while_the_port_is_held() {
+    let root = root("late-yes");
+    let ui = window(&root, json!({"language": "en"}));
+    let app = ui.global::<App>();
+    let r = ui.global::<Radio>();
+    let p = ui.global::<Packs>();
+    for hold in 0..4 {
+        match hold {
+            0 => app.set_busy(true),
+            1 => r.set_busy(true),
+            2 => r.set_live_running(true),
+            _ => r.set_slog_running(true),
+        }
+        app.set_message("".into());
+        p.invoke_write_yes();
+        assert_eq!(i18n::t("en", "slog_busy_other"), app.get_message().as_str(), "write, hold {hold}");
+        app.set_message("".into());
+        app.invoke_res_confirm_yes();
+        assert_eq!(i18n::t("en", "slog_busy_other"), app.get_message().as_str(), "restore, hold {hold}");
+        app.set_message("".into());
+        p.invoke_read_radio();
+        assert_eq!(i18n::t("en", "slog_busy_other"), app.get_message().as_str(), "read, hold {hold}");
+        assert!(ddm32_gui::with_state(|s| !s.writing && s.restore.running.is_none()));
+        app.set_busy(false);
+        r.set_busy(false);
+        r.set_live_running(false);
+        r.set_slog_running(false);
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_selection_follows_its_version_and_the_question_names_the_backup_once() {
+    let root = root("follow");
+    let ui = window(&root, json!({"language": "en", "channel": 2}));
+    let app = ui.global::<App>();
+    ddm32_gui::catalog_loaded(&ui, Ok(catalog(&[("1.0.1", "stable"), ("1.0.0", "stable")])), false);
+    app.invoke_navigate(11);
+    app.set_ver_selected(1);
+    // a newer version arrives above it: the same version stays selected
+    ddm32_gui::catalog_loaded(
+        &ui,
+        Ok(catalog(&[("1.1.0-beta.1", "beta"), ("1.0.1", "stable"), ("1.0.0", "stable")])),
+        false,
+    );
+    let i = app.get_ver_selected();
+    assert_eq!("1.0.0", app.get_ver_rows().row_data(i as usize).unwrap().version.as_str());
+    // a version that went away: nothing selected (Switch is off)
+    ddm32_gui::catalog_loaded(&ui, Ok(catalog(&[("1.0.1", "stable")])), false);
+    assert_eq!(-1, app.get_ver_selected());
+    // the restore question: the backup once (its full path), then the plan
+    app.invoke_navigate(2);
+    let b = root.join("backups").join("dm32-x");
+    ddm32_gui::with_state(|s| s.restore.backup_dir = Some(b.clone()));
+    app.set_restore_ready(true);
+    app.set_res_status(format!("{}\nplan", i18n::tf("en", "res_chosen", "dm32-x")).into());
+    app.invoke_restore();
+    let q = app.get_res_confirm_text().to_string();
+    assert_eq!(1, q.matches("Chosen backup").count(), "{q}");
+    // the channels page says a folder the user opened is one
+    let o = root.join("opened").join("dm32-y");
+    fake_backup(&o, &sample_image());
+    app.set_res_confirm_open(false);
+    app.invoke_navigate(9);
+    channels::open_backup(&ui, &o);
+    assert_eq!(
+        "Source: dm32-y (the folder you opened; the radio is not asked)",
+        ui.global::<Radio>().get_channels_source().as_str()
+    );
     let _ = std::fs::remove_dir_all(&root);
 }

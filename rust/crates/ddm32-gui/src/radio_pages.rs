@@ -472,7 +472,8 @@ pub fn demo(ui: &AppWindow, lang: &str) {
     r.set_live_dbm(dbm.into());
     r.set_live_facts(facts(f));
     r.set_live_raw(poll.join("\n").into());
-    r.set_live_running(true);
+    // made-up readings: no reader runs, so the buttons show their real states
+    r.set_live_running(false);
     r.set_channels_source(i18n::tf(lang, "channels_source", "dm32-20261121").into());
     let cols: Vec<SharedString> = if lang == "en" {
         vec!["No".into(), "Name".into(), "Frequency".into(), "Mode".into(), "Settings".into()]
@@ -482,7 +483,7 @@ pub fn demo(ui: &AppWindow, lang: &str) {
     r.set_table_columns(ModelRc::new(VecModel::from(cols)));
     r.set_table_widths(ModelRc::new(VecModel::from(vec![0.07f32, 0.22, 0.2, 0.1, 0.41])));
     r.set_table_loaded(true);
-    r.set_channels_radio(i18n::t(lang, "ch_radio").replacen("{}", "TA2DOU", 1).replacen("{}", "2862001", 1).into());
+    r.set_channels_radio(i18n::t(lang, "ch_radio").replacen("{}", "TA1TST", 1).replacen("{}", "2869999", 1).into());
     r.set_zone_text(i18n::tf(lang, "ch_zone", &i18n::t(lang, "ch_all_zones")).into());
     r.set_mode_text(format!("{} {}", i18n::t(lang, "ch_mode"), i18n::t(lang, "ch_all_modes")).into());
     r.set_sort_column(-1);

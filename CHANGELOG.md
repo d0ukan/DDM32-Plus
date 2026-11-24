@@ -83,6 +83,12 @@ Windows, Linux and macOS; host-tested only (fakes, no serial port, no network), 
     Versions, Help and Language; a developer build's title mark, local release folder and `--release-folder`;
     `--show PAGE[:demo|:FOLDER]`.
   - The search log keeps a Linux / macOS PC awake too (`systemd-inhibit` / `caffeinate`, when present).
+  - Verifier round: tests never read the user's real backups (an injectable environment); fictional demo data; only
+    the wizard's own stock backups are recorded; a damaged settings.json is never written for a C# key and the channel
+    cannot flip to Beta; the window is restored only with its title bar on a monitor (one DPI basis); a late Yes or a
+    tool start never runs beside another radio job; the versions page keeps its selected version after a check; the
+    restore question names the backup once; "the folder you opened" on My channels; a RadioID download holds the close
+    button.
 
 ## v1.0.1 (2026-11-24)
 

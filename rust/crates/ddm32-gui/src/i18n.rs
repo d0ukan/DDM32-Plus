@@ -472,6 +472,7 @@ pub const TEXTS: &[(&str, &str, &str)] = &[
     ("ch_open", "Başka bir yedek aç...", "Open another backup..."),
     ("ch_shown", "{} / {} satır gösteriliyor", "Showing {} of {} rows"),
     ("ch_unverified", " (doğrulanmamış yedek)", " (unverified backup)"),
+    ("ch_opened", "Kaynak: {} (açılan klasör; telsize bağlanmaz)", "Source: {} (the folder you opened; the radio is not asked)"),
     ("ch_failed", "Okunamadı: {}", "Could not read: {}"),
     ("ch_zone_title", "Bölge seçin", "Choose a zone"),
     ("ch_zone_intro", "Kanallar sekmesi yalnızca seçilen bölgenin kanallarını gösterir. Bölgeler sekmesinde bir bölgeye çift tıklamak da onu seçer.",

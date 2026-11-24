@@ -8,7 +8,7 @@
 use crate::{i18n, trf, with, AppWindow, Radio, TableRow, ZoneRow};
 use ddm32_core::codeplug::{self, Codeplug, Table};
 use ddm32_core::storage::backups;
-use ddm32_core::storage::paths::{is_verified_backup, real_env};
+use ddm32_core::storage::paths::is_verified_backup;
 use ddm32_core::storage::Os;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::cmp::Ordering;
@@ -295,7 +295,7 @@ pub fn pick(ui: &AppWindow, key: &str) {
 /// The backups the page looks in (this program's, the C# and Python programs' read only).
 fn newest_backup_with_codeplug() -> Option<PathBuf> {
     let found = with(|s| {
-        let roots = backups::backup_roots(&s.paths, &s.settings, Os::current(), &real_env);
+        let roots = backups::backup_roots(&s.paths, &s.settings, Os::current(), &s.env);
         backups::discover(&roots)
     });
     found.iter().find(|b| b.folder.join("q128-pass1.bin").is_file()).map(|b| b.folder.clone())
@@ -396,7 +396,8 @@ pub fn show_table(ui: &AppWindow) {
         );
         let name = ch.source.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
         let source = name.map(|n| {
-            let mut t = i18n::tf(&lang, "channels_source", &n);
+            let key = if ch.chosen { "ch_opened" } else { "channels_source" };
+            let mut t = i18n::tf(&lang, key, &n);
             if !ch.verified {
                 t.push_str(&i18n::t(&lang, "ch_unverified"));
             }

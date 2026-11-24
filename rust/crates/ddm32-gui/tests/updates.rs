@@ -344,7 +344,7 @@ fn window(name: &str) -> (AppWindow, PathBuf, Settings) {
     // accepted: an open disclaimer holds the question back (disclaimer_holds_the_question below)
     settings.accept_disclaimer(&ddm32_gui::disclaimer::version(), "2026-11-24T00:00:00Z").unwrap();
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, paths, false);
+    ddm32_gui::setup_with_env(&ui, paths, false, ddm32_gui::no_env);
     (ui, root, settings)
 }
 
@@ -468,7 +468,7 @@ fn disclaimer_holds_the_question() {
     let paths = AppPaths::new(&root);
     Settings::new(paths.settings_file()).set_language("en").unwrap();
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, paths, false);
+    ddm32_gui::setup_with_env(&ui, paths, false, ddm32_gui::no_env);
     let app = ui.global::<App>();
     assert!(app.get_disc_open(), "not accepted yet: asked first");
     ddm32_gui::catalog_loaded(&ui, Ok(catalog(&[("v9.0.0", None, Some("9.0.0"))])), true);
@@ -531,7 +531,7 @@ fn a_fresh_install_keeps_latest_after_an_install() {
     updates::record_install_result(&settings, &ok, &app_sha("1.0.0"), "1.0.0", None, updates::now_unix()).unwrap();
     drop(ui);
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, AppPaths::new(&root), false);
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(&root), false, ddm32_gui::no_env);
     assert_eq!(0, ui.global::<App>().get_channel());
     assert_eq!(Some(0), settings.load().get("channel").and_then(|v| v.as_i64()), "settled at the first start");
     let _ = std::fs::remove_dir_all(&root);

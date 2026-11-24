@@ -35,9 +35,18 @@ impl KeepAwake {
         }
     }
 
-    /// Whether something keeps the PC awake now (Windows: always; elsewhere: the helper process started).
-    pub fn active(&self) -> bool {
-        cfg!(windows) || self.child.is_some()
+    /// Whether something keeps the PC awake now (Windows: always; elsewhere: the helper process runs; one that ended,
+    /// e.g. systemd-inhibit refused by the system, is dropped and says false).
+    pub fn active(&mut self) -> bool {
+        if cfg!(windows) {
+            return true;
+        }
+        if let Some(c) = self.child.as_mut() {
+            if !matches!(c.try_wait(), Ok(None)) {
+                self.child = None;
+            }
+        }
+        self.child.is_some()
     }
 }
 

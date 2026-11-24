@@ -118,7 +118,7 @@ fn the_window_locks_the_choice_and_says_a_port_is_gone() {
     let settings = Settings::new(paths.settings_file());
     settings.set_language("en").unwrap();
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, paths, false);
+    ddm32_gui::setup_with_env(&ui, paths, false, ddm32_gui::no_env);
     let app = ui.global::<App>();
     let radio = ui.global::<Radio>();
     let listing = [e("COM14", true, false), e("COM15", true, false)];

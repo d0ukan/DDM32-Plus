@@ -63,18 +63,40 @@ impl Settings {
     }
 
     pub fn save(&self, key: &str, value: Value) -> std::io::Result<()> {
-        let mut s = self.load();
-        s.insert(key.to_string(), value);
-        self.write(&s)
+        self.save_all(vec![(key, value)])
     }
 
     /// Several keys in one atomic write (a value of null is kept as null, as the C# program writes it).
+    ///
+    /// A write that adds one of the C# program's keys ([`NET_ONLY_KEYS`]: the window's place, the last check, ...)
+    /// keeps the release channel from flipping: `channel` is saved with it, as it read before the write, when the file
+    /// has none; and a file that is there but is not a JSON object (damaged, unreadable) is never written for such a
+    /// key (refused with an error), so it can never come to look like a C# file.
     pub fn save_all(&self, entries: Vec<(&str, Value)>) -> std::io::Result<()> {
+        let net_key = entries.iter().any(|(k, _)| NET_ONLY_KEYS.contains(k));
         let mut s = self.load();
+        if net_key && s.is_empty() && self.file_path.exists() && !self.reads_as_object() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "settings.json is not readable; not written",
+            ));
+        }
+        if net_key && !s.contains_key(CHANNEL_KEY) {
+            let c = channel_of(&s);
+            s.insert(CHANNEL_KEY.into(), Value::from(c));
+        }
         for (k, v) in entries {
             s.insert(k.to_string(), v);
         }
         self.write(&s)
+    }
+
+    /// The file holds a JSON object (an empty one too).
+    fn reads_as_object(&self) -> bool {
+        std::fs::read(&self.file_path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .is_some_and(|v| v.is_object())
     }
 
     fn write(&self, s: &Map<String, Value>) -> std::io::Result<()> {
@@ -125,15 +147,7 @@ impl Settings {
     /// betas: `include_beta` itself when present, Beta when the file is one the C# program wrote (one of its own keys
     /// is there), and Latest only for a fresh install.
     pub fn channel(&self) -> i32 {
-        let s = self.load();
-        if let Some(c) = s.get(CHANNEL_KEY).and_then(Value::as_i64) {
-            return c.clamp(0, 2) as i32;
-        }
-        match s.get(INCLUDE_BETA_KEY).and_then(Value::as_bool) {
-            Some(b) => b as i32,
-            None if NET_ONLY_KEYS.iter().any(|k| s.contains_key(*k)) => 1,
-            None => 0,
-        }
+        channel_of(&self.load())
     }
 
     /// The channel at start-up, saved when this program has none yet: decided once (from the C# keys or as a fresh
@@ -252,5 +266,17 @@ impl Settings {
 
     pub fn withdraw_disclaimer(&self, version: &str, now_utc: &str) -> std::io::Result<()> {
         self.save(DISCLAIMER_KEY, serde_json::json!({"version": version, "accepted": false, "withdrawn_utc": now_utc}))
+    }
+}
+
+/// The channel a settings object says (Settings::channel).
+fn channel_of(s: &Map<String, Value>) -> i32 {
+    if let Some(c) = s.get(CHANNEL_KEY).and_then(Value::as_i64) {
+        return c.clamp(0, 2) as i32;
+    }
+    match s.get(INCLUDE_BETA_KEY).and_then(Value::as_bool) {
+        Some(b) => b as i32,
+        None if NET_ONLY_KEYS.iter().any(|k| s.contains_key(*k)) => 1,
+        None => 0,
     }
 }

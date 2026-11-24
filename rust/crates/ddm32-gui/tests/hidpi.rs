@@ -141,7 +141,8 @@ fn scaled_150_and_200_percent() {
                             "gate" => ui.global::<ddm32_gui::Radio>().set_disclaimer_ok(false),
                             "res-confirm" => {
                                 let p = Path::new("C:/Users/…/DDM32 Plus/backups/dm32-20261121");
-                                let status = app.get_res_status().to_string();
+                                let status =
+                                    ddm32_gui::i18n::tn(lang, "res_plan_summary", &["23", "0x0C000", "0x22000"]);
                                 app.set_res_confirm_text(ddm32_gui::restore::confirm_text(lang, p, &status).into());
                                 app.set_res_confirm_open(true);
                             }

@@ -39,7 +39,7 @@ fn window(root: &Path, mut settings: serde_json::Value) -> AppWindow {
     std::fs::write(root.join("settings.json"), settings.to_string()).unwrap();
     init();
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, AppPaths::new(root), false);
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(root), false, ddm32_gui::no_env);
     ui
 }
 
@@ -294,7 +294,7 @@ fn an_unreadable_settings_file_is_left_as_it_is() {
     std::fs::write(root.join("settings.json"), bytes).unwrap();
     init();
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, AppPaths::new(&root), false);
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(&root), false, ddm32_gui::no_env);
     assert_eq!(0, ui.global::<App>().get_channel());
     assert_eq!(bytes, std::fs::read(root.join("settings.json")).unwrap().as_slice());
     let _ = std::fs::remove_dir_all(&root);

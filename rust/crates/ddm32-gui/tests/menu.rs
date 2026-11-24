@@ -46,7 +46,7 @@ fn no_page_is_left_while_the_port_is_held() {
     i_slint_backend_testing::init_no_event_loop();
     let root = std::env::temp_dir().join(format!("ddm32-menu-test-{}", std::process::id()));
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, ddm32_core::storage::AppPaths::new(&root), false);
+    ddm32_gui::setup_with_env(&ui, ddm32_core::storage::AppPaths::new(&root), false, ddm32_gui::no_env);
     let app = ui.global::<App>();
     let radio = ui.global::<Radio>();
     app.set_page(8); // the live panel

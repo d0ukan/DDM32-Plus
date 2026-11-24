@@ -230,7 +230,7 @@ fn every_screen_in_both_themes() {
                     }
                     "ver-details" => app.set_ver_details(true),
                     "res-confirm" => {
-                        let status = app.get_res_status().to_string();
+                        let status = ddm32_gui::i18n::tn(lang, "res_plan_summary", &["23", "0x0C000", "0x22000"]);
                         let p = std::path::Path::new("C:/Users/…/DDM32 Plus/backups/dm32-20261121");
                         app.set_res_confirm_text(ddm32_gui::restore::confirm_text(lang, p, &status).into());
                         app.set_res_confirm_open(true);

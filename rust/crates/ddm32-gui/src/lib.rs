@@ -35,6 +35,15 @@ use ddm32_core::releases::client::{self, Package};
 use ddm32_core::releases::net::HttpReleaseNet;
 use ddm32_core::storage::backups::{self, FoundBackup};
 use ddm32_core::storage::paths::{real_env, unique_folder};
+
+/// Where the window looks up the environment (LOCALAPPDATA, APPDATA) to find the C# and Python programs' backups:
+/// the real one in the program, [`no_env`] in the tests (nothing outside their own data folder is ever read).
+pub type EnvLookup = fn(&str) -> Option<String>;
+
+/// An environment with nothing in it: the tests' data folder is the only place backups are looked for.
+pub fn no_env(_name: &str) -> Option<String> {
+    None
+}
 use ddm32_core::storage::{today, AppPaths, Os, Settings, Theme as SavedTheme};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
@@ -126,6 +135,8 @@ pub struct State {
     pub health_timer: Option<slint::Timer>,
     /// Data packs: the list, the pages, the packs built or loaded, what the radio holds
     pub packs: packs::PackState,
+    /// The environment the other programs' backups are found through (setup_with_env)
+    pub env: EnvLookup,
 }
 
 thread_local! {
@@ -190,6 +201,12 @@ pub static DEMO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// Sets up the window: the state, every callback, the first contents. `fetch` loads the release list in the
 /// background when the settings allow it.
 pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
+    setup_with_env(ui, paths, fetch, real_env);
+}
+
+/// setup() with the environment the other programs' data folders are found through (the tests pass [`no_env`], so
+/// they never read the user's real backups).
+pub fn setup_with_env(ui: &AppWindow, paths: AppPaths, fetch: bool, env: EnvLookup) {
     install_texts(ui);
     let _ = paths.ensure();
     let settings = Settings::new(paths.settings_file());
@@ -271,6 +288,7 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             channels: Default::default(),
             health_timer: None,
             packs: Default::default(),
+            env,
         })
     });
     with(|s| s.port_pref = s.settings.port_pref());
@@ -1118,7 +1136,8 @@ pub const CLOSE_FALLBACK: std::time::Duration = std::time::Duration::from_secs(1
 pub fn close_requested(ui: &AppWindow) -> slint::CloseRequestResponse {
     let app = ui.global::<App>();
     let r = ui.global::<Radio>();
-    if app.get_busy() || r.get_busy() {
+    let downloading = with(|s| s.packs.download_bytes.is_some());
+    if app.get_busy() || r.get_busy() || downloading {
         let writing = with(|s| s.writing);
         let again = with(|s| s.close_refused_at.is_some_and(|t| t.elapsed() < FORCE_CLOSE_WINDOW));
         if !writing && again {
@@ -1170,6 +1189,11 @@ pub fn force_close(ui: &AppWindow) -> bool {
         r.set_message(text.into());
         r.set_message_kind("warning".into());
         return false;
+    }
+    // a RadioID download cut short leaves no half file behind
+    if with(|s| s.packs.download_bytes.is_some()) {
+        let part = with(|s| s.paths.packs().join("user.csv"));
+        let _ = std::fs::remove_file(ddm32_core::releases::net::partial_path(&part));
     }
     window::save(ui);
     let _ = slint::quit_event_loop();
@@ -1289,7 +1313,7 @@ fn refresh(ui: &AppWindow) {
     app.set_versions(ModelRc::new(VecModel::from(model)));
     // backups, found by themselves
     let (found, quick) = with(|s| {
-        let roots = backups::backup_roots(&s.paths, &s.settings, Os::current(), &real_env);
+        let roots = backups::backup_roots(&s.paths, &s.settings, Os::current(), &s.env);
         s.found = backups::discover(&roots);
         let dirs: Vec<PathBuf> = roots.iter().map(|r| r.folder.clone()).collect();
         s.quick = backups::last_for_quick_update(&dirs, Codec::dm32(), 8);
@@ -1771,6 +1795,11 @@ pub(crate) fn run_tool_lines(
     on_line: fn(&AppWindow, &str),
     done: impl FnOnce(&AppWindow, Option<ToolError>) + Send + 'static,
 ) {
+    // one radio job at a time, whatever called: refused (as a step that did not start) while another holds the port
+    if port_busy(ui) {
+        done(ui, Some(ToolError::value("another radio job holds the port; nothing was started")));
+        return;
+    }
     let app = ui.global::<App>();
     app.set_busy(true);
     clear_progress(&app);
@@ -1846,6 +1875,19 @@ fn s(p: &Path) -> String {
 
 /// A read-only reader (the search log or the live view) holds the radio's port: the radio steps wait (said on screen).
 /// On Linux / macOS a second open of the same tty would succeed and the two streams would mix.
+/// Another radio job holds the port now (a step, a health read, the live view, the search log): a Yes that comes
+/// late (a question left open) starts nothing; said on screen.
+pub(crate) fn port_busy(ui: &AppWindow) -> bool {
+    let r = ui.global::<Radio>();
+    let busy = ui.global::<App>().get_busy() || r.get_busy() || r.get_live_running() || r.get_slog_running();
+    if busy {
+        set_message(ui, &tr("slog_busy_other"), "warning");
+        r.set_message(tr("slog_busy_other").into());
+        r.set_message_kind("warning".into());
+    }
+    busy
+}
+
 pub(crate) fn reader_holds_port(ui: &AppWindow) -> bool {
     let held = with(|st| st.slog_cancel.is_some() || st.live_cancel.is_some());
     if held {
@@ -1975,7 +2017,7 @@ fn restore_plan(ui: &AppWindow) {
 }
 
 fn start_restore(ui: &AppWindow) {
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     with_port(ui, start_restore_on);
@@ -1984,7 +2026,7 @@ fn start_restore(ui: &AppWindow) {
 /// start_restore once the port is known (crate::with_port).
 fn start_restore_on(ui: &AppWindow, found: Option<String>) {
     // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     let Some(port) = found else {
@@ -2111,8 +2153,8 @@ pub fn demo(ui: &AppWindow) {
             kind: "".into(),
         },
         BackupRow {
-            name: "dm32-047-20261113".into(),
-            detail: "…/DDM25Plus/yedekler/dm32-047-20261113".into(),
+            name: "dm32-demo-20260101".into(),
+            detail: "…/DDM25Plus/yedekler/dm32-demo-20260101".into(),
             origin: "python".into(),
             kind: "".into(),
         },

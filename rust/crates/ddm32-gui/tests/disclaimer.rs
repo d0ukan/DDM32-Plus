@@ -34,7 +34,7 @@ fn settings_with(root: &Path, v: serde_json::Value) {
 fn window(root: &Path) -> AppWindow {
     init();
     let ui = AppWindow::new().unwrap();
-    ddm32_gui::setup(&ui, AppPaths::new(root), false);
+    ddm32_gui::setup_with_env(&ui, AppPaths::new(root), false, ddm32_gui::no_env);
     ui
 }
 

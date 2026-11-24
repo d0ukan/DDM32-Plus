@@ -142,11 +142,12 @@ pub fn show(ui: &AppWindow) {
     let downloaded: Vec<String> =
         client::list_packages(&releases, None).into_iter().filter(Package::installable).map(|p| p.version).collect();
     let rows = rows(&lang, &cat, &installed, &downloaded);
+    // the selection follows its version (a check may add or drop versions above it), not its place in the list
     let old = app.get_ver_selected();
-    if old >= rows.len() as i32 {
-        app.set_ver_selected(-1);
-    }
+    let was = slint::Model::row_data(&app.get_ver_rows(), old.max(0) as usize).filter(|_| old >= 0).map(|r| r.version);
+    let now = was.and_then(|v| rows.iter().position(|r| r.version == v)).map_or(-1, |i| i as i32);
     app.set_ver_rows(ModelRc::new(VecModel::from(rows)));
+    app.set_ver_selected(now);
     let (text, kind) = status(&lang, checking, error.as_deref(), &cat);
     app.set_ver_checking(checking);
     app.set_ver_status(text.into());

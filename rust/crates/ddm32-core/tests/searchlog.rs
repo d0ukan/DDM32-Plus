@@ -180,7 +180,7 @@ fn both_lists_and_a_second_search_are_not_counted_twice() {
         "alls.n=2",
         "alls.seq=2",
         "alls.f0=433500000,P25,456,0,0,1,0,655,1234567,1,0,1,",
-        "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,4,2,TA2DOU",
+        "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,4,2,TA1TST",
     ];
     assert!(b.add(&first, T0));
     assert_eq!(2, b.groups().len());
@@ -193,7 +193,7 @@ fn both_lists_and_a_second_search_are_not_counted_twice() {
         "alls.on=1",
         "alls.seq=2",
         "alls.f0=433500000,P25,456,0,0,1,0,655,1234567,1,1,1,",
-        "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,5,2,TA2DOU",
+        "alls.f1=439100000,YSF,0,0,0,0,0,0,0,1,5,2,TA1TST",
     ];
     assert!(!b.add(&same, at(1)));
     assert!(b.add(&["alls.on=1", "alls.seq=3", "alls.f0=439100000,YSF,0,0,0,0,0,0,0,2,0,2,YM2KDZ"], at(2)));
@@ -447,9 +447,9 @@ fn all_digital_fields_are_parsed() {
     assert_eq!(Stamp(T0.0 - 10), p.time);
     let d = parse_all("438612500,DMR,1,2,1,1,0,2620,2620123,4,0,5,", T0).unwrap();
     assert_eq!(("DMR", "CC1", "TS2 RPT", 2620, 2620123), (d.mode, d.code.as_str(), d.slot.as_str(), d.group, d.source));
-    let y = parse_all("439100000,YSF,0,0,0,0,0,0,0,2,5,6,TA2DOU/P", T0).unwrap();
+    let y = parse_all("439100000,YSF,0,0,0,0,0,0,0,2,5,6,TA1TST/P", T0).unwrap();
     assert_eq!(
-        ("YSF", "DG0", "", 0, 0, 2, "TA2DOU/P"),
+        ("YSF", "DG0", "", 0, 0, 2, "TA1TST/P"),
         (y.mode, y.code.as_str(), y.slot.as_str(), y.group, y.source, y.calls, y.caller.as_str())
     );
     let n = parse_all("438800000,NXDN,5,0,0,1,1,101,1234,1,0,7,", T0).unwrap();
@@ -855,7 +855,7 @@ fn keep_awake_helper_on_linux_and_macos() {
     assert!(inhibit_command("windows", 1).is_none());
     assert!(inhibit_command("freebsd", 1).is_none());
     // made and dropped at once: never panics, whatever the OS has (Windows: the thread's state is given back)
-    let k = ddm32_core::sys::KeepAwake::new();
+    let mut k = ddm32_core::sys::KeepAwake::new();
     if cfg!(windows) {
         assert!(k.active());
     }

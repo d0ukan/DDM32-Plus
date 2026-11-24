@@ -46,8 +46,8 @@ pub fn stock_backups(settings: &Settings) -> Vec<String> {
     }
 }
 
-/// Records a backup whose program image is stock firmware (the wizard's check, a planned restore): kept for "Back to
-/// stock firmware" (the C# AppState.RememberStockBackup).
+/// Records a backup whose program image is stock firmware, taken by this program's own wizard (its check): kept for
+/// "Back to stock firmware" (the C# AppState.RememberStockBackup). A folder the user showed is never recorded.
 pub fn remember_stock_backup(settings: &Settings, folder: &Path) -> std::io::Result<()> {
     let f = folder.display().to_string();
     let mut list = stock_backups(settings);
@@ -126,10 +126,8 @@ pub fn choose(ui: &AppWindow, kind: Option<&str>, folder: &Path) -> bool {
     app.set_restore_ready(false);
     set_message(ui, "", "info");
     let detected = FileSteps::detect_backup(folder, Codec::dm32());
+    // a planned restore never records a stock backup: only the wizard's own backups enter `stock_backups`
     let stock = detected.as_ref().ok().and_then(|d| d.str("layout")) == Some("stock");
-    if stock {
-        let _ = with(|s| remember_stock_backup(&s.settings, folder));
-    }
     let kind = kind.unwrap_or(if stock { "stock" } else { "previous" });
     let ok = with(|st| {
         if st.restore.choose(kind, folder).is_err() || st.restore.start_detect().is_err() {
@@ -212,8 +210,10 @@ pub fn ask(ui: &AppWindow) {
         return;
     }
     let Some(backup) = with(|s| s.restore.backup_dir.clone()) else { return };
-    let lang = with(|s| s.lang.clone());
-    let status = ui.global::<App>().get_res_status().to_string();
+    let (lang, status) = with(|s| {
+        // the plan and the flow's message; the backup is named once, by its full path, in the question itself
+        (s.lang.clone(), status_text(&s.lang, None, s.restore.plan_data.as_ref(), &s.restore.message))
+    });
     let app = ui.global::<App>();
     app.set_res_confirm_text(confirm_text(&lang, &backup, &status).into());
     app.set_res_confirm_open(true);

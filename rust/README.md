@@ -152,11 +152,14 @@ Since v1.1.0 (candidate) the window has what a normal user used in the C# 2.0.0 
 - **Backups and going back** (`src/restore.rs`): the C# shortcuts **Back to the previous version** (settings.json
   `restore_previous_backup`, now written after every verified install with a backup and after one that stopped after
   its writes began; else this program's install record's backup) and **Back to stock firmware** (`stock_backups`, now
-  recorded whenever the wizard's check or a planned restore sees a stock backup), **Choose another backup folder...**
+  recorded when the wizard's check sees that its own backup is stock firmware; a folder the user shows is never
+  recorded), **Choose another backup folder...**
   (a verified backup only), and the list of every backup found. Old Turkish paths (`yedekler`, ...) follow the moved
   folders. Choosing only detects and plans (files only) and shows the chosen backup and "N sectors will be written
-  (first - last)"; **Restore** then asks Yes / No (No by default) with the backup's path, the plan and "You are
-  responsible. Is your backup ready?" before the radio step starts, behind the disclaimer and the port lock. Limit:
+  (first - last)"; **Restore** then asks Yes / No (No by default) with the backup's path (named once), the plan and
+  "You are responsible. Is your backup ready?" before the radio step starts, behind the disclaimer and the port lock.
+  Every Yes (restore, pack write) and every radio tool start checks again that no other job (a step, a health read,
+  the live view, the search log) holds the port, and starts nothing if one does. Limit:
   a stock backup taken by 3.0.0 is not in `stock_backups`; "Choose another backup folder..." or the list finds it.
 - **Data packs** (`src/packs.rs`): what the radio holds (**Read the radio's packs**: the data pack tool's read-only
   `read` over the CPS protocol, a user-clicked radio step behind the disclaimer) or what a verified backup's data chip
@@ -171,15 +174,19 @@ Since v1.1.0 (candidate) the window has what a normal user used in the C# 2.0.0 
 - **My channels** (`src/channels.rs`): a view-only warning, a zone filter and a mode filter (each a small picker),
   **All columns** (every field but the two made from others; the table then scrolls sideways), a sort by any column
   title (numbers as numbers, again for the other way round), a double click on a zone shows its channels, **Open
-  another backup...** (a folder or a 16 MiB image; it stays chosen while the program runs), "Showing N of M rows", and
+  another backup...** (a folder or a 16 MiB image; it stays chosen while the program runs, and the source line says
+  "the folder you opened"), "Showing N of M rows", and
   the CSV of exactly the rows shown.
 - **Health**: the cable card with **Check the cable** (the device list again; no port opened) and **Read every 30 s**
   (off by default, ends when the page is left; each read only while nothing else holds the port, a cable is known and
   the disclaimer is accepted), and the last read's time.
 - **Window**: size and place kept in `settings.json` `window` in the C# format (`x`, `y`, `w`, `h`, `max`, logical
-  pixels) so both programs agree; restored only when at least the window's minimum and a 120 x 40 px grip of it lies on
-  the screens there are now (Windows: the virtual screen at the system DPI, as WPF measures it; elsewhere only an
-  absurd place is refused); a maximized or minimized window keeps the last normal place. **Help** is an offline page
+  pixels at the system DPI on Windows, as WPF measures them, for the save and the check alike) so both programs
+  agree; restored only when at least the window's minimum and its title bar lies on one monitor (the top inside the
+  monitor's work area, a 40 px strip below it, 120 px of the width; Windows lists the monitors; elsewhere only an
+  absurd place is refused); the size is cut to that monitor; a maximized or minimized window keeps the last normal
+  place. A damaged `settings.json` is never written for one of the C# keys (`window`, `last_check_utc`, the restore and
+  pack keys), and the first such key also saves `channel` as it read, so the channel can never flip to Beta. **Help** is an offline page
   with the C# help's eight common situations (button names are this program's), one click from the full guide.
 - **Developer builds** (`--features developer`): the title says "DEVELOPER BUILD - radio access on / WRITE on" as the
   C# one, Tools > **Local release folder...** and `--release-folder PATH` load a signed release from a folder (verified
@@ -188,7 +195,13 @@ Since v1.1.0 (candidate) the window has what a normal user used in the C# 2.0.0 
   `--show health:demo` / `live:demo` (made-up readings; nothing holds the port) and `--show channels:FOLDER`.
 - **Search log keep-awake** on Linux and macOS: a `systemd-inhibit --what=sleep:idle ... tail --pid=PID -f /dev/null`
   / `caffeinate -i -w PID` child process while the log runs (ended with the log, and by itself with the program);
-  without the tool nothing happens and the log reconnects after a sleep as before. Not tried on a real Linux or Mac.
+  without the tool (or when it ends at once) nothing happens and the log reconnects after a sleep as before. Not tried
+  on a real Linux or Mac. A running RadioID download holds the close button like a step that does not write ("Close
+  anyway" deletes its half file).
+- **Tests are hermetic**: the window takes its environment lookup from `setup_with_env`; every test passes `no_env`
+  (or a sandbox inside its temporary folder), so no test reads the user's real backups (`tests/parity.rs` checks the
+  test files and that everything found lies inside the test's folder). Demo and test data use fictional callsigns and
+  IDs (TA1TST, 2869999).
 
 ## Radio access
 

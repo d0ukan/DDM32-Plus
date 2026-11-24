@@ -6,7 +6,9 @@
 //! payload first, header last). Every radio step starts only from its own button and the write asks first (Yes / No,
 //! No by default); both are behind the disclaimer and refused while another job holds the port.
 
-use crate::{i18n, radio_allowed, reader_holds_port, tr, trf, with, with_port, worker, App, AppWindow, Packs};
+use crate::{
+    i18n, port_busy, radio_allowed, reader_holds_port, tr, trf, with, with_port, worker, App, AppWindow, Packs,
+};
 use ddm32_core::datapacks::datapack::{self as dp, AIR, RADIO_ID};
 use ddm32_core::datapacks::files::{self as files, AirSource, BuiltPack};
 use ddm32_core::datapacks::radioid;
@@ -540,7 +542,7 @@ pub fn ask_write(ui: &AppWindow, ptype: u8) {
 
 fn write_yes(ui: &AppWindow) {
     ui.global::<Packs>().set_write_confirm_open(false);
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     with_port(ui, write_on);
@@ -548,7 +550,7 @@ fn write_yes(ui: &AppWindow) {
 
 /// The write once the port is known (crate::with_port): the gates again, then the data pack tool (writes).
 fn write_on(ui: &AppWindow, found: Option<String>) {
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     let Some(port) = found else {
@@ -593,14 +595,14 @@ fn write_on(ui: &AppWindow, found: Option<String>) {
 
 /// "Read the radio's packs": the radio information and both slots of each type (read only, no power cycle).
 pub fn read_radio(ui: &AppWindow) {
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     with_port(ui, read_on);
 }
 
 fn read_on(ui: &AppWindow, found: Option<String>) {
-    if !radio_allowed(ui) || reader_holds_port(ui) {
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     let Some(port) = found else {
@@ -723,7 +725,7 @@ pub fn demo(ui: &AppWindow, lang: &str) {
 
 /// A small RadioID pack for the screenshots (made in memory; the count says what a real list holds).
 pub fn demo_pack() -> BuiltPack {
-    let entries = [(2862001i64, "TA2DOU".to_string(), "Dogukan".to_string())];
+    let entries = [(2869999i64, "TA1TST".to_string(), "Test".to_string())];
     let payload = dp::radioid_payload(&entries, dp::ID_CHARS).expect("a valid entry");
     let image = dp::image(RADIO_ID, &payload, "20261124", "RadioID TR", 0, dp::TAG).expect("a valid pack");
     let header = dp::parse(&image).0.expect("its own header");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The window's size and place, kept in settings.json `window` in the C# program's format, so both programs agree:
 //! `{"x": .., "y": .., "w": .., "h": .., "max": bool}` in logical pixels (WPF's device independent pixels). Restored
-//! at the start only when the saved size is at least the window's minimum and enough of it lies on the screens the
+//! at the start only when the saved size is at least the window's minimum and its title bar lies on a monitor the
 //! computer has now (a monitor unplugged since: the window opens where the OS puts it). Saved when the window closes;
 //! a maximized or minimized window keeps the last normal place.
 
@@ -46,31 +46,28 @@ pub fn to_json(g: &Geometry) -> Value {
 }
 
 /// What the start puts back: (the place and size, or None for the OS's default; maximized). The size is at least
-/// MIN and at most the screens' size; the place only when VISIBLE of the window lies on `screen` (all monitors).
-/// Without the screens' extent (`screen` None: not Windows) the place is used when it is not absurd (within
+/// MIN; the place only when the window's title bar lies on one monitor (its top within the monitor, the 40 px strip
+/// below it inside, at least 120 px of the window's width on it), so it can always be grabbed. The size is cut to that
+/// monitor. Without the monitors (`monitors` empty: not Windows) the place is used when it is not absurd (within
 /// -10000..100000).
-pub fn restore_plan(saved: Option<&Value>, screen: Option<Rect>) -> (Option<Rect>, bool) {
+pub fn restore_plan(saved: Option<&Value>, monitors: &[Rect]) -> (Option<Rect>, bool) {
     let Some(g) = parse(saved) else { return (None, false) };
     let r = g.rect;
     if r.w < MIN.0 || r.h < MIN.1 {
         return (None, g.max);
     }
-    let on_screen = match screen {
-        Some(s) => {
-            let ox = (r.x + r.w).min(s.x + s.w) - r.x.max(s.x);
-            let oy = (r.y + r.h).min(s.y + s.h) - r.y.max(s.y);
-            ox >= VISIBLE.0 && oy >= VISIBLE.1
-        }
-        None => (-10000.0..100000.0).contains(&r.x) && (-10000.0..100000.0).contains(&r.y),
-    };
-    if !on_screen {
-        return (None, g.max);
+    if monitors.is_empty() {
+        let sane = (-10000.0..100000.0).contains(&r.x) && (-10000.0..100000.0).contains(&r.y);
+        return (sane.then_some(r), g.max);
     }
-    let (w, h) = match screen {
-        Some(s) => (r.w.min(s.w.max(MIN.0)), r.h.min(s.h.max(MIN.1))),
-        None => (r.w, r.h),
+    let holds = |m: &Rect| {
+        let ox = (r.x + r.w).min(m.x + m.w) - r.x.max(m.x);
+        r.y >= m.y && r.y + VISIBLE.1 <= m.y + m.h && ox >= VISIBLE.0
     };
-    (Some(Rect { x: r.x, y: r.y, w, h }), g.max)
+    match monitors.iter().find(|m| holds(m)) {
+        Some(m) => (Some(Rect { x: r.x, y: r.y, w: r.w.min(m.w.max(MIN.0)), h: r.h.min(m.h.max(MIN.1)) }), g.max),
+        None => (None, g.max),
+    }
 }
 
 /// What the close saves: the normal place and size now, or (maximized / minimized) the last saved place with the
@@ -86,12 +83,24 @@ pub fn save_plan(now: Rect, maximized: bool, minimized: bool, saved: Option<&Val
     Some(Geometry { rect: now, max: false })
 }
 
-/// The extent of every monitor together in logical pixels (Windows: the virtual screen at the system's DPI, as WPF
-/// measures it); None elsewhere.
-pub fn virtual_screen() -> Option<Rect> {
+/// Every monitor's work area in logical pixels (Windows: at the system's DPI, as WPF measures it); empty elsewhere.
+pub fn monitors() -> Vec<Rect> {
     #[cfg(windows)]
     {
-        win::virtual_screen()
+        win::monitors()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// Physical pixels per logical pixel for the saved place: the system's DPI on Windows (one basis for every monitor,
+/// for the save and the check alike, as WPF does), else None (the window's own scale factor).
+pub fn system_scale() -> Option<f64> {
+    #[cfg(windows)]
+    {
+        Some(win::system_scale())
     }
     #[cfg(not(windows))]
     {
@@ -102,24 +111,33 @@ pub fn virtual_screen() -> Option<Rect> {
 /// Puts the window back where it was (main, before the event loop; tests never call it).
 pub fn restore(ui: &crate::AppWindow) {
     let saved = crate::with(|s| s.settings.load().get("window").cloned());
-    let (rect, max) = restore_plan(saved.as_ref(), virtual_screen());
+    let (rect, max) = restore_plan(saved.as_ref(), &monitors());
     let w = ui.window();
     if let Some(r) = rect {
-        w.set_size(slint::LogicalSize::new(r.w as f32, r.h as f32));
-        w.set_position(slint::LogicalPosition::new(r.x as f32, r.y as f32));
+        match system_scale() {
+            Some(k) => {
+                w.set_size(slint::PhysicalSize::new((r.w * k).round() as u32, (r.h * k).round() as u32));
+                w.set_position(slint::PhysicalPosition::new((r.x * k).round() as i32, (r.y * k).round() as i32));
+            }
+            None => {
+                w.set_size(slint::LogicalSize::new(r.w as f32, r.h as f32));
+                w.set_position(slint::LogicalPosition::new(r.x as f32, r.y as f32));
+            }
+        }
     }
     if max {
         w.set_maximized(true);
     }
 }
 
-/// Saves the window's size and place (every way the window closes; not in the demo).
+/// Saves the window's size and place (every way the window closes; not in the demo). Never over an unreadable
+/// settings.json (Settings refuses the C# key then).
 pub fn save(ui: &crate::AppWindow) {
     if crate::DEMO.load(std::sync::atomic::Ordering::SeqCst) {
         return;
     }
     let w = ui.window();
-    let scale = w.scale_factor().max(0.1) as f64;
+    let scale = system_scale().unwrap_or(w.scale_factor() as f64).max(0.1);
     let (p, s) = (w.position(), w.size());
     let now =
         Rect { x: p.x as f64 / scale, y: p.y as f64 / scale, w: s.width as f64 / scale, h: s.height as f64 / scale };
@@ -134,32 +152,70 @@ pub fn save(ui: &crate::AppWindow) {
 mod win {
     use super::Rect;
 
-    const SM_XVIRTUALSCREEN: i32 = 76;
-    const SM_YVIRTUALSCREEN: i32 = 77;
-    const SM_CXVIRTUALSCREEN: i32 = 78;
-    const SM_CYVIRTUALSCREEN: i32 = 79;
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct WinRect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[repr(C)]
+    struct MonitorInfo {
+        size: u32,
+        monitor: WinRect,
+        work: WinRect,
+        flags: u32,
+    }
+
+    type EnumProc = unsafe extern "system" fn(isize, isize, *mut WinRect, isize) -> i32;
 
     #[link(name = "user32")]
     extern "system" {
-        fn GetSystemMetrics(index: i32) -> i32;
+        fn EnumDisplayMonitors(hdc: isize, clip: *const WinRect, proc_: EnumProc, data: isize) -> i32;
+        fn GetMonitorInfoW(monitor: isize, info: *mut MonitorInfo) -> i32;
         fn GetDpiForSystem() -> u32;
     }
 
-    pub fn virtual_screen() -> Option<Rect> {
-        // SAFETY: plain value queries without pointers
-        let (x, y, w, h, dpi) = unsafe {
-            (
-                GetSystemMetrics(SM_XVIRTUALSCREEN),
-                GetSystemMetrics(SM_YVIRTUALSCREEN),
-                GetSystemMetrics(SM_CXVIRTUALSCREEN),
-                GetSystemMetrics(SM_CYVIRTUALSCREEN),
-                GetDpiForSystem(),
-            )
+    unsafe extern "system" fn collect(monitor: isize, _hdc: isize, _r: *mut WinRect, data: isize) -> i32 {
+        // SAFETY: `data` is the Vec passed by monitors() below, alive for the whole enumeration
+        let out = unsafe { &mut *(data as *mut Vec<WinRect>) };
+        let mut info = MonitorInfo {
+            size: std::mem::size_of::<MonitorInfo>() as u32,
+            monitor: WinRect::default(),
+            work: WinRect::default(),
+            flags: 0,
         };
-        if w <= 0 || h <= 0 {
-            return None;
+        // SAFETY: a handle Windows just gave us and our own correctly sized struct
+        if unsafe { GetMonitorInfoW(monitor, &mut info) } != 0 {
+            out.push(info.work);
         }
-        let k = 96.0 / dpi.max(96) as f64;
-        Some(Rect { x: x as f64 * k, y: y as f64 * k, w: w as f64 * k, h: h as f64 * k })
+        1
+    }
+
+    pub fn system_scale() -> f64 {
+        // SAFETY: a plain value query
+        let dpi = unsafe { GetDpiForSystem() };
+        dpi.max(96) as f64 / 96.0
+    }
+
+    pub fn monitors() -> Vec<Rect> {
+        let mut found: Vec<WinRect> = Vec::new();
+        // SAFETY: the callback only pushes into `found`, which outlives the call
+        unsafe {
+            EnumDisplayMonitors(0, std::ptr::null(), collect, &mut found as *mut Vec<WinRect> as isize);
+        }
+        let k = system_scale();
+        found
+            .into_iter()
+            .filter(|r| r.right > r.left && r.bottom > r.top)
+            .map(|r| Rect {
+                x: r.left as f64 / k,
+                y: r.top as f64 / k,
+                w: (r.right - r.left) as f64 / k,
+                h: (r.bottom - r.top) as f64 / k,
+            })
+            .collect()
     }
 }
