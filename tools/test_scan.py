@@ -33,7 +33,7 @@ def ui_tests(ROOT, APP, OUT, host):
     argv[argv.index('-o') + 1] = str(OUT / 'test_ui_scan')
     run([*argv, '-I' + str(host), '-I' + str(tp), '-DCONFIG_P25_CHANNELS=1', '-DCONFIG_P25_SEARCH=1',
          '-DCONFIG_DMR_SEARCH=1', '-DCONFIG_DMR_ANY=1', '-DCONFIG_FIND_SAVE=1', '-DCONFIG_SEARCH_RANGE=1',
-         '-DCONFIG_LANG_TR=1',
+         '-DCONFIG_LANG_TR=1', '-DCONFIG_NAC_DEC=1', '-DCONFIG_SEARCH_SURE=1', '-DCONFIG_ALL_SEARCH=1',
          *(str(ui / f) for f in ('ui_p25search.c', 'ui_dmrsearch.c', 'ui_srange.c', 'ui_scratch.c', 'findsave.c',
                                  'ui_findsave.c'))], cwd=host)
     run([OUT / 'test_ui_scan'], cwd=host)

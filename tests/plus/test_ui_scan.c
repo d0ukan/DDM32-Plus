@@ -287,9 +287,168 @@ static void dmr_range(void)
 	run("shot:dmr-range");
 }
 
+/* --- srchfix: the lines fit the safe area, the status line leaves nothing behind --- */
+
+/* Worst-case content: 4-digit pass and hits, a 3-digit negative floor, the longest NAC, talkgroup, color code, source
+ * and ages (58 minutes) */
+static uint32_t ago(uint32_t ms)
+{
+	return (uint32_t)(sim_now() - ms);
+}
+
+static void sf_p25(uint8_t phase, bool playing)
+{
+	p25s_view_t *v = &sc_sim.p25;
+	memset(v, 0, sizeof *v);
+	v->phase = phase;
+	v->playing = playing;
+	v->at_hz = 433525000u;
+	v->floor_dbm = -120;
+	v->sweeps = 9998;
+	v->hits = 9999;
+#if CONFIG_SEARCH_SURE
+	v->step_ms = 83;
+#endif
+	static const struct { uint32_t hz; uint16_t nac, tg; uint32_t src; uint32_t age; } f[] = {
+		{ 433525000u, 0xFFF, 65535, 4294967295u, 3500000u },	/* the longest: NAC $FFF/4095, TG 65535 */
+		{ 158006250u, 0x40C, 0, 0, 780000u },			/* the owner's photo: 13m ago */
+		{ 159868750u, 0x44E, 612, 663147, 780000u },		/* TG612 */
+		{ 145600000u, 0x293, 101, 0, 59000u },
+	};
+	for (unsigned i = 0; i < sizeof f / sizeof f[0]; i++) {
+		v->found[i].hz = f[i].hz;
+		v->found[i].nac = f[i].nac;
+		v->found[i].tg = f[i].tg;
+		v->found[i].src = f[i].src;
+		v->found[i].heard_ms = ago(f[i].age);
+	}
+	v->found_n = 4;
+	sc_sim_changed();
+}
+
+static void sf_dmr(uint8_t phase, bool playing, bool all)
+{
+	dmrs_view_t *v = &sc_sim.dmr;
+	memset(v, 0, sizeof *v);
+	v->phase = phase;
+	v->playing = playing;
+	v->kind = all ? DMRS_KIND_ALL : DMRS_KIND_DMR;
+	v->mode = all ? DMRS_MODE_NXDN : DMRS_MODE_DMR;
+	v->at_hz = 438712500u;
+	v->floor_dbm = -120;
+	v->sweeps = 9998;
+	v->hits = 9999;
+#if CONFIG_SEARCH_SURE
+	v->step_ms = 83;
+#endif
+	static const struct {
+		uint32_t hz, dst, src;
+		uint16_t cc;
+		uint8_t ts, sync, mode, group, enc;
+		uint32_t age;
+	} f[] = {
+		{ 438712500u, 16777215u, 16777214u, 15, 3, 3, DMRS_MODE_DMR, 1, 1, 3500000u },	/* everything at once */
+		{ 438712500u, 2620123u, 2620124u, 1, 3, 1, DMRS_MODE_DMR, 1, 0, 780000u },	/* a repeater, 13m ago */
+		{ 433525000u, 0, 4294967295u, 0xFFF, 0, 0, DMRS_MODE_P25, 1, 0, 3500000u },	/* NAC $FFF/4095 */
+		{ 433525000u, 612, 663147, 0x1C8, 0, 0, DMRS_MODE_P25, 1, 0, 780000u },
+		{ 144800000u, 1, 3, 15, 0, 0, DMRS_MODE_YSF, 0, 0, 780000u },
+		{ 144800000u, 2, 3, 63, 0, 0, DMRS_MODE_NXDN, 1, 1, 3500000u },
+	};
+	for (unsigned i = 0; i < sizeof f / sizeof f[0]; i++) {
+		dmrs_found_t *o = &v->found[i];
+		o->hz = f[i].hz;
+		o->dst = f[i].dst;
+		o->src = f[i].src;
+		o->cc = f[i].cc;
+		o->ts_mask = f[i].ts;
+		o->sync_mask = f[i].sync;
+		o->mode = all ? f[i].mode : DMRS_MODE_DMR;
+		o->group = f[i].group;
+		o->enc = f[i].enc;
+		o->heard_ms = ago(f[i].age);
+	}
+	v->found_n = 6;
+	sc_sim_changed();
+}
+
+static void sf_fill(ui_scr_t scr, uint8_t phase, bool playing)
+{
+	if (scr == SCR_P25SEARCH)
+		sf_p25(phase, playing);
+	else
+		sf_dmr(phase, playing, scr != SCR_DMRSEARCH);
+}
+
+/* Every phase of each screen with the worst content: the layout check (nothing past the 220 px of the safe area, none
+ * clipped, none on top of another) and the pass line in its shortest form */
+static void sf_layouts(ui_scr_t scr)
+{
+	static const struct { uint8_t phase; bool playing; } ph[] = { { 1, false }, { 2, false }, { 3, true } };
+	for (unsigned i = 0; i < sizeof ph / sizeof ph[0]; i++) {
+		start("srchfix layout", scr);
+		sf_fill(scr, ph[i].phase, ph[i].playing);
+		run("wait:300");
+		layout();
+		char shot[40];
+		snprintf(shot, sizeof shot, "shot:sf-%d-%u", (int)scr, i);	/* SCAN_SHOTS: the screens as PNGs */
+		run(shot);
+		expect(T("shows=P9999_h9999_fl-120", "shows=T9999_b9999_tb-120"));
+		/* the lines in the shortest form that fits the 24 glyphs (and the longer one where it does) */
+		if (scr == SCR_P25SEARCH) {
+			expect("shows=433.5250_FFF_TG65535_58m shows=158.0062_$40C/1036_13m shows=159.8687_$44E_TG612_13m");
+			expect("shows=145.6000_$293_TG101_59s");
+		} else if (scr == SCR_DMRSEARCH) {
+			expect("shows=438.7125_CC15_T12_RD_58m shows=438.7125_CC1_TS1+2_R_13m");
+			expect(T("shows=TG_2620123_from_2620124", "shows=TG_2620123_<2620124"));
+		} else {
+			expect("shows=433.5250_P25_$FFF_58m shows=433.5250_P25_$1C8_13m shows=438.7125_DMR_CC1_R_13m");
+			expect(T("shows=TG_2620123_from_2620124", "shows=TG_2620123_<2620124"));
+			if (ph[i].phase == 2 && !ph[i].playing)
+				expect(T("shows=Prb_NXDN_438.7125", "shows=Dnm_NXDN_438.7125"));
+		}
+	}
+}
+
+static void sf_p25_layout(void) { sf_layouts(SCR_P25SEARCH); }
+static void sf_dmr_layout(void) { sf_layouts(SCR_DMRSEARCH); }
+static void sf_all_layout(void) { sf_layouts(SCR_ALLSEARCH); }
+
+/* The same screen after a status line change (Sweep, Probe, the call) is what a fresh draw of the new state gives:
+ * compared pixel for pixel in the panel as gfx_flush sent it (no old digits left over "Probe") */
+static void sf_redraw(ui_scr_t scr)
+{
+	static const struct { uint8_t phase; bool playing; } seq[] = { { 1, false }, { 2, false }, { 3, true }, { 1, false } };
+	size_t n = (size_t)240 * 320;
+	uint16_t *want = malloc(n * sizeof *want);
+	for (unsigned i = 0; i < sizeof seq / sizeof seq[0]; i++) {
+		/* the frame as drawn from a clean start */
+		start("srchfix redraw fresh", scr);
+		sf_fill(scr, seq[i].phase, seq[i].playing);
+		sc_sim.p25.at_hz = sc_sim.dmr.at_hz = 159868700u + i * 100u;
+		sc_sim_changed();
+		run("wait:300");
+		memcpy(want, sim_panel(), n * sizeof *want);
+		/* ... and after the other phases before it */
+		start("srchfix redraw after", scr);
+		for (unsigned k = 0; k <= i; k++) {
+			sf_fill(scr, seq[k].phase, seq[k].playing);
+			sc_sim.p25.at_hz = sc_sim.dmr.at_hz = k < i ? 438712500u + k * 12500u : 159868700u + i * 100u;
+			sc_sim_changed();
+			run("wait:300");
+		}
+		check(memcmp(want, sim_panel(), n * sizeof *want) == 0, "the status line leaves old pixels behind");
+	}
+	free(want);
+}
+
+static void sf_p25_redraw(void) { sf_redraw(SCR_P25SEARCH); }
+static void sf_dmr_redraw(void) { sf_redraw(SCR_DMRSEARCH); }
+static void sf_all_redraw(void) { sf_redraw(SCR_ALLSEARCH); }
+
 typedef void (*case_fn)(void);
 static const case_fn all[] = {
 	p25_presets, p25_type, p25_back, p25_step, p25_move, p25_refuse, p25_running_kept, dmr_range,
+	sf_p25_layout, sf_dmr_layout, sf_all_layout, sf_p25_redraw, sf_dmr_redraw, sf_all_redraw,
 };
 
 int main(void)

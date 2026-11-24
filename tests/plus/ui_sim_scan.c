@@ -73,3 +73,37 @@ void radio_req_dmr_timeslot(uint8_t ts)
 	view.dmr.ts = ts;
 	changed();
 }
+
+void sc_sim_changed(void)
+{
+	changed();	/* the radio's view changed: the screen on top draws again (as the search's own updates do) */
+}
+
+#if CONFIG_ALL_SEARCH
+/* The all digital search (srchfix): its view is the DMR view's, its requests recorded as "alls:" */
+bool dmrs_snapshot_all(dmrs_view_t *out)
+{
+	*out = sc_sim.dmr;
+	return true;
+}
+
+void radio_req_all_search(uint32_t lo_hz, uint32_t hi_hz)
+{
+	search_req("alls", lo_hz, hi_hz);
+	sc_sim.dmr.phase = lo_hz != 0 ? DMRS_SWEEP : DMRS_OFF;
+	sc_sim.dmr.at_hz = srange_lo_of(lo_hz);
+}
+
+const char *dmrs_mode_name(uint8_t mode)
+{
+	static const char names[DMRS_MODES][5] = { "DMR", "P25", "YSF", "NXDN" };
+	return mode < DMRS_MODES ? names[mode] : "?";
+}
+
+void dmrs_call_unpack(uint32_t hi, uint32_t lo, char out[11])
+{
+	(void)hi;
+	(void)lo;
+	memcpy(out, "TA2ABC/P", 9);
+}
+#endif
