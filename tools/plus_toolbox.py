@@ -84,8 +84,8 @@ def prepare_toolbox(transform, install):
          '#if CONFIG_GPS_DASH\n\tcase T_GPSDASH: ui_push(SCR_GPSDASH, 0); break;\n#endif\n'
          '#if CONFIG_CLOCK_TOOLS\n\tcase T_CLOCK: ui_push(SCR_CLOCK, 0); break;\n#endif\n'
          '\tcase T_CW: ui_push(SCR_CW, 0); break;\n'),
-        ('\t\t[T_SOS] = ART_ICON_BEACON + 1,\t// the SOS beacon\'s\n',
-         '\t\t[T_SOS] = ART_ICON_BEACON + 1,\t// the SOS beacon\'s\n'
+        ('\t\t[T_SOS] = ART_ICON_SOS + 1,\t// the warning triangle\n',
+         '\t\t[T_SOS] = ART_ICON_SOS + 1,\t// the warning triangle\n'
          '\t\t[T_HEARD] = ART_ICON_RECENT + 1,\t// a list of calls, as Recent\n'
          '\t\t[T_GPSDASH] = ART_ICON_POSITION + 1, [T_CLOCK] = ART_ICON_ALMANAC + 1,\t// the GPS\'s; the sky\'s clock\n'),
     ])

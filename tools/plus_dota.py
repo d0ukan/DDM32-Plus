@@ -253,7 +253,7 @@ def prepare_dota(transform, install):
         ('#if CONFIG_CLOCK_TOOLS\n\tcase T_CLOCK: ui_push(SCR_CLOCK, 0); break;\n#endif\n',
          '#if CONFIG_CLOCK_TOOLS\n\tcase T_CLOCK: ui_push(SCR_CLOCK, 0); break;\n#endif\n'
          + ON + '\tcase T_DOTA: ui_push(SCR_DOTA, 0); break;\n#endif\n'),
-        ('[T_CLOCK] = ART_ICON_ALMANAC + 1,', '[T_CLOCK] = ART_ICON_ALMANAC + 1, [T_DOTA] = ART_ICON_BEACON + 1,'),
+        ('[T_CLOCK] = ART_ICON_ALMANAC + 1,', '[T_CLOCK] = ART_ICON_ALMANAC + 1, [T_DOTA] = ART_ICON_DOTA + 1,'),
     ])
     transform('core/ui/ui_app.c', [
         ('#if CONFIG_CLOCK_TOOLS\n#include "ui/ui_clock.h"\n#endif\n',

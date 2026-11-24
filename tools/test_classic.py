@@ -1008,6 +1008,9 @@ def main():
     # DDM32 Plus round 14 xband: last calls of every mode and letter (tools/test_xband.py)
     import test_xband
     test_xband.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus Tools menu icons: every entry its own or a deliberate family's, in the real UI (tools/test_toolicons.py)
+    import test_toolicons
+    test_toolicons.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus SSTV send: the picture's audio decoded again, the page (tools/test_sstvtx.py)
     test_sstvtx.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus DMR receive audio diagnostics: the PCM driver's counters and prefill, the page (tools/test_dmraudio.py)
