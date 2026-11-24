@@ -898,3 +898,22 @@ TS-1..TS-4, TS-6 and TS-7 expect **nothing transmitted**: watch the red LED and 
 | RA-2 | Press `*` again on the same repeater; then on a DMR repeater; then on a C4FM entry | "Already in ZONE: ch N", no second channel; the DMR one is added receive only with its colour code and slot (RX list All TGs); the C4FM one: "Info only: not a mode of this radio" |
 | RA-3 | With Home's zone at 80 channels, `*` on a repeater; with a DMR data send running, `*` on a repeater | "Zone full: max 80 channels", nothing written; "Can't add while transmitting" |
 | RA-4 | In the VFO (Home on the VFO), `*` on a repeater; on the first (province) level of Tools > Repeaters press `*`, then `#` on a list | the channel goes only into "All channels"; on the province level `*` opens quick settings as before; `#` still opens the nearest repeater's details |
+
+## RAM saving: the safe-area frame buffer (branch `ramsave`, docs/plus.md "RAM budget", v1.0.2 candidate)
+
+The frame buffer now holds only the 220 x 310 area inside the bezel; the radio paints the 10 px left / right and
+5 px top / bottom edges in the background color itself (`fill_insets`). The host tests show the panel gets the same
+pixels on every simulator screen, but only the real panel proves the LCD side (window addressing, the edge fill, wake
+from sleep). Installing needs the owner's approval in chat; nothing here transmits. Look closely at all four edges
+and the corners in every step: any stripe, garbage, a 1 px line of another color, or a picture shifted by 10 / 5 px
+is a failure (photo it).
+
+| # | Do | Expect |
+|---|---|---|
+| FB-1 | Power on; boot splash, then Home on an FM channel, a DMR channel and the VFO | as v1.0.1: the edges in the background color, nothing shifted, text not cut at the left / top |
+| FB-2 | Menu, Channels (a long list: scroll to the end and back), Zones, Contacts, Settings pages, Tools and three tool screens (Spectrum with the waterfall, the map, SSTV) | every screen whole; the focus bar and the scroll bar reach the same place as before; no garbage left at the edges after scrolling |
+| FB-3 | Settings > Display: dark, light, high-contrast theme; the filled status bar off and on; Large text on Home | the edges change to each theme's background at once (no dark frame around a light screen, no light frame after going back to dark) |
+| FB-4 | Receive a call (FM and DMR) and transmit (licence permitting) | the RX / TX banner and the status bar (bars, battery, icons) draw as before |
+| FB-5 | Let the backlight time out / the screen sleep, wait a minute, press a key; also the power-save sleep if used | the screen comes back whole: no stripes or old content at the edges, the edges in the current theme's color |
+| FB-6 | Pop-ups: open and close quick settings, the lock (long Quick 5), a message banner | banners and pop-ups draw whole |
+| FB-7 | Only if the owner uses the debug link screenshot (`rfoundry_debug.py screenshot`): take one of Home | a whole 240 x 320 picture (the packed form now answers "unavailable", so the tool reads the slower RGB565 form; the picture is the same) |

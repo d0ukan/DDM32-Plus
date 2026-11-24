@@ -3,6 +3,21 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## v1.0.2 (candidate, not released yet)
+
+Firmware (host-tested only; not yet run on a radio).
+
+- More free RAM for the coming software P25 receive probe: 4,792 B more static RAM free (1,968 -> 6,760 B; the
+  1,500 B floor kept), no feature removed and no task stack touched (branch `ramsave`, `tools/plus_ramsave.py`; two of
+  the three savings of RadioFoundry 454a5b76, MIT; the third, the start-up stack in the RTOS heap, was already in):
+  - The screen's frame buffer holds only the area inside the bezel (220 x 310 of the 240 x 320 panel): 34,100 B instead
+    of 38,400. Nothing was ever drawn in the 10 / 5 px edges; the radio now paints them in the background color
+    itself. The screen shows the same pixels (every simulator screen compared both ways, frame by frame).
+  - Settings and storage each use one 256-byte slot buffer instead of two (they were never used at the same time):
+    -512 B.
+  - The debug link's packed (LZ4) screenshot now answers "unavailable", and the debug tool reads the RGB565 form
+    instead, which gives the same whole-screen picture (slower over the cable). Our PC programs use neither.
+
 ## v1.1.0 (candidate, not released yet)
 
 Programmer (Rust, `rust/`; the version numbers are not bumped yet). The Rust program becomes the only programmer for

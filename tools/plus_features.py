@@ -204,6 +204,7 @@ def prepare(transform, install):
     __import__((__package__ + "." if __package__ else "") + "plus_txsafe", fromlist=["x"]).prepare_txsafe(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_rfports", fromlist=["x"]).prepare_rfports(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_fastscan", fromlist=["x"]).prepare_fastscan(transform, install)
+    __import__((__package__ + "." if __package__ else "") + "plus_ramsave", fromlist=["x"]).prepare_ramsave(transform, install)
 
 
 def prepare_large_scale(transform):
@@ -1849,6 +1850,11 @@ PLUS_RAM_TRIM = {
     # +2,048 B back (2026-11-18): the radio read heap_min_free 1,640 B with FM caller ID's 2 KB ring running, and the
     # SSTV screen takes 1,472 B more while it is open (docs/plus-radio-test.md RR1, SV7)
     'PLUS_HEAP_BYTES': 36 * 1024 + 512 - 3840 - (731 - PLUS_HOST_TASK_WORDS) * 4 + 2048,
+    # v1.0.2 RAM saving (tools/plus_ramsave.py, RadioFoundry 454a5b76): the frame buffer of the 220 x 310 safe area
+    # inside the bezel only (34,100 B instead of the panel's 38,400; display_dm32.c checks the size), and one slot buffer
+    # each in settings.c and storage.c (-512 B)
+    'PLUS_FB_SAFE_BYTES': (240 - 10 - 10 + 1) // 2 * (320 - 5 - 5),
+    'PLUS_SHARED_SLOT_BUF': 1,
 }
 
 
