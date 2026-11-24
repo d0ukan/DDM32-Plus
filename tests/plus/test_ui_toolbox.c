@@ -34,6 +34,7 @@
 #include "ui/mapnav.h"
 #include "ui/ui_gpsdash.h"
 #include "ui/ui_clock.h"
+#include "ui/i18n.h"
 #include "radio/beep.h"
 #include "codeplug/codeplug.h"
 #include "ui_sim_toolbox.h"
@@ -578,6 +579,63 @@ static void clock_flow(void)
 	expect("screen=clock shows=07:00:");
 }
 
+/* --- Tools > Sun & Moon: the row labels must not run into the time columns (owner's photo: "Sun up/down" over
+   07:44, "Dawn/dusk" over 07:14). Run in English and in Turkish, at every UTC offset the Left / Right keys reach. --- */
+
+static void fit(const font_t *f, int x, const char *text, const char *what)
+{
+	int tw = gfx_text_width(f, text);
+	if (x + tw > gfx_width()) {
+		printf("FAIL %s: %s \"%s\" ends at %d px, the area is %d px\n", name, what, text, x + tw, gfx_width());
+		fails++;
+	}
+}
+
+static void almanac_rows(bool turkish)
+{
+	if (turkish && !lang_set(lang_find('t' << 8 | 'r'))) {
+		printf("FAIL %s: no Turkish in this build\n", name);
+		fails++;
+		return;
+	}
+	const font_t *m = ui_layout.medium, *sm = ui_layout.small;
+	/* the row labels left of the widest time columns ("00:00  00:00", 12 characters at the right edge) */
+	int cols = gfx_text_width(m, "00:00  00:00"), w = gfx_width();
+	check(gfx_text_width(m, tr("Sun")) + 6 <= w - cols && gfx_text_width(m, tr("Twil.")) + 6 <= w - cols,
+	      "a row label runs into the time columns");
+	/* the Day line: its longest form (the polar night / day) */
+	char day[64];
+	snprintf(day, sizeof day, "%s%s", tr("Day "), tr("no rise/set"));
+	fit(m, 0, day, "Day line");
+	/* the moon block (disk of radius 28 at most): every phase name, and the worst "100% lit, 29 days" line */
+	static const char *const phases[8] = { "New moon", "Waxing crescent", "First quarter", "Waxing gibbous",
+		"Full moon", "Waning gibbous", "Last quarter", "Waning crescent" };
+	int mx = 2 * 28 + 10;
+	for (int i = 0; i < 8; i++)
+		fit(sm, mx, tr(phases[i]), "moon phase");
+	char lit[64];
+	snprintf(lit, sizeof lit, "100%s29%s", tr("% lit, "), tr(" days"));
+	fit(sm, mx, lit, "moon line");
+	gps(true, 39.93, 32.86);
+	tb_sim.time = true;
+	tb_sim.utc_hms = 120000;
+	tb_sim.utc_at = hal_millis();
+	ui_push(SCR_ALMANAC, 0);
+	ok_run("wait:300");
+	expect("screen=almanac shows=UTC+03:00");
+	layout();
+	for (int k = 0; k < 8; k++) {		/* other UTC offsets */
+		ok_run("right right right");
+		layout();
+	}
+	gps(true, 69.65, 18.96);	/* Tromso: "--:--" in the rows, no sunrise */
+	ok_run("wait:1200");
+	layout();
+}
+
+static void almanac_en(void) { almanac_rows(false); }
+static void almanac_tr(void) { almanac_rows(true); }
+
 typedef void (*case_fn)(void);
 
 static int run_case(const char *n, case_fn fn)
@@ -613,6 +671,8 @@ int main(void)
 		{ "I27 coverage", cov_flow },
 		{ "I29 GPS dashboard", gps_flow },
 		{ "I34 clock", clock_flow },
+		{ "Sun & Moon rows, English", almanac_en },
+		{ "Sun & Moon rows, Turkish", almanac_tr },
 	};
 	int failed = 0;
 	unsigned n = sizeof cases / sizeof cases[0];
