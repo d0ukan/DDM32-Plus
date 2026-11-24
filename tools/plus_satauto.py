@@ -272,10 +272,10 @@ def prepare_iss_tool(transform):
     ])
     # Home's hold-4 key (a channel; every other digit hold there was the dead "Speed dial N is empty" toast, and in the
     # VFO a hold types the digit): the ISS's held track, else Tools > ISS (ui_sat.c ui_sat_home_iss). The hint group
-    # "4 ISS" sits before the caller, so a row too wide drops the caller (ui_draw_hint), never the ISS group
+    # "4 ISS" ends the row; with a caller "OK Menu" goes and the name is cut with an ellipsis to fit
     transform('core/ui/ui_app.c', [
         ('bool ui_home_key(const input_event_t *ev)\n{\n',
-         '#if CONFIG_SATELLITES\nvoid ui_sat_home_iss(void);\t// ui_sat.c (DDM32 Plus)\n#endif\n'
+         '#if CONFIG_SATELLITES\n#include "ui/gfx.h"\n#include "ui/ui_screens.h"\nvoid ui_sat_home_iss(void);\t// ui_sat.c (DDM32 Plus)\n#endif\n'
          'bool ui_home_key(const input_event_t *ev)\n{\n'),
         ('\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo) {\n\t\tstatic char msg[48];\n',
          '#if CONFIG_SATELLITES\n'
@@ -285,31 +285,97 @@ def prepare_iss_tool(transform):
          '\t}\n'
          '#endif\n'
          '\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo) {\n\t\tstatic char msg[48];\n'),
-        ('\tif (has_context_key && recent_n && caller_target(&t)) {\n\t\tsb_str(&b, "  # ");\n',
+        ('\tsb_str(&b, home_hint_keys());\n'
+         '\tif (has_context_key && recent_n && caller_target(&t)) {\n'
+         '\t\tsb_str(&b, "  # ");\n'
+         '\t\tif (t.name[0]) {\n'
+         '\t\t\tmemcpy(name, t.name, sizeof name - 1);\n'
+         '\t\t\tname[sizeof name - 1] = 0;\n'
+         '\t\t\tchar *sp_ = strchr(name, \' \');\n'
+         '\t\t\tif (sp_ != NULL)\n'
+         '\t\t\t\t*sp_ = 0;\t// first word of the name\n'
+         '\t\t\tsb_str(&b, name);\n'
+         '\t\t} else {\n'
+         '\t\t\tsb_u32(&b, t.id, 1);\n'
+         '\t\t}\n'
+         '\t}\n',
          '#if CONFIG_SATELLITES\n'
-         '\tsb_str(&b, "  4 ISS");\t// DDM32 Plus: before the caller, so a row too wide drops the caller, never this\n'
-         '#endif\n'
-         '\tif (has_context_key && recent_n && caller_target(&t)) {\n\t\tsb_str(&b, "  # ");\n'),
-        ('static char home_hint[32];', 'static char home_hint[40];\t// DDM32 Plus: room for "  4 ISS" before the caller'),
+         '\t// DDM32 Plus: "OK Menu  * Quick  4 ISS"; with a caller "* Quick  # Joe  4 ISS": OK Menu goes (OK opens the menu\n'
+         '\t// anyway) and the name is cut with an ellipsis until the row fits, so the keys and "4 ISS" are never cut\n'
+         '\tconst char *keys = home_hint_keys();\n'
+         '\tbool who = has_context_key && recent_n && caller_target(&t);\n'
+         '\tbool iss = ui_has_action(ACT_DIGIT_4);\t// a keypad: a board without digit keys has no hold-4\n'
+         '\tif (iss && !has_quick_key)\n'
+         '\t\tkeys = TR("Hold OK Quick");\n'
+         '\telse if (iss && who)\n'
+         '\t\tkeys = TR("* Quick");\n'
+         '\tname[0] = 0;\n'
+         '\tif (who) {\n'
+         '\t\tif (t.name[0]) {\n'
+         '\t\t\tmemcpy(name, t.name, sizeof name - 1);\n'
+         '\t\t\tname[sizeof name - 1] = 0;\n'
+         '\t\t\tchar *sp_ = strchr(name, \' \');\n'
+         '\t\t\tif (sp_ != NULL)\n'
+         '\t\t\t\t*sp_ = 0;\t// first word of the name\n'
+         '\t\t} else {\n'
+         '\t\t\tsbuf_t nb;\n'
+         '\t\t\tsb_init(&nb, name, sizeof name);\n'
+         '\t\t\tsb_u32(&nb, t.id, 1);\n'
+         '\t\t}\n'
+         '\t}\n'
+         '\tchar row[sizeof home_hint];\n'
+         '\tsize_t nl = strlen(name);\n'
+         '\tfor (size_t n = nl;; n--) {\n'
+         '\t\tif (n > 0 && n < nl && ((unsigned char)name[n] & 0xC0) == 0x80)\n'
+         '\t\t\tcontinue;\t// not inside a multi-byte character\n'
+         '\t\tsbuf_t rb;\n'
+         '\t\tsb_init(&rb, row, sizeof row);\n'
+         '\t\tsb_str(&rb, keys);\n'
+         '\t\tif (n > 0) {\n'
+         '\t\t\tchar cut[sizeof name];\n'
+         '\t\t\tmemcpy(cut, name, n);\n'
+         '\t\t\tcut[n] = 0;\n'
+         '\t\t\tsb_str(&rb, "  # ");\n'
+         '\t\t\tsb_str(&rb, cut);\n'
+         '\t\t\tif (n < nl)\n'
+         '\t\t\t\tsb_str(&rb, GLYPH_ELLIPSIS);\n'
+         '\t\t}\n'
+         '\t\tif (iss)\n'
+         '\t\t\tsb_str(&rb, "  4 ISS");\n'
+         '\t\tif (!iss || n == 0 || gfx_text_width(ui_layout.small, row) <= gfx_width() - 2)\n'
+         '\t\t\tbreak;\n'
+         '\t}\n'
+         '\tstr_copy(home_hint, sizeof home_hint, row);\n'
+         '#else\n'
+         '\tsb_str(&b, home_hint_keys());\n'
+         '\tif (has_context_key && recent_n && caller_target(&t)) {\n'
+         '\t\tsb_str(&b, "  # ");\n'
+         '\t\tif (t.name[0]) {\n'
+         '\t\t\tmemcpy(name, t.name, sizeof name - 1);\n'
+         '\t\t\tname[sizeof name - 1] = 0;\n'
+         '\t\t\tchar *sp_ = strchr(name, \' \');\n'
+         '\t\t\tif (sp_ != NULL)\n'
+         '\t\t\t\t*sp_ = 0;\t// first word of the name\n'
+         '\t\t\tsb_str(&b, name);\n'
+         '\t\t} else {\n'
+         '\t\t\tsb_u32(&b, t.id, 1);\n'
+         '\t\t}\n'
+         '\t}\n'
+         '#endif\n'),
+        ('static char home_hint[32];', 'static char home_hint[40];\t// DDM32 Plus: room for "* Quick  # name  4 ISS"'),
     ])
-    # The same hint in dual watch (Home's own hint there), and the idle row of a radio without the quick key: the ISS group
-    # must fit the 220 px row, so the second form of each is shorter (ui_draw_hint picks the longest that fits)
+    # The same hint in dual watch (Home's own hint there): the ISS group must fit the 220 px row, so the second form is
+    # shorter (ui_draw_hint picks the longest that fits)
     transform('core/ui/ui_screens.c', [
+        ('static const char *dual_hint(const radio_view_t *v, const ui_state_t *s)\n{\n',
+         '#if CONFIG_SATELLITES\nbool ui_has_action(uint8_t action);\t// ui_app.c (the mwatch hint below uses it too)\n#endif\n'
+         'static const char *dual_hint(const radio_view_t *v, const ui_state_t *s)\n{\n'),
         ('\treturn TR("# options  Back stop");\n}',
          '#if CONFIG_SATELLITES\n'
-         '\treturn TR(TEXT_ALT_OPEN "# options  4 ISS  Back stop" TEXT_ALT_NEXT "# more  4 ISS  Back stop" TEXT_ALT_CLOSE);\n'
-         '#else\n'
-         '\treturn TR("# options  Back stop");\n'
-         '#endif\n}'),
-    ])
-    transform('core/ui/ui_app.c', [
-        ('\treturn has_quick_key ? TR("OK Menu  * Quick") : TR("OK Menu  Hold OK Quick");\n',
-         '#if CONFIG_SATELLITES\n'
-         '\t// DDM32 Plus: without the quick key the row names Hold OK Quick alone, so "4 ISS" fits the 220 px row\n'
-         '\treturn has_quick_key ? TR("OK Menu  * Quick") : TR("Hold OK Quick");\n'
-         '#else\n'
-         '\treturn has_quick_key ? TR("OK Menu  * Quick") : TR("OK Menu  Hold OK Quick");\n'
-         '#endif\n'),
+         '\tif (ui_has_action(ACT_DIGIT_4))\t// a keypad: a board without digit keys has no hold-4\n'
+         '\t\treturn TR(TEXT_ALT_OPEN "# options  4 ISS  Back stop" TEXT_ALT_NEXT "# more  4 ISS  Back stop" TEXT_ALT_CLOSE);\n'
+         '#endif\n'
+         '\treturn TR("# options  Back stop");\n}'),
     ])
     transform('core/ui/ui_menus.c', [
         ('extern const ui_scr_def_t ui_sat_screen;\t// ui_sat.c (DM32 Plus)\n',

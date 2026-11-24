@@ -352,13 +352,14 @@ static bool turkish, large;
 
 /* One flow: a fresh fake and language, the setup, prep (between setup and script, may be NULL), the script, the
  * expectations; layout: the screen checked for clipped or overlapping text too */
+static sim_map_t iss_map = SIM_MAP_M;	/* the board's keys (the few-key board has no digits) */
 static int iss_flow(const char *name, const char *setup, void (*prep)(void), const char *script, const char *expect,
 		    bool layout)
 {
 	char err[300], exp[400], issues[SIM_LAYOUT_MAX][160];
 	int bad = 0;
 	fake_reset(true);
-	sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_M);
+	sim_reset(sim_geom_find("240x320i10x5"), iss_map);
 	if (large) {
 		ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
 		sim_run("reboot", err, sizeof err);	/* the setting is read at start */
@@ -557,13 +558,28 @@ static int iss_checks(void)
 	 * track (145.800), else Tools > ISS opens; a short 4 is still Find; in the VFO a hold of 4 types the digit */
 	bad += iss_flow("Home hint names 4 ISS", "", NULL, "wait:300",
 			T("screen=home shows=OK_Menu shows=*_Quick shows=4_ISS", "screen=home shows=OK_Men shows=4_ISS"), true);
-	bad += iss_flow("Home hint names 4 ISS: a long caller", CALLER, NULL, "wait:300",
-			T("screen=home shows=OK_Menu shows=*_Quick shows=4_ISS", "screen=home shows=OK_Men shows=4_ISS"), true);
+	bad += iss_flow("Home hint names 4 ISS: a caller by id", CALLER, NULL, "wait:300",
+			T("screen=home shows=*_Quick hides=OK_Menu shows=4_ISS", "screen=home hides=OK_Men shows=4_ISS"), true);
+	bad += iss_flow(n = "Home hint names 4 ISS: a long caller name", "worst call:3108765,91,g wait:11000 ", NULL,
+			"wait:300", T("screen=home shows=*_Quick hides=OK_Menu shows=4_ISS", "screen=home hides=OK_Men shows=4_ISS"),
+			true);
+	{
+		char want[48];
+		snprintf(want, sizeof want, "%s  # Alexa" GLYPH_ELLIPSIS "  4 ISS", TR("* Quick"));
+		ISS_CHECK(strcmp(ui_st.home_hint, want) == 0, n);
+	}
+	ISS_CHECK(gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2, n);
+	ISS_CHECK(strstr(ui_st.home_hint, "  4 ISS") != NULL && strstr(ui_st.home_hint, "  # ") != NULL &&
+		  strstr(ui_st.home_hint, "OK Men") == NULL, n);
 	bad += iss_flow("Home hint names 4 ISS: dual watch", "quick 7 ctx 3 5 ok", NULL, "wait:300",
 			"dual=1 shows=4_ISS", true);
 	bad += iss_flow(n = "Dual watch hold 4 tracks the ISS", "quick 7 ctx 3 5 ok", NULL, "long:4", "dual=1", false);
 	ISS_CHECK(starts == 1 && start_sat == iss, n);
 	bad += iss_flow("VFO hint has no 4 ISS (a held 4 types a digit there)", "ok 4 up ok ", NULL, "wait:300", "hides=4_ISS", false);
+	iss_map = SIM_MAP_F;	/* a board without digit keys: no hold-4, no hint for it */
+	bad += iss_flow(n = "Few-key board: no 4 ISS in the hint", "", NULL, "wait:300",
+			T("screen=home shows=OK_Menu hides=4_ISS", "screen=home shows=OK_Men hides=4_ISS"), false);
+	iss_map = SIM_MAP_M;
 	{	/* the rows that cannot be flowed (a radio without the quick key): the widest form with 4 ISS fits the row */
 		char row[64];
 		snprintf(row, sizeof row, "%s  4 ISS", TR("Hold OK Quick"));

@@ -201,6 +201,10 @@ msgid "Hold OK Quick"
 msgstr "OK tut Hızlı"
 
 #: core/ui/ui_app.c
+msgid "* Quick"
+msgstr "* Hızlı"
+
+#: core/ui/ui_app.c
 msgid "Not saved"
 msgstr "Kaydedilmedi"
 
