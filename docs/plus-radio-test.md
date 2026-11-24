@@ -924,6 +924,8 @@ Receive only: nothing is transmitted. English menus. SK2 is the lower of the two
 | VS-3 | Set a step with SK2 (say 5 kHz), then press Up three times; then Settings > Talk > VFO step; then switch the radio off and on, back to the VFO | Up moves the frequency 5 kHz a press; the menu row shows 5 kHz; after the power cycle the step is still 5 kHz |
 | VS-4 | On a channel (not the VFO): look at the bottom row; press SK2 briefly; then press SK2 held | no "SK2 step"; short SK2 starts dual watch as before (Back ends it); held SK2 as before |
 | VS-5 | VFO on Home: hold SK2 (dual watch starts, the VFO is a letter); press SK2 briefly twice; Back; in the VFO type "4 3 3" and press SK2; start a scan (SK2 is not the scan key: use the scan key) and press SK2 | in dual watch short SK2 selects the other letter, the step does not change; typing and scanning: SK2 does not step |
+| IK-1 | On a channel (not the VFO), Home idle: look at the bottom row; hold 4 about a second with no ISS pass within 10 min (needs GPS time and TLEs) | the row reads "OK Menu  * Quick  # name  Hold 4 ISS" ("4 tut ISS"; the last group drops first on a long caller name); the hold opens Tools > ISS with the next pass time |
+| IK-2 | Within 10 min of an ISS AOS (or during a pass), Home on a channel: hold 4; then any key | the radio goes to 145.800 receive-only, banner "ISS tracking, max NN" once the radio holds (or a toast "Can't track: ..."); any key ends it, the radio back as before; a short 4 still opens Find; in the VFO a held 4 types the digit |
 
 ## RAM saving: the safe-area frame buffer (branch `ramsave`, docs/plus.md "RAM budget", v1.0.2 candidate)
 

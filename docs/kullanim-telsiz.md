@@ -20,7 +20,7 @@ Her tuş her ekranda aynı türden işi yapar:
 | **Sol / Sağ** | Ana ekranda önceki / sonraki bölge; çoklu izlemede önceki / sonraki harf | |
 | **\*** | Hızlı ayarlar (güç, susturma, ton, mod, tarama, ...) | Tuş kilidi aç / kapa |
 | **#** | Odaktaki şeyin eylemleri; ana ekranda son arayanın | DMR'de konuşma hedefi seçici |
-| **0-9** | Ana ekranda Bul (kanal no, frekans, ad, ID); listelerde numaralı satır veya harfle süzme | |
+| **0-9** | Ana ekranda Bul (kanal no, frekans, ad, ID); listelerde numaralı satır veya harfle süzme | **4** (kanalda, VFO'da değil): ISS izleme; ipucu "4 tut ISS" |
 | **SK1** (yan) | FM: susturmayı açar; DMR: dijital dinleme aç / kapa | |
 | **SK2** (yan) | Dual watch / çoklu izleme: sonraki harf | İzlemeyi aç / kapa |
 | **PTT** | Gönder (listede odaktaki kişiye / gruba bir kez) | |

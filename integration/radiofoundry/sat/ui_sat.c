@@ -1197,9 +1197,24 @@ static void __attribute__((noinline)) iss_ok(const sat_view_t *v, uint8_t i)
 	}
 }
 
+/* Home's hold-4 key (ui_app.c ui_home_key; the hint "Hold 4 ISS"): the held track of the ISS now when a pass is under
+ * way or due within 10 min (as OK on Tools > ISS; the service says "ISS tracking" or why not), else Tools > ISS opens
+ * (it searches the pass and says when; OK there tracks). A track by hand running: the page too (OK stops it).
+ * noinline: off ui_home_key's frame, which must not hold a sat_view_t */
+void __attribute__((noinline)) ui_sat_home_iss(void)
+{
+	sat_view_t v;
+	uint8_t i = iss_index();
+	sat_view(&v);
+	if (i != SAT_NONE && v.track == SAT_NONE && can_track(&v, i))
+		sat_auto_start(i, iss_mode());
+	else
+		ui_push(SCR_ISS, 0);
+}
+
 static bool iss_key(const input_event_t *ev)
 {
-	bool press = ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
+	bool press =ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
 	sat_view_t v;
 	uint8_t i = iss_index();
 	if (sky_page)

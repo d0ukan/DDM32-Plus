@@ -270,6 +270,29 @@ def prepare_iss_tool(transform):
          '\tSCR_SATELLITES,\t\t\t// DM32 Plus: Tools > Satellites (CONFIG_SATELLITES)\n'
          '\tSCR_ISS,\t\t\t// DDM32 Plus: Tools > ISS (CONFIG_SATELLITES)\n'),
     ])
+    # Home's hold-4 key (a channel; every other digit hold there was the dead "Speed dial N is empty" toast, and in the
+    # VFO a hold types the digit): the ISS's held track, else Tools > ISS (ui_sat.c ui_sat_home_iss). The hint's last
+    # group "Hold 4 ISS" is the first the hint row drops when it is too wide (ui_draw_hint)
+    transform('core/ui/ui_app.c', [
+        ('bool ui_home_key(const input_event_t *ev)\n{\n',
+         '#if CONFIG_SATELLITES\nvoid ui_sat_home_iss(void);\t// ui_sat.c (DDM32 Plus)\n#endif\n'
+         'bool ui_home_key(const input_event_t *ev)\n{\n'),
+        ('\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo) {\n\t\tstatic char msg[48];\n',
+         '#if CONFIG_SATELLITES\n'
+         '\tif (d == 4 && ev->gesture == GESTURE_LONG && !view->vfo) {\n'
+         '\t\tui_sat_home_iss();\t// DDM32 Plus: hold 4 = ISS\n'
+         '\t\treturn true;\n'
+         '\t}\n'
+         '#endif\n'
+         '\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo) {\n\t\tstatic char msg[48];\n'),
+        ('\tuint32_t serial = radio_view_serial();\n\tif (serial != serial_seen) {\n',
+         '#if CONFIG_SATELLITES\n'
+         '\tsb_str(&b, "  ");\n'
+         '\tsb_str(&b, TR("Hold 4 ISS"));\n'
+         '#endif\n'
+         '\tuint32_t serial = radio_view_serial();\n\tif (serial != serial_seen) {\n'),
+        ('static char home_hint[32];', 'static char home_hint[44];\t// DDM32 Plus: room for "  Hold 4 ISS" after the caller'),
+    ])
     transform('core/ui/ui_menus.c', [
         ('extern const ui_scr_def_t ui_sat_screen;\t// ui_sat.c (DM32 Plus)\n',
          'extern const ui_scr_def_t ui_sat_screen;\t// ui_sat.c (DM32 Plus)\n'

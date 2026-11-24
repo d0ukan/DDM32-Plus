@@ -5022,3 +5022,31 @@ Host tests (`tests/plus/test_ui_vfostep.c`, `tools/test_vfostep.py`, EN + TR, no
 the new step, a step set in the menu going on from there (and one outside the list going to Auto), no hint and no step on
 a channel, dual watch's selection, a scan and a typed frequency leaving the step alone, SK2 reassigned hiding the hint.
 Host-tested only; not run on the radio (docs/plus-radio-test.md, VS-1 to VS-5).
+
+## ISS key on Home (branch `issk`, v1.0.2 candidate)
+
+Owner request 2026-11-24: one key on Home that starts ISS tracking, named in Home's hint row.
+
+**The key: hold 4, on a channel.** Every short key on Home already has a job (digits: Find on a channel, frequency
+digits in the VFO; `*` Quick, `#` caller, OK menu, Back undo, arrows zone, SK1 monitor, SK2 dual watch / the VFO step).
+The one free gesture is a *held* digit on a channel: it only showed the dead toast "Speed dial N is empty: set it in
+qdmr" (no speed dial exists). In the VFO a held digit types the digit, so the key is not taken there (and the hint
+is not shown there: the VFO has its own hint). 4 is the ISS's letter I on a phone keypad (GHI). A short 4 is Find as
+before; held 0 / `#` / the other digits are untouched.
+
+**What it does** (`ui_sat_home_iss` in `integration/radiofoundry/sat/ui_sat.c`; hooks in `tools/plus_satauto.py`
+`prepare_iss_tool`): the same as OK on Tools > ISS. With a pass under way or due within 10 min and no hand track
+running it asks for the held, receive-only track on the downlink chosen on Tools > ISS (145.800 at power on), and the
+service answers as there ("ISS tracking, max 47°" once the radio holds, or a toast "Can't track: ..."). Otherwise it
+opens Tools > ISS, which searches the pass and says when it comes (OK there tracks, 1 changes the downlink). That is
+also what happens the first time: the pass search runs only while a satellite screen is open, so Home alone knows no
+pass until Tools > ISS (or Satellites, or the pass alarm) has been open once since power on; after that the key
+starts the track in one press. A running auto track ends on any key as before (`ui_sat_auto_key` runs first, so
+the hold ends it).
+
+**Hint.** Home's idle hint grows a last group: "OK Menu  * Quick  # Joe  Hold 4 ISS" (Turkish "OK Menü  * Hızlı  # Joe
+4 tut ISS"). `ui_draw_hint` drops the last groups whole when the row is too wide, so on a long caller name the ISS
+group goes first and the other keys are never cut. Built with `CONFIG_SATELLITES` only. Cost: `home_hint` 32 -> 44 B
+RAM; the rest flash. Host tests (`tests/plus/test_ui_sat.c`, `classic-test`): the hint in English and Turkish with
+layout check, the key tracking on 145.800 / 145.825, the service's word, too early and a hand track opening Tools >
+ISS, a short 4 still Find, a VFO hold still typing. Host-tested only (docs/plus-radio-test.md IK-1, IK-2).

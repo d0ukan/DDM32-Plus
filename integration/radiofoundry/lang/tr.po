@@ -197,6 +197,10 @@ msgid "OK Menu  Hold OK Quick"
 msgstr "OK Menü  OK tut Hızlı"
 
 #: core/ui/ui_app.c
+msgid "Hold 4 ISS"
+msgstr "4 tut ISS"
+
+#: core/ui/ui_app.c
 msgid "Not saved"
 msgstr "Kaydedilmedi"
 

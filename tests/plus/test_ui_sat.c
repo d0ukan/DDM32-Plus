@@ -412,6 +412,7 @@ static void prep_up(void)
 	fv.el10 = 234;
 	fv.rate_ms = -4000;
 }
+static void prep_hand(void) { fv.track = iss; fv.track_state = SAT_TRK_ON; }	/* a track by hand (not auto) */
 static void prep_no_clock(void) { fv.clock = SAT_CLOCK_NONE; }
 static void prep_frozen(void) { fv.clock = SAT_CLOCK_NONE; fake_frozen = true; }
 static void prep_aprs(void) { iss_aprs = true; }
@@ -552,6 +553,23 @@ static int iss_checks(void)
 	bad += iss_flow(n = "No pop-up with auto track on: OK", SATS "0 up right ok long:back ", NULL, "wait:10500 ok",
 			"hides=OK:_track", false);
 	ISS_CHECK(starts == 0, n);
+	/* Home's hold-4 key (ui_sat_home_iss): the hint names it; with a pass due within 10 min it asks for the held
+	 * track (145.800), else Tools > ISS opens; a short 4 is still Find; in the VFO a hold of 4 types the digit */
+	bad += iss_flow("Home hint names hold 4", "", NULL, "wait:300",
+			T("screen=home shows=OK_Menu shows=Hold_4_ISS", "screen=home shows=4_tut_ISS"), true);
+	bad += iss_flow(n = "Home hold 4 tracks the ISS", "", NULL, "long:4", "screen=home banner=none", false);
+	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
+	bad += iss_flow(n = "Home hold 4: the service's word", "", NULL, "long:4 wait:1500", TRACKING, false);
+	bad += iss_flow(n = "Home hold 4 on 145.825", "", prep_aprs, "long:4", "screen=home", false);
+	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_APRS, n);
+	bad += iss_flow(n = "Home hold 4 too early: Tools > ISS opens", "", prep_late, "long:4", "screen=iss", false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Home hold 4 over a track by hand: Tools > ISS opens", "", prep_hand, "long:4", "screen=iss", false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Home short 4 is Find", "", NULL, "4", "screen=find", false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "VFO hold 4 types the digit", "ok 4 up ok ", NULL, "long:4", "screen=home", false);
+	ISS_CHECK(starts == 0 && ui_st.entry, n);
 #undef ISS_CHECK
 	return bad;
 }
