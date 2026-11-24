@@ -63,6 +63,9 @@ static uint16_t fake_rx_read(int16_t *buf, uint16_t max)
 static const hal_afsk_t fake_afsk = { 8000u, fake_rx_start, fake_rx_stop, fake_rx_read };
 board_t board = { &fake_afsk };
 
+static bool aprs_on;	/* APRS receive holds the ring (an FM channel on the APRS frequency, DOTA over FM) */
+bool aprs_rx_listening(void) { return aprs_on; }
+
 bool board_nxdn_flat(bool on)
 {
 	if (on && flat_fail)
@@ -156,6 +159,25 @@ static int16_t *speech(size_t *n)
 	return s;
 }
 
+/* P25 whose syncs are clean but whose NIDs are random dibits (a receive path that blurs the symbols after the sync
+ * more than the model does): syncs found, no NID decodes */
+static int16_t *p25_bad_nid(uint16_t nac, unsigned ldus, const chan_t *c, size_t *n)
+{
+	static const uint8_t sync[24] = { 1, 1, 1, 1, 1, 3, 1, 1, 3, 3, 1, 1, 3, 3, 3, 3, 1, 3, 1, 3, 3, 3, 3, 3 };
+	uint8_t *dib = malloc(200000);
+	size_t nd = p25_call(nac, ldus, dib), nm;
+	for (size_t i = 0; i + 57u <= nd; i++)
+		if (memcmp(dib + i, sync, sizeof sync) == 0)
+			for (size_t k = 24u; k < 57u; k++)
+				if (k != 35u)
+					dib[i + k] = (uint8_t)(rnd() & 3u);
+	double *dev = c4fm(dib, nd, &nm);
+	int16_t *s = radio(dev, nm, c, n);
+	free(dib);
+	free(dev);
+	return s;
+}
+
 static sh_stats_t stats(void)
 {
 	sh_stats_t v;
@@ -168,7 +190,7 @@ static void reset(void)
 {
 	p25s_stop();
 	poll();
-	ring_dead = flat_fail = heap_fail = false;
+	ring_dead = flat_fail = heap_fail = aprs_on = false;
 	level_on_f = -84;
 	sh_set_fast(true);
 }
@@ -282,6 +304,35 @@ int main(void)
 	CHECK(native_took != 0 && live_allocs == 0 && !ring_on);
 	p25s_probe_done(false, now);
 	reset();
+
+	/* APRS receive holds the ring: the soft probe leaves it alone (no start, no stop), the native receiver probes */
+	aprs_on = true;
+	starts = ring_starts;
+	to_probe();
+	poll();
+	CHECK(native_took != 0 && native_took - probe_t0 <= 2u * POLL && ring_starts == starts && live_allocs == 0);
+	p25s_probe_done(false, now);
+	reset();
+
+	/* Syncs seen but no NID decodes: not "not P25" (never skipped by the soft probe), the native receiver decides */
+	{
+		size_t bn;
+		int16_t *bad = p25_bad_nid(0x659, 40, &c, &bn);
+		sig = bad;
+		sig_n = bn;
+		sig_at = 0;
+		to_probe();
+		s0 = stats();
+		until_decided(1000);
+		poll();
+		CHECK(native_took != 0);
+		CHECK(stats().nosync == s0.nosync);
+		p25s_probe_done(false, now);
+		reset();
+		sig = p25;
+		sig_n = p25n;
+		free(bad);
+	}
 
 	/* A ring that brings nothing: not enough samples for "not P25", so the native receiver decides */
 	ring_dead = true;

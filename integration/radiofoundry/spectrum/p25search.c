@@ -668,7 +668,7 @@ uint32_t p25s_soft_verdict(uint8_t verdict, uint16_t nac, uint32_t now_ms)
 		return 0;
 	}
 	if (verdict == P25S_SOFT_NONE)
-		return p25s_probe_done(false, now_ms);	/* as a probe that heard nothing (gone: not skipped) */
+		return p25s_probe_done(false, now_ms);	/* as a probe that heard nothing: skipped unless the carrier went */
 	return 0;					/* unsure: the native receiver probes as before */
 }
 #endif

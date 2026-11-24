@@ -52,9 +52,9 @@ The radio core (`radio_p25soft.c`) then decides:
 | Seen in the window | Verdict | What follows |
 |---|---|---|
 | a NID with <= 6 bits corrected | **P25** | the found list gets the frequency and NAC at once (`p25s_probe_found(nac, 0, 0)`); the ring and flat path are given back; the native receiver takes the frequency exactly as before, plays the call and adds the talkgroup and source to the same entry. The probe is never skipped afterwards, even if the native receiver then heard nothing |
-| a NID with 7-11 bits corrected | unsure | the native receiver probes as before |
-| nothing, carrier >= 25 dB over the floor, >= 400 ms of samples read | **not P25** | given back as a probe that heard nothing (`p25s_probe_done(false)`): skipped 10 s / 30 s / 2 min as classic and fast already do; a carrier that went off the air meanwhile is not skipped (SURE's rule, unchanged) |
-| a carrier < 25 dB over the floor, no heap, the flat path or ring would not start, too few samples | unsure | the native receiver probes as before |
+| a NID with 7-11 bits corrected, or a sync whose NID did not decode (verifier 2026-11-24: no non-P25 model signal shows a sync, so this costs nothing there and keeps a real P25 carrier on a blurring receive path from being skipped) | unsure | the native receiver probes as before |
+| nothing (no sync), carrier >= 25 dB over the floor, >= 400 ms of samples read | **not P25** | given back as a probe that heard nothing (`p25s_probe_done(false)`): skipped 10 s / 30 s / 2 min as classic and fast already do; a carrier that went off the air meanwhile is not skipped (SURE's rule, unchanged) |
+| a carrier < 25 dB over the floor, no heap, APRS receive holding the ring (`aprs_rx_listening()`), the flat path or ring would not start, too few samples | unsure | the native receiver probes as before |
 
 The native receiver never takes the frequency while the soft probe runs (`native_lab.c`: `!p25s_soft_pending()`).
 
@@ -77,14 +77,14 @@ receiver. It can take the same probe later; the radio core's NXDN probe already 
 |---|---|
 | FLASH | `p25soft.c` (correlator, interpolation, fit, slicer; the 40-byte template) and `radio_p25soft.c` and the engine's hooks: estimated 2-3 KB. The NID decoder is already linked. Baseline `--plus` on this branch's base (fa379fa): 874,664 B of 901,120 (26,456 free) |
 | RAM, static | about 16 B (the probe's pointer and start time, the engine's four flags and a level) |
-| RAM, heap | 456 B (`p25soft_t` 320 B: the 128-sample ring 256 B; and a 64-sample read buffer) from the RTOS heap for the window only, freed before the verdict; the NXDN receiver takes about 830 B the same way and never runs at the same time (NXDN listens only on an NXDN channel, `nxdn && !p25s_on()`). No heap: the native receiver probes as before |
+| RAM, heap | 456 B (`p25soft_t` 320 B: the 128-sample ring 256 B; and a 64-sample read buffer) plus the HR_C7000 FM RX ring's own 2,048 B (`hrc_fm_rx_start`, 4 halves of 256 samples), about 2.5 KB from the RTOS heap for the window only, freed before the verdict; the NXDN receiver takes about 830 B the same way and never runs at the same time (NXDN listens only on an NXDN channel, `nxdn && !p25s_on()`). No heap: the native receiver probes as before |
 | RAM floor | baseline 204,784 B of 211,456 (6,672 B free); the floor of 1,500 B free is far away |
 | CPU | per sample: one 40-tap correlation (40 multiply-adds), the running sums, and a 64-bit division only where r^2 > 1/8; per sync 57 cubic interpolations and one BCH decode. About 0.6 M cycles a second, under 0.5 % of the 168 MHz CK803S (estimate, not measured), for 450 ms per probe |
 | Stack | the radio task: a few locals (the buffers are on the heap) |
 
-The firmware build (`--plus --stack-check --verify-rebuild`) and its FLASH / RAM figures are still to be run: the WSL
-virtual disk went read-only and then failed to start when drive C: ran out of space during this job. The baseline
-above was built before that.
+Firmware build (verifier, 2026-11-24, WSL, `--plus --stack-check --verify-rebuild`): 0 warnings,
+`forced_rebuild_identical`, no unresolved symbols. FLASH 877,224 B (+2,560 B over the baseline above), RAM 204,800 B
+of 211,456 (+16 B, 6,656 B free; the floor 1,500 B). Not run on the radio.
 
 ## 5. Host tests
 
@@ -124,7 +124,7 @@ its sample timing, FD6818 AGC and click noise at low levels, real transmitters' 
 | The FM RX RAM is not the discriminator as modelled (filtering, de-emphasis left on, AGC, a sample rate other than 8 kHz, clipping) | the sync correlation stays under 0.70: no P25 found by soft; on a strong carrier "not P25" and a skip of a real P25 frequency | the trust rule (25 dB) and the minimum sample count; **radio test SP-1/SP-2 first**; NXDN's own "what the radio must confirm" list covers the same path |
 | A real P25 carrier judged "not P25" | skipped 10 s (30 s / 2 min on repeats), as a failed native probe is today | only on carriers 25 dB over the floor with nothing P25-like in 400 ms of samples (two LDU syncs); the model finds 96/96 down to 8 dB CNR |
 | False P25 | a non-P25 carrier listed with a made-up NAC and probed by the native receiver | NID within 6 bits after a sync r >= 0.84; 0 in 3 minutes of six kinds of non-P25 signal in the model |
-| The ring is shared (APRS, FM caller ID, Pager / SSTV, NXDN) | a conflict if another owner runs during the search | all of them are off while `p25s_on()` (`plus_features.py` gates `fmid`, `msg`, `nxdn`, `dpmr` on `!p25s_on()`; the search does not start while APRS transmits). APRS receive on an APRS-frequency FM channel during a search is not checked on the radio |
+| The ring is shared (APRS, FM caller ID, Pager / SSTV, NXDN) | a conflict if another owner runs during the search | all of them are off while `p25s_on()` (`plus_features.py` gates `fmid`, `msg`, `nxdn`, `dpmr` on `!p25s_on()`; the search does not start while APRS transmits). APRS receive (an FM channel on the APRS frequency, DOTA over FM) is not gated on `p25s_on()` and keeps the ring through a search: the soft probe then does not start (`aprs_rx_listening()`, verifier fix 2026-11-24; before it, `rx_start` failed and its `listen(false)` / our `rx_stop` left APRS deaf) and the native receiver probes |
 | The flat path left on | FM audio without de-emphasis / filters after the search | the path is restored before every verdict, on every poll with no soft probe pending, and at the start of `tune()` (before the board leaves FM: `board_nxdn_flat(false)` writes the FM filter word) |
 | The heap | 456 B for 0.45 s; a failure falls back to the native receiver | none needed |
 | Hidden cost on a P25 find | the native receiver starts 0.1-0.45 s later than in fast mode | measured by SYNC_LAST / SYNC_MAX in the PC stats (from the hit) |

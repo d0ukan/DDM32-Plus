@@ -12,6 +12,9 @@
 #include "radio/p25soft.h"
 #include "board.h"
 #include "FreeRTOS.h"
+#if CONFIG_APRS_RX
+#include "aprs/aprs.h"
+#endif
 
 #define READ_N		64u
 /* Samples a "not P25" needs: 400 ms, two LDU frame syncs and their NIDs */
@@ -53,6 +56,13 @@ static bool start(uint32_t now_ms)
 	const hal_afsk_t *a = board.afsk;
 	if (a == NULL || a->rx_start == NULL || a->rx_read == NULL || a->rx_rate_hz != P25SOFT_FS)
 		return false;
+#if CONFIG_APRS_RX
+	/* APRS receive (an FM channel on the APRS frequency, or DOTA over FM) holds the ring: our rx_start would fail
+	 * (hrc_fm_rx_start refuses a running ring) and its listen(false) would take APRS's route away, and our rx_stop
+	 * would leave APRS deaf. The native receiver probes as before */
+	if (aprs_rx_listening())
+		return false;
+#endif
 	st = pvPortMalloc(sizeof *st);
 	if (st == NULL)
 		return false;
@@ -91,8 +101,10 @@ void radio_p25soft_poll(uint32_t now_ms)
 	if (p25soft_p25(&st->p))
 		verdict(P25S_SOFT_P25, st->p.nac, now_ms);
 	else if (now_ms - start_ms >= P25SOFT_WINDOW_MS)
-		/* "not P25" only when the ring really brought the window's samples (two frame syncs' worth) */
-		verdict(p25soft_hint(&st->p) || st->p.count < P25SOFT_MIN_SAMPLES ? P25S_SOFT_UNSURE : P25S_SOFT_NONE, 0,
-			now_ms);
+		/* "not P25" only when the ring really brought the window's samples (two frame syncs' worth) and not one sync
+		 * was seen: a sync whose NID did not decode (a receive path that blurs the symbols more than modelled) is
+		 * left to the native receiver rather than skipped (no non-P25 model signal shows a sync) */
+		verdict(p25soft_hint(&st->p) || st->p.syncs != 0 || st->p.count < P25SOFT_MIN_SAMPLES ? P25S_SOFT_UNSURE :
+			P25S_SOFT_NONE, 0, now_ms);
 }
 #endif

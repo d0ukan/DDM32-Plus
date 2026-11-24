@@ -752,3 +752,5 @@ __pycache__/
 !/tests/plus/p25soft_stubs/
 !/tests/plus/p25soft_stubs/board.h
 !/tests/plus/p25soft_stubs/FreeRTOS.h
+!/tests/plus/p25soft_stubs/aprs/
+!/tests/plus/p25soft_stubs/aprs/aprs.h
