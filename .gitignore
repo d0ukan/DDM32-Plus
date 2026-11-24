@@ -574,6 +574,7 @@ __pycache__/
 !/tests/plus/test_xband.c
 !/tests/plus/test_xband_radio.inc
 !/tests/plus/test_ui_xband.c
+!/tests/plus/test_xband_worker.c
 # DDM32 Plus DMR receive audio diagnostics (tools/plus_dmraudio.py, branch fix-dmr-audio)
 !/tools/plus_dmraudio.py
 !/tools/test_dmraudio.py

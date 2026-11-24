@@ -12,10 +12,12 @@ common/ui_scratch.*: the picker's room in the shared buffer).
               caller, talkgroup or unit, how long ago. The newest P25 call still plays again (CALL_REPLAY's frames,
               unchanged); the other modes keep no audio (owner, 2026-11-20). Fed where the heard list is fed. Needs
               CALL_LOG and CALL_REPLAY.
-  XBAND       (item 46) Tools > Cross-band: store and forward between two frequencies A and B, DMR only. An over heard
-              on one is recorded (its AMBE+2 air frames, in the P25 worker's memory lent for the session) and sent on
-              the other through the call stack; attended operation, the screen locked (Back stops), CROSS on Home,
-              the CW ID, the band plan's refusals. Needs DMR, SFR_CWID, P25_CHANNELS and DEV_TX.
+  XBAND       (item 46) Tools > Cross-band: store and forward between two frequencies A and B, each in its own mode
+              (2026-11-24: DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM, P25 -> P25; docs/xband-multiproto-study.md). An
+              over heard on one is recorded (its AMBE+2 air frames or IMBE parameters, in the P25 worker's memory lent
+              for the session) and sent on the other (the call stack, the stock codec into the FM tone path, the P25
+              worker's transmitter); attended operation, the screen locked (Back stops), CROSS on Home, the CW ID, the
+              band plan's refusals. Needs DMR, SFR_CWID, P25_CHANNELS, DEV_TX and CALL_REPLAY.
 """
 
 LASTCALL = 'integration/radiofoundry/lastcall/'
@@ -121,12 +123,16 @@ STACK_EDGES = (
     'core/radio/radio_xband.inc:xb_unkey core/radio/radio_xband.inc:xb_cw core/radio/radio_xband.inc:xb_beep\n'
     'call listen core/radio/radio_xband.inc:xb_tune\n'
     'call id_next core/radio/radio_xband.inc:xb_cw core/radio/radio_xband.inc:xb_beep\n'
+    # an FM over: the tone path's interrupt reads the decoded blocks, the voice bridge's audio block hands them over
+    'call platform/hrc7000/hrc_afsk.c:fill radio_sstvtx_gen core/radio/radio_xband.inc:xb_gen\n'
+    'call ambeVoiceAudioBlock beep_mix core/radio/radio_xband.inc:xb_mix\n'
 )
 
 
 def prepare_crossband(transform, install):
-    """XBAND (item 46): cross-band store and forward, DMR (docs/plus.md "Cross-band store and forward"). Needs DMR,
-    SFR_CWID (the CW keyer and the callsign rule), P25_CHANNELS and DEV_TX (the P25 worker whose memory it borrows)."""
+    """XBAND (item 46): cross-band store and forward, a mode per side (docs/plus.md "Cross-band store and forward").
+    Needs DMR, SFR_CWID (the CW keyer and the callsign rule), P25_CHANNELS and DEV_TX (the P25 worker whose memory it
+    borrows and whose transmitter sends a P25 over) and CALL_REPLAY (the IMBE frame packing, the memory)."""
     for dst, src in (('core/radio/xband.c', 'xband.c'), ('core/radio/xband.h', 'xband.h'),
                      ('core/radio/radio_xband.inc', 'radio_xband.inc'), ('core/ui/ui_xband.c', 'ui_xband.c'),
                      ('core/ui/ui_xband.h', 'ui_xband.h')):
@@ -137,7 +143,7 @@ def prepare_crossband(transform, install):
          'CONFIG_LAST_CALLS ?= n\nFEATURES += LAST_CALLS\n'
          'CONFIG_XBAND ?= n\nFEATURES += XBAND\n'
          # off where a board's build lacks one (the registry asks every board), as DOTA
-         'ifneq ($(CONFIG_DMR)$(CONFIG_SFR_CWID)$(CONFIG_P25_CHANNELS)$(CONFIG_DEV_TX),yyyy)\n'
+         'ifneq ($(CONFIG_DMR)$(CONFIG_SFR_CWID)$(CONFIG_P25_CHANNELS)$(CONFIG_DEV_TX)$(CONFIG_CALL_REPLAY),yyyyy)\n'
          'override CONFIG_XBAND := n\nendif\n'),
     ])
     transform('core/config.h', [
@@ -178,7 +184,10 @@ def prepare_crossband(transform, install):
          '\t\treturn;\n\t}\n#endif\n' + XB_ON + '\txb_rf_poll(sm, now_ms);\t// DDM32 Plus cross-band (radio_xband.inc)\n#endif\n'),
         ('\tif (dota_on() || sm->aprs_phase != APRS_RF_OFF ||', '\tif (dota_on() || xband_on() || sm->aprs_phase != APRS_RF_OFF ||'),
         ('!ZONE_WRITE_BUSY() && !dota_on() &&', '!ZONE_WRITE_BUSY() && !dota_on() && !xband_on() &&'),
-        # The cross-band CW ID is over (or cut): back to the session's DMR channel (the engine retunes after)
+        # a P25 session's channel: the native receiver owns the radio and the poll is not run; the session goes on
+        ('\tbeep_service(p25_lab_busy());\n#endif\n}\n',
+         '\tbeep_service(p25_lab_busy());\n#endif\n' + XB_ON + '\txb_native_poll(sm, now_ms);\t// DDM32 Plus cross-band\n#endif\n}\n'),
+        # The cross-band CW ID is over (or cut): back to the session's channel (the engine retunes after)
         ('#if CONFIG_CW_BEACON\n\tif (beacon.keying) {\n',
          XB_ON + '\tif (xb_cw_on) {\n\t\txb_cw_on = false;\t// DDM32 Plus cross-band: its ID is over (or cut)\n'
          '\t\tsm->board_mode = RADIO_MODE_FM;\n\t\ttune(sm, xb_now);\n\t\toutputs(sm);\n\t\tchanged(sm);\n\t\treturn;\n\t}\n'
