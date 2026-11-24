@@ -207,14 +207,22 @@ static void step(uint8_t r, int dir)
 	}
 }
 
-/* 145500 / 4335125: kHz, or kHz and a digit of 100 Hz */
+/* A typed frequency in MHz, its first three digits the MHz (every band the relay may use has three): 433 is 433.000,
+ * 4335 and 43350 433.500, 145500 145.500, 4335125 433.5125. Fewer than three digits: told, the frequency kept. (Before
+ * 2026-11-25 only six or seven digits counted and any other entry was dropped without a word, so the row went back to
+ * an older frequency, maybe one refused, while the user believed the typed one was set) */
 static void typed(uint8_t r)
 {
 	uint32_t n = 0;
 	for (uint8_t i = 0; i < ndigits; i++)
 		n = n * 10u + (uint32_t)(digits[i] - '0');
-	if (FREQ_ROW(r) && (ndigits == 6 || ndigits == 7))
-		xband_req()->hz[SIDE(r)] = n * (ndigits == 6 ? 1000u : 100u);
+	if (FREQ_ROW(r) && ndigits >= 3u) {
+		for (uint8_t i = ndigits; i < 9u; i++)
+			n *= 10u;	/* (7 digits at most: below 10^9) */
+		xband_req()->hz[SIDE(r)] = n;
+	} else if (FREQ_ROW(r) && ndigits != 0) {
+		ui_toast(TR("Type the MHz: 433500"));
+	}
 	ndigits = 0;
 }
 

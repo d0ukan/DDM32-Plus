@@ -3716,6 +3716,12 @@ Owner's rules (2026-11-20) and how they are kept:
   each with half a 12.5 kHz channel around it); the satellite segments (145.800-146.000, 435-438 MHz); APRS 144.800;
   A = B; any input or output of the repeater list (Tools > Repeaters' table); a channel whose RX and TX differ when
   picked from a zone; frequencies the radio cannot transmit on.
+- **A typed frequency** is MHz, its first three digits the MHz (2026-11-25): 4335, 43350 and 433500 are 433.500, 433 is
+  433.000, 4335125 is 433.5125; fewer than three digits are refused with "Type the MHz:
+  433500" ("MHz yazın: 433500") and the frequency stays. Before, only six or seven digits counted and any other entry was
+  dropped silently, so A or B went back to an older frequency (maybe a refused one, e.g. a satellite frequency typed
+  earlier) while the user believed the typed one was set: the owner's 1.0.2 report "Satellite segment" on 432.275 /
+  433.500 (that pair itself passes every rule; `tests/plus/test_ui_xband.c` `owner_pair`, typed and picked, EN + TR).
 - **CW ID every 10 minutes**: the callsign (the radio name, `radio_cwid_callsign`: refused to start without one) in
   Morse on each frequency transmitted on since the last ID: after the first over, then again once 10 minutes have passed
   and there was traffic (as the SFR repeater's ID); the CW beacon's keyer (FM carrier, the settings' speed and tone).

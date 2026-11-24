@@ -6291,6 +6291,10 @@ msgid "B mode"
 msgstr "B modu"
 
 #: core/ui/ui_xband.c
+msgid "Type the MHz: 433500"
+msgstr "MHz yazın: 433500"
+
+#: core/ui/ui_xband.c
 msgid "Repeater channel (RX and TX differ)"
 msgstr "Röle kanalı (RX ve TX farklı)"
 

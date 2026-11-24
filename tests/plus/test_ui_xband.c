@@ -18,6 +18,7 @@
 #include "hal_time.h"
 #include "ui/ui_app.h"
 #include "ui/ui_nav.h"
+#include "ui/ui_svc.h"
 #include "ui/i18n.h"
 #include "ui/rpt.h"
 #include "radio/xband.h"
@@ -303,6 +304,64 @@ static void picker(void)
 	ok_run("back");
 }
 
+/* The owner's pair (1.0.2 on the radio, 2026-11-25): A 432.275, B 433.500, DMR -> DMR; neither is in a refused
+ * segment, so Start asks the question. Typed, then both picked from a zone's channels */
+static void owner_pair(void)
+{
+	start("432.275 / 433.500");
+	ok_run("4 3 2 2 7 5 down down 4 3 3 5 0 0 down");
+	expect("shows=432.275 shows=433.500");
+	check(xband_req()->hz[0] == 432275000 && xband_req()->hz[1] == 433500000, "typed");
+	check(xband_req()->mode[0] == XB_MODE_DMR && xband_req()->mode[1] == XB_MODE_DMR, "DMR -> DMR");
+	check(xband_check_hz(432275000) == XB_R_OK && xband_check_hz(433500000) == XB_R_OK, "the band plan allows both");
+	press_start();
+	expect(T("shows=Attended", "shows=Yaln"));
+	ok_run("back wait:100");
+	check(!xband_on() && req_on == 0, "the question: Back, nothing started");
+	/* B left on a satellite frequency from before, then typed short (433.50, 433.5): the typed one is set and Start
+	 * asks (before: any entry but 6 or 7 digits was dropped, B stayed 435.500, Start said "Satellite segment") */
+	xband_req()->hz[1] = 435500000;
+	ok_run("up up up up up up up up down down 4 3 3 5 0 down");
+	expect("shows=433.500");
+	check(xband_req()->hz[1] == 433500000, "five digits: 433.50");
+	xband_req()->hz[1] = 435500000;
+	ok_run("up 4 3 3 5 down");	/* (each entry ends on B's mode row: one up is B again) */
+	check(xband_req()->hz[1] == 433500000, "four digits: 433.5");
+	ok_run("up 4 3 2 down");
+	check(xband_req()->hz[1] == 432000000, "three digits: 432.000");
+	ok_run("up 4 3 down wait:100");
+	expect_tr("toast", "Type the MHz: 433500");
+	check(xband_req()->hz[1] == 432000000, "two digits: told, kept");
+	ok_run("wait:3000");
+	xband_req()->hz[1] = 435500000;
+	press_start();
+	expect_tr("toast", "Satellite segment");	/* (a real satellite frequency is still refused) */
+	ok_run("wait:3000");
+	ok_run("up up up up up up up up down down 4 3 3 5 0 0 down");
+	press_start();
+	expect(T("shows=Attended", "shows=Yaln"));
+	ok_run("back wait:100");
+	/* the same from a zone: channel 35 (Hotspots' 7th) made a 432.275 DMR simplex channel; HS 433.5 its 2nd */
+	channel_t c;
+	check(codeplug_channel(35, &c), "channel 35");
+	c.rx_hz = c.tx_hz = 432275000;
+	c.mode = RADIO_MODE_DMR;
+	check(ui_svc_write_channel(35, &c), "channel 35 written");
+	xband_req()->hz[0] = xband_req()->hz[1] = 0;
+	ok_run("up up up up up up up up ok wait:200");	/* A's row */
+	ok_run("right right wait:100 down down down down down down ok wait:200");
+	expect("screen=xband shows=432.275");
+	ok_run("down down ok wait:200");		/* B's row */
+	ok_run("right right wait:100 down ok wait:200");
+	expect("screen=xband shows=433.500");
+	check(xband_req()->hz[0] == 432275000 && xband_req()->hz[1] == 433500000, "picked");
+	press_start();
+	expect(T("shows=Attended", "shows=Yaln"));
+	ok_run("ok wait:200");
+	expect("screen=home shows=CROSS");
+	check(xband_on() && req_on == 1, "started");
+}
+
 static void question_and_run(void)
 {
 	start("the question, the run");
@@ -385,7 +444,7 @@ typedef void (*case_fn)(void);
 
 int main(void)
 {
-	static const case_fn all[] = { form, refusals, picker, question_and_run, ended_itself };
+	static const case_fn all[] = { form, refusals, picker, owner_pair, question_and_run, ended_itself };
 	int bad = 0, run = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		for (unsigned i = 0; i < sizeof all / sizeof all[0]; i++) {
