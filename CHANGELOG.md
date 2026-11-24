@@ -8,7 +8,7 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 Firmware. Host-tested only (simulator flows in English and Turkish, normal and Large text); not yet run on the radio.
 
 - VFO step key: on Home with the VFO selected, a short SK2 (the A/B key) takes the tuning step to the next value of
-  Settings > Talk > VFO step (Auto, 2.5, 5, 6.25, 8.33, 10, 12.5, 20, 25, 50, 100 kHz, then Auto again) and shows it as a
+  Settings > Talk > VFO step (Auto, 2.5, 5, 6.25, 8.33, 10, 12.5, 20, 25, 50, 100 kHz, then Auto again; 8.33 only on the air band and AM, where it belongs: it snaps the frequency to its grid) and shows it as a
   toast ("Step 12.5 kHz"); Home's hint row names the key ("SK2 step", Turkish "SK2 adım"). It is the menu row's own setting
   (same storage, nothing new to save). Nothing else changes: on a channel short SK2 still starts dual watch, in dual and
   multi-watch it still selects the other letter, held SK2 is untouched, and while a scan runs or a frequency is typed it

@@ -906,7 +906,7 @@ Receive only: nothing is transmitted. English menus. SK2 is the lower of the two
 | # | Do | Expect |
 |---|---|---|
 | VS-1 | Home on the VFO (Zones > VFO, or the VFO key), look at the bottom row and the top-right of the top row | the bottom row ends "SK2 step" (e.g. "0-9 freq  * Quick  SK2 step"); the top row says "Step 12.5k" or "Step 25k" on the right |
-| VS-2 | Press SK2 briefly, one press at a time, 11 times | each press a toast "Step 2.5 kHz", "5", "6.25", "8.33", "10", "12.5", "20", "25", "50", "100 kHz", then "Step Auto"; the top row's Step follows; the frequency never moves by itself |
+| VS-2 | Press SK2 briefly, one press at a time, 10 times (on an air band or AM VFO, e.g. 121.575, 11 times: "8.33" comes after "6.25") | each press a toast "Step 2.5 kHz", "5", "6.25", "10", "12.5" (no 8.33 on a 2 m FM VFO), "20", "25", "50", "100 kHz", then "Step Auto"; the top row's Step follows; the frequency never moves by itself |
 | VS-3 | Set a step with SK2 (say 5 kHz), then press Up three times; then Settings > Talk > VFO step; then switch the radio off and on, back to the VFO | Up moves the frequency 5 kHz a press; the menu row shows 5 kHz; after the power cycle the step is still 5 kHz |
 | VS-4 | On a channel (not the VFO): look at the bottom row; press SK2 briefly; then press SK2 held | no "SK2 step"; short SK2 starts dual watch as before (Back ends it); held SK2 as before |
 | VS-5 | VFO on Home: hold SK2 (dual watch starts, the VFO is a letter); press SK2 briefly twice; Back; in the VFO type "4 3 3" and press SK2; start a scan (SK2 is not the scan key: use the scan key) and press SK2 | in dual watch short SK2 selects the other letter, the step does not change; typing and scanning: SK2 does not step |

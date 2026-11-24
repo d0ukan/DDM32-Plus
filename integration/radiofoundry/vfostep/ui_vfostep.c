@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* DDM32 Plus VFO step key (CONFIG_VFO_STEPKEY, docs/plus.md "VFO step key"): on Home with the VFO selected, a short
  * SK2 (the A/B key) takes the VFO's tuning step to the next value of Settings > Talk > VFO step (Auto, 2.5, 5, 6.25,
- * 8.33, 10, 12.5, 20, 25, 50, 100 kHz, then Auto again) and says it in a toast ("Step 12.5 kHz"). The step is the same
+ * 8.33, 10, 12.5, 20, 25, 50, 100 kHz, then Auto again; 8.33 only on the air band and AM: it snaps the frequency to
+ * its grid) and says it in a toast ("Step 12.5 kHz"). The step is the same
  * setting as the menu row: it goes to the radio core (ui_svc_apply UI_SET_VFO_STEP), which keeps it in the settings
  * (vfo_step_hz); no new settings bit, and the only RAM is the toast's text.
  * Nothing else changes: on a channel, in dual or multi-watch (the A/B key selects the other letter there, and the
@@ -18,6 +19,7 @@
 #include "font.h"
 #include "i18n.h"
 #include "input/keyassign.h"
+#include "radio/radio_am.h"
 
 /* The menu row's values (ui_menus.c v_step), 10 Hz units: 0 Auto, 833 the 8.33 kHz air band grid */
 static const int16_t vs_set[] = { 0, 250, 500, 625, 833, 1000, 1250, 2000, 2500, 5000, 10000 };
@@ -52,6 +54,8 @@ bool ui_vfostep_key(const input_event_t *ev)
 			i = VS_N - 1;	/* not in the list (a build's other value): on to Auto */
 	}
 	i = (i + 1) % VS_N;
+	if (vs_set[i] == 833 && !v->am && !radio_am_band(v->ch.rx_hz))
+		i++;	/* 8.33 kHz snaps the frequency to its grid (radio_am_step): only for AM and the air band */
 	ui_svc_apply(UI_SET_VFO_STEP, vs_set[i]);
 	sbuf_t b;
 	sb_init(&b, vs_msg, sizeof vs_msg);

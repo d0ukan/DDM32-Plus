@@ -81,7 +81,7 @@ static uint32_t step_hz(void) { return ui_view()->vfo_step_hz; }
 static void cycle(void)
 {
 	static const struct { uint32_t hz; const char *en; } want[] = {
-		{ 2500, "Step_2.5_kHz" }, { 5000, "Step_5_kHz" }, { 6250, "Step_6.25_kHz" }, { 8333, "Step_8.33_kHz" },
+		{ 2500, "Step_2.5_kHz" }, { 5000, "Step_5_kHz" }, { 6250, "Step_6.25_kHz" },
 		{ 10000, "Step_10_kHz" }, { 12500, "Step_12.5_kHz" }, { 20000, "Step_20_kHz" }, { 25000, "Step_25_kHz" },
 		{ 50000, "Step_50_kHz" }, { 100000, "Step_100_kHz" }, { 25000, "Step_Auto" },
 	};
@@ -99,7 +99,7 @@ static void cycle(void)
 		snprintf(s, sizeof s, "expect:toast=%s", turkish ? "Ad" : want[i].en);
 		run(s);
 		check(step_hz() == want[i].hz, "the step in use");
-		check(ui_view()->vfo_step_auto == (i == 10), "Auto only on the last");
+		check(ui_view()->vfo_step_auto == (i == 9), "Auto only on the last");
 		check(ui_view()->vfo, "still the VFO");
 		check(ui_view()->ch.rx_hz == rx, "the frequency is not touched");
 		if (i == 0)
@@ -121,7 +121,7 @@ static void from_menu(void)
 	run(VFO "wait:200");
 	check(step_hz() == 6250 && !ui_view()->vfo_step_auto, "set to 6.25 kHz");
 	run("abkey wait:100");
-	check(step_hz() == 8333, "6.25 on to 8.33 kHz");
+	check(step_hz() == 10000, "6.25 on to 10 kHz: 8.33 skipped on a 2 m FM VFO");
 	ui_svc_apply(UI_SET_VFO_STEP, 10000);
 	run("wait:100 abkey wait:100");
 	check(ui_view()->vfo_step_auto, "100 kHz on to Auto");
@@ -182,8 +182,24 @@ static void reassigned(void)
 	layout();
 }
 
+/* The air band (and AM) is where 8.33 kHz belongs: the cycle keeps it there, and a menu-set 8.33 on FM goes on to 10 */
+static void air(void)
+{
+	start("VFO: 8.33 kHz on the air band only");
+	run(VFO "1 2 1 5 7 5 ok wait:300");
+	check(ui_view()->ch.rx_hz == 121575000, "121.575 MHz typed");
+	run("abkey abkey abkey abkey wait:100");	/* 2.5, 5, 6.25, 8.33 */
+	check(step_hz() == 8333, "the air band's cycle has 8.33 kHz");
+	run("abkey wait:100");
+	check(step_hz() == 10000, "and goes on to 10 kHz");
+	start("FM: a menu-set 8.33 kHz goes on past it");
+	ui_svc_apply(UI_SET_VFO_STEP, 833);
+	run(VFO "wait:200 abkey wait:100");
+	check(step_hz() == 10000, "8.33 on FM goes on to 10 kHz");
+}
+
 typedef void (*case_fn)(void);
-static const case_fn all[] = { cycle, from_menu, channel, dual, busy, reassigned };
+static const case_fn all[] = { cycle, from_menu, air, channel, dual, busy, reassigned };
 
 int main(void)
 {

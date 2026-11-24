@@ -4832,10 +4832,16 @@ key (long `#` the talk target, long `*` the key lock), the arrows leave the VFO 
 zone key, OK is the menu, Back undoes, SK1 is the monitor. SK2's short press is the only key whose job there was a
 duplicate: with dual watch off it only *started* dual watch, which the held key (and the Dual watch key function) does
 as well. So now, on Home, VFO selected, dual watch off, no scan, no frequency being typed, a short SK2 goes to the next
-step in the menu row's list (Auto, 2.5 ... 100 kHz, then Auto again) and says it in a toast: "Step 12.5 kHz",
+step in the menu row list (Auto, 2.5 ... 100 kHz, then Auto again; 8.33 kHz only on the air band and AM, see below) and says it in a toast: "Step 12.5 kHz",
 "Step Auto" (Turkish "Adım 12.5 kHz", "Adım Otomatik"). The place row (normal text) shows the step at once. The step is
 the same stored setting as the menu row: no new settings bit; it survives a power cycle exactly as the menu's value;
 the menu row shows the value the key left. Cost: no new RAM except the toast's 24 bytes.
+
+**8.33 kHz is skipped outside the air band and AM.** `radio_am_step` (`radio_am.c`) moves the frequency on the 8.33 kHz
+grid, snapping it to the nearest grid point first (146.520 -> 146.525 on the next Up), so on a ham-band FM VFO that value
+is a trap one key away. The key skips it unless the VFO is AM or its frequency is in the air band (`radio_am_band`); the
+menu row keeps every value, and a step already at 8.33 goes on to 10 kHz. 6.25 kHz has no such effect (plain addition,
+no snap) and stays in the cycle: 10 values on FM, 11 on the air band.
 
 | Where | What short SK2 does |
 |---|---|
