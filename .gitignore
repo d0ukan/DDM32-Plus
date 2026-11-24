@@ -727,3 +727,8 @@ __pycache__/
 !/integration/radiofoundry/scanfast/ui_scanfast.c
 !/tests/plus/test_fastscan.c
 !/tests/plus/test_fastscan_radio.inc
+# branch vfostep: VFO step key (tools/plus_vfostep.py, docs/plus.md "VFO step key")
+!/tools/plus_vfostep.py
+!/tools/test_vfostep.py
+!/integration/radiofoundry/vfostep/ui_vfostep.c
+!/tests/plus/test_ui_vfostep.c

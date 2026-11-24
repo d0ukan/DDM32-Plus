@@ -5316,6 +5316,10 @@ msgstr "{Geri: kanalın talkgroup|Geri varsayılan hedef}"
 msgid "0-9 freq  * Quick  Up/Dn"
 msgstr "0-9 frek  * Hızlı  Yuk/Aşa"
 
+#: core/ui/ui_vfostep.c
+msgid "{0-9 freq  * Quick  Up/Dn  SK2 step|0-9 freq  * Quick  SK2 step|0-9 freq  SK2 step}"
+msgstr "{0-9 frek  * Hızlı  Yuk/Aşa  SK2 adım|0-9 frek  * Hızlı  SK2 adım|0-9 frek  SK2 adım}"
+
 #: core/ui/ui_screens.c
 msgid "Busy"
 msgstr "Meşgul"

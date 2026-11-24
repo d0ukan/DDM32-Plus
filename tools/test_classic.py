@@ -992,6 +992,9 @@ def main():
     # DDM32 Plus faster channel scan: the engine, the suites with it built in, upstream's scan suite, the model (tools/test_fastscan.py)
     import test_fastscan
     test_fastscan.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus VFO step key: the A/B key on the VFO's Home, its hint, the cycle (tools/test_vfostep.py)
+    import test_vfostep
+    test_vfostep.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus searchfix: the surer P25 / DMR / all digital searches (tools/test_searchfix.py)
     import test_searchfix
     test_searchfix.main(ROOT,APP,OUT,flags,host)

@@ -4814,3 +4814,58 @@ removed:
   core). DOTA's band-plan tests (`test_dota_radio.inc`, `test_ui_dota.c`) are unchanged.
 - Build (`--plus --stack-check --verify-rebuild`): FLASH 869,384 B (96.48 %), RAM 208,616 B (98.66 %), 0 warnings,
   forced rebuild identical; all host test targets pass, 0 warnings in classic-test. Host-tested only; not run on the radio.
+
+## VFO step key (`CONFIG_VFO_STEPKEY`, branch `vfostep`, v1.0.2 candidate)
+
+Owner request 2026-11-24: on Home with the VFO selected, change the tuning step with one key that the screen names,
+without the menus.
+
+**How the step works today (unchanged).** The VFO's step is the setting Settings > Talk > VFO step (`UI_SET_VFO_STEP`,
+`ui_menus.c` `v_step`: Auto, 2.5, 5, 6.25, 8.33, 10, 12.5, 20, 25, 50, 100 kHz). It is `settings_t.vfo_step_hz` (0 =
+Auto: the width's step, 12.5 kHz on a 12.5 kHz VFO, 25 kHz on a 25 kHz or AM one, the broadcast step in the FM
+broadcast band). `ui_svc_apply(UI_SET_VFO_STEP)` sends it to the radio core (`RREQ_VFO_STEP_SIZE`), which keeps it in the
+settings (`vfo_step_set`) and in `view.vfo_step_hz`; Up / Down and the knob step the frequency by it, and a VFO scan
+and search use it. Home's place row already said "Step 12.5k" at the right (not in Large text, which has no place row).
+
+**The key: a short SK2 (the A/B key).** In the VFO every digit types a frequency, `*` is Quick settings, `#` the caller
+key (long `#` the talk target, long `*` the key lock), the arrows leave the VFO for a zone and their long press is the
+zone key, OK is the menu, Back undoes, SK1 is the monitor. SK2's short press is the only key whose job there was a
+duplicate: with dual watch off it only *started* dual watch, which the held key (and the Dual watch key function) does
+as well. So now, on Home, VFO selected, dual watch off, no scan, no frequency being typed, a short SK2 goes to the next
+step in the menu row list (Auto, 2.5 ... 100 kHz, then Auto again; 8.33 kHz only on the air band and AM, see below) and says it in a toast: "Step 12.5 kHz",
+"Step Auto" (Turkish "Adım 12.5 kHz", "Adım Otomatik"). The place row (normal text) shows the step at once. The step is
+the same stored setting as the menu row: no new settings bit; it survives a power cycle exactly as the menu's value;
+the menu row shows the value the key left. Cost: no new RAM except the toast's 24 bytes.
+
+**8.33 kHz is skipped outside the air band and AM.** `radio_am_step` (`radio_am.c`) moves the frequency on the 8.33 kHz
+grid, snapping it to the nearest grid point first (146.520 -> 146.525 on the next Up), so on a ham-band FM VFO that value
+is a trap one key away. The key skips it unless the VFO is AM or its frequency is in the air band (`radio_am_band`); the
+menu row keeps every value, and a step already at 8.33 goes on to 10 kHz. 6.25 kHz has no such effect (plain addition,
+no snap) and stays in the cycle: 10 values on FM, 11 on the air band.
+
+| Where | What short SK2 does |
+|---|---|
+| Home, VFO, dual off, not scanning, nothing typed | the next step (new) |
+| Home, a channel | as before: starts dual watch |
+| Dual watch or multi-watch running (VFO or channel letters) | as before: selects the other letter; a VFO letter has the same one step (it is one setting), changed in the menu |
+| A scan running, a frequency being typed | as before (not the step key then) |
+| Any other screen | as before |
+| Held SK2 (dual watch on / off), SK2 given another job in Settings > Keys | as before |
+
+The hint row on the VFO's Home reads "0-9 freq  * Quick  Up/Dn  SK2 step", in the longest of three forms that fits
+("... * Quick  SK2 step", "0-9 freq  SK2 step"); Turkish "0-9 frek  * Hızlı  Yuk/Aşa  SK2 adım". It is not shown when
+Settings > Keys has taken SK2's press for another function (the key then works only if A/B is on another key, which
+the hint does not name). A frequency being typed, a scan, a temporary change and a held talk target keep their own hints
+as before. Toast, hint and key: `integration/radiofoundry/vfostep/ui_vfostep.c`; the hooks (`ui_app.c` `ACT_AB`,
+`ui_screens.c` `home_hint`, the config flag, the build flag) in `tools/plus_vfostep.py`.
+
+**Considered and not done.** `5` or another digit: every digit types a frequency in the VFO. The arrows: a short Left /
+Right is the only way on the DM-32UV's keypad to leave the VFO for a zone (there is no VFO key on the keypad), so taking
+it would cost a function. A Quick settings tile: two key presses and a menu; the owner asked for one key. A key function
+for Settings > Keys: not on screen by default, so the owner would still have to know it.
+
+Host tests (`tests/plus/test_ui_vfostep.c`, `tools/test_vfostep.py`, EN + TR, normal and Large text, layout checks, in
+`classic-test`): the whole cycle with the toast and `view.vfo_step_hz` of each press and the frequency untouched, Up by
+the new step, a step set in the menu going on from there (and one outside the list going to Auto), no hint and no step on
+a channel, dual watch's selection, a scan and a typed frequency leaving the step alone, SK2 reassigned hiding the hint.
+Host-tested only; not run on the radio (docs/plus-radio-test.md, VS-1 to VS-5).
