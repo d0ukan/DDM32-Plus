@@ -320,12 +320,46 @@ static void line_hex3(line_t *l,uint16_t v)
     }
     *l->p='\0';
 }
+#if CONFIG_P25_EXTRAS
+/* DM32 Plus: an emergency call on a channel that does not say its NAC (Any, or another NAC): Home's forms keep the NAC.
+ * "EMERGENCY TG65535 ID16777214 $1C8" (wide) | "EMG TG65535 ID16777214 $1C8" (27 characters: the 8 px font) |
+ * "EMG ID16777214 $1C8" (the caller and the NAC: 19 characters, any font). No BER here, the room is the NAC's. A
+ * unit-to-unit emergency says "Private 77285>1234" in the first two */
+static size_t emergency_nac_line(char *out,size_t cap,uint16_t tg,uint32_t src,uint32_t target,bool unit,uint16_t heard)
+{
+    line_t l={out,cap,false};
+    for(unsigned form=0;form<3u;form++) {
+        line_str(&l,form?"\x1f":"\x1d");
+        line_str(&l,form?"EMG":TR("EMERGENCY"));
+        line_str(&l," ");
+        if(form==2u && src) {
+            line_str(&l,"ID");line_u32(&l,src);
+        } else if(unit) {
+            line_str(&l,TR("Private"));line_str(&l," ");
+            line_u32(&l,src);line_str(&l,">");line_u32(&l,target);
+        } else {
+            line_str(&l,"TG");line_u32(&l,tg);
+            if(src){line_str(&l," ID");line_u32(&l,src);}
+        }
+        line_str(&l," ");
+#if CONFIG_NAC_DEC
+        line_str(&l,"$");
+#endif
+        line_hex3(&l,heard);
+    }
+    line_str(&l,"\x1e");
+    return (size_t)(l.p-out);
+}
+#endif
 size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
 {
     if(!out || !cap)return 0;
     out[0]='\0';
     taskENTER_CRITICAL();
     uint16_t tg=p25_tg,heard_nac=p25_nac;uint32_t src=p25_src;
+#if CONFIG_DEV_TX && CONFIG_P25_CHANNELS
+    uint16_t channel_nac=channel_rx_nac;
+#endif
 #if CONFIG_P25_EXTRAS
     uint32_t target=p25_target;unsigned kind=p25_kind;
 #endif
@@ -339,6 +373,24 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
 #if CONFIG_SIGNAL_QUALITY
     int ber=pane?-1:p25_lab_ber_permille();
 #endif
+    /* DM32 Plus: the NAC the call came on stays in Home's short forms (" $1C8") when the channel does not already say
+     * it: a channel on NAC Any, or a NAC other than the channel's. A channel with its own NAC keeps the room for BER */
+    bool short_nac=false;
+    if(!pane && heard_nac!=P25_NAC_ANY) {
+#if CONFIG_DEV_TX && CONFIG_P25_CHANNELS
+        short_nac=channel_nac==0xF7Eu || channel_nac==P25_NAC_ANY || channel_nac!=heard_nac;
+#else
+        short_nac=true;
+#endif
+    }
+#if CONFIG_P25_EXTRAS
+    if(short_nac && (kind&P25_LAB_EMERGENCY))return emergency_nac_line(out,cap,tg,src,target,unit,heard_nac);
+#endif
+#if CONFIG_SIGNAL_QUALITY
+    unsigned alts=short_nac?4u:3u;   /* the last one: TG, ID and NAC without BER (24 characters of a 9 px font) */
+#else
+    unsigned alts=3u;
+#endif
     line_t l={out,cap,false};
     /* Home: "P25 TG 101 ID 77285 NAC 659" | "TG101 ID77285 NAC659" | "TG101 ID77285";
      * a dual watch pane: "TG 101 ID 77285 NAC 659" | "TG101 ID77285".
@@ -349,7 +401,7 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
     for(unsigned first=pane?1u:0u;first<3u;first++) {
     l=(line_t){out,cap,false};
     line_str(&l,"\x1d");
-    for(unsigned alt=first;alt<3u;alt++) {
+    for(unsigned alt=first;alt<alts;alt++) {
         bool tight=alt>=(pane?2u:1u);
         if(alt>first)line_str(&l,"\x1f");
 #if CONFIG_P25_EXTRAS
@@ -367,7 +419,13 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
             line_str(&l,tight?"TG":"TG ");line_u32(&l,tg);
             if(src){line_str(&l,tight?" ID":" ID ");line_u32(&l,src);}
         }
-        if(heard_nac!=P25_NAC_ANY && alt<2u){
+        if(short_nac && alt>=2u) {
+            line_str(&l," ");
+#if CONFIG_NAC_DEC
+            line_str(&l,"$");
+#endif
+            line_hex3(&l,heard_nac);
+        } else if(heard_nac!=P25_NAC_ANY && alt<2u){
             line_str(&l,tight?" NAC":" NAC ");
 #if CONFIG_NAC_DEC
             /* DM32 Plus: "$125" marks hex, then the decimal some factory radios use, in every form ("$125/293") */
@@ -379,7 +437,7 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
         }
 #if CONFIG_SIGNAL_QUALITY
         /* DM32 Plus signal quality on Home, every form: "... BER 1.2%" | "... BER1.2%" */
-        if(ber>=0) {
+        if(ber>=0 && !(short_nac && alt==3u)) {
             line_str(&l,tight?" BER":" BER ");line_u32(&l,(uint32_t)ber/10u);
             line_str(&l,".");line_u32(&l,(uint32_t)ber%10u);line_str(&l,"%");
         }
