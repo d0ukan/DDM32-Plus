@@ -197,6 +197,14 @@ msgid "OK Menu  Hold OK Quick"
 msgstr "OK Menü  OK tut Hızlı"
 
 #: core/ui/ui_app.c
+msgid "Hold OK Quick"
+msgstr "OK tut Hızlı"
+
+#: core/ui/ui_app.c
+msgid "* Quick"
+msgstr "* Hızlı"
+
+#: core/ui/ui_app.c
 msgid "Not saved"
 msgstr "Kaydedilmedi"
 
@@ -5363,6 +5371,10 @@ msgstr "{# 1 A'da konuş  Geri durdur|# 1 A'da konuş}"
 #: core/ui/ui_screens.c
 msgid "# options  Back stop"
 msgstr "# seçenekler  Geri durdur"
+
+#: core/ui/ui_screens.c core/ui/ui_mwatch_draw.inc
+msgid "{# options  4 ISS  Back stop|# more  4 ISS  Back stop}"
+msgstr "{# seçenekler  4 ISS  Geri durdur|# seç  4 ISS  Geri dur}"
 
 #: core/ui/ui_screens.c
 msgid "# Open"
