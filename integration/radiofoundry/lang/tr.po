@@ -6382,6 +6382,14 @@ msgid "Any: every TG on this slot"
 msgstr "Tümü: bu slottaki tüm gruplar"
 
 #: core/ui/ui_menus.c
+msgid "Any: every TG"
+msgstr "Tümü: tüm gruplar"
+
+#: core/ui/ui_menus.c
+msgid "None: the channel's squelch"
+msgstr "Yok: kanalın squelch'i"
+
+#: core/ui/ui_menus.c
 msgid "None: only the TX contact's TG"
 msgstr "Yok: yalnız TX kişisinin grubu"
 

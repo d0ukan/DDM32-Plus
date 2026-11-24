@@ -724,6 +724,7 @@ def main():
         "CONFIG_XBAND="+("y" if args.plus else "n"),	# DDM32 Plus cross-band store and forward (docs/plus.md, item 46)
         "CONFIG_DMR_AUDIO_DIAG="+("y" if args.plus else "n"),	# DDM32 Plus DMR receive audio diagnostics (tools/plus_dmraudio.py)
         "CONFIG_CHAN_EXTRAS="+("y" if args.plus else "n"),	# DDM32 Plus r15 channels (tools/plus_chux.py)
+        "CONFIG_P25_RXGL="+("y" if args.plus else "n"),	# DDM32 Plus P25 RX group list (rxgl, tools/plus_p25rxgl.py)
         "CONFIG_SEARCH_RANGE="+("y" if args.plus else "n"),	# DDM32 Plus search ranges (round 15 item 1, tools/plus_scan.py)
         "CONFIG_SEARCH_FAST="+("y" if args.plus else "n"),	# DDM32 Plus faster searches (round 15 item 2, tools/plus_scan.py)
         "CONFIG_MWATCH_FAST="+("y" if args.plus else "n"),	# DDM32 Plus faster multi-watch ring (round 15 item 3, tools/plus_scan.py)
