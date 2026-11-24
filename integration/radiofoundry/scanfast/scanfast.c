@@ -15,6 +15,10 @@ static uint32_t stop_ms;		/* the current stop's first tune (a pause's end tunes 
 static uint32_t pass_t0, last_where;
 static uint16_t cur_stops;
 static bool have_stop, have_pass;
+static uint32_t cur_where;		/* the current stop: where, its channel and FS_WHY_* so far */
+static uint16_t cur_ch;
+static uint8_t cur_why, cur_step;	/* ... its step time (ms, capped) */
+static uint8_t last_band = FS_BANDS;	/* the stop before's band */
 
 void fs_set_fast(bool fast)
 {
@@ -54,6 +58,8 @@ static void restart(uint32_t now_ms)
 	memset(&st, 0, sizeof st);
 	st.on = true;
 	st.fast = fast;
+	st.slow_mode = st.fb_mode = FS_MODES;	/* none yet */
+	last_band = FS_BANDS;
 	st.start_ms = st.mark_ms = now_ms;
 	have_stop = have_pass = false;
 	last_where = 0;
@@ -86,6 +92,15 @@ void fs_stop_new(uint32_t tuned_ms, uint32_t where, uint8_t prev_mode, bool prev
 		restart(tuned_ms);	/* the switch moved: the counters start again with this stop */
 	} else if (have_stop) {
 		st.stops++;
+		uint8_t why = (uint8_t)(cur_why | (prev_noticed ? FS_WHY_NOTICED : 0u) | (prev_held ? FS_WHY_HELD : 0u));
+		if (tuned_ms - stop_ms > st.slow_ms) {
+			st.slow_ms = tuned_ms - stop_ms;
+			st.slow_where = cur_where;
+			st.slow_ch = cur_ch;
+			st.slow_mode = prev_mode;
+			st.slow_why = why;
+			st.slow_step = cur_step;
+		}
 		if (prev_noticed) {
 			st.noticed++;
 			st.held += prev_held;
@@ -106,6 +121,10 @@ void fs_stop_new(uint32_t tuned_ms, uint32_t where, uint8_t prev_mode, bool prev
 		cur_stops = 0;
 	}
 	cur_stops++;
+	cur_where = where;
+	cur_ch = 0;
+	cur_why = 0;
+	cur_step = 0;
 	last_where = where;
 	stop_ms = tuned_ms;
 	have_stop = true;
@@ -132,6 +151,45 @@ void fs_count(uint8_t what)
 fs_stop_t *fs_cur(void)
 {
 	return &cur;
+}
+
+void fs_stop_about(uint16_t number, bool other_zone, bool switched, uint8_t band, bool am)
+{
+	cur_ch = number;
+	if (other_zone) {
+		cur_why |= FS_WHY_OTHER_ZONE;
+		st.other_zone++;
+	}
+	if (switched) {
+		cur_why |= FS_WHY_SWITCHED;
+		st.switches++;
+	}
+	st.bands += last_band != FS_BANDS && band != last_band;
+	last_band = band;
+	st.am_stops += am;
+}
+
+void fs_fallback_reading(uint8_t mode, uint8_t why, uint8_t noise, uint8_t line, int16_t rssi)
+{
+	cur_why = (uint8_t)((cur_why & ~(7u << FS_WHY_FB_SHIFT)) | FS_WHY_FALLBACK | ((why & 7u) << FS_WHY_FB_SHIFT));
+	st.fb_why = why;
+	st.fb_ch = cur_ch;
+	st.fb_mode = mode;
+	st.fb_noise = noise;
+	st.fb_line = line;
+	st.fb_rssi = rssi;
+}
+
+void fs_radio_cost(uint32_t gap_ms, uint32_t step_ms)
+{
+	if (gap_ms > st.gap_max)
+		st.gap_max = (uint16_t)(gap_ms > 0xFFFFu ? 0xFFFFu : gap_ms);
+	if (step_ms > st.step_max)
+		st.step_max = (uint16_t)(step_ms > 0xFFFFu ? 0xFFFFu : step_ms);
+	uint32_t s = gap_ms > FS_TICK_MS ? gap_ms - FS_TICK_MS : 0u;
+	s = step_ms > s ? step_ms : s;
+	if (s > cur_step)
+		cur_step = (uint8_t)(s > 255u ? 255u : s);
 }
 
 void fs_view(uint32_t now_ms, fs_stats_t *out)

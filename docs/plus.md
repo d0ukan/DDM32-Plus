@@ -983,14 +983,26 @@ scanst.on=0|1
 scanst.st=ALGO,UP_MS,STOPS,PASSES,PASS_MS,PASS_STOPS,NOTICED,HELD,FAST_QUIET,FALLBACK,LATE
 scanst.quiet=FM_N,FM_MS,DMR_N,DMR_MS,P25_N,P25_MS,OTHER_N,OTHER_MS
 scanst.rate=CPS_X10
+scanst.slow=MS,WHERE,CH,MODE,WHY,STEP_MS,CAUSE      (v1.0.2)
+scanst.fb=CH,MODE,NOISE,LINE,RSSI,REASON            (v1.0.2)
+scanst.cost=GAP_MAX,STEP_MAX,OTHER_ZONE,SWITCHES,BANDS,AM_STOPS (v1.0.2)
 ```
 
 ALGO `fast` / `classic`; UP_MS since the scan (or the counters, after a switch) started; PASSES complete rounds (the
 first wrap starts the count), PASS_MS / PASS_STOPS the last one's; NOTICED stops that probed or held, HELD those that
 held; FAST_QUIET stops the fast rule ended; FALLBACK stops it handed to the classic rules; LATE spans started again after
 a late tick; `quiet` the quiet stops by mode and their total time (P25 counts YSF, OTHER NXDN and dPMR: FM_MS / FM_N is
-the FM quiet dwell); `rate` quiet channels a second times ten. Not shown by the PC programmers yet (debug link only):
-`tools/plus_live.py` in the lab repo or any GET_VIEW 31 reader. **Held 0 on Home while a zone or VFO scan runs** switches
+the FM quiet dwell); `rate` quiet channels a second times ten. Since v1.0.2 (section "A zone scans slowly" below):
+`slow` the longest stop since the counters started (its ms tune to tune, the sweep position or VFO Hz, the channel
+number, FM / DMR / P25 / OTHER, WHY bits 1 heard something, 2 held, 4 the fast rule handed it to classic, 8 in another
+zone, a priority channel there, 16-112 the fall-back reason << 4, 128 a FM / DMR switch; STEP_MS the radio task's time
+stepping to it; CAUSE held / heard / noise / am / open / strength / dmr / dmrcfg / step / quiet); `fb` the last stop the
+fast rule handed to classic and the reading that did it (noise reading, the noise it had to reach, strength dBm; noise
+0: the squelch was already open or AM; REASON noise / am / open / strength / dmr); `cost` the radio task's longest gap
+between two 10 ms ticks while a stop listened, the longest step the tick made (reading the channel and retuning), both
+ms, stops in another zone, FM / DMR switches, band jumps between consecutive stops (VHF / UHF / air band 108-137 MHz),
+AM stops. Not shown by the PC programmers' pages: `pc/radiotools/plus_live.py
+--port COMx --scan-stats` (read only, since v1.0.2; the lab repo's copy or any GET_VIEW 31 reader too). **Held 0 on Home while a zone or VFO scan runs** switches
 fast (the default) / classic, toast "Scan: fast" / "Scan: classic (v1.0.0)" (Turkish "Tarama: hızlı" / "Tarama: klasik
 (v1.0.0)"); kept in RAM while the radio is on; a running scan takes it at its next stop and the counters start again.
 A short 0 still skips the channel the scan stopped on. No band rule anywhere.
@@ -1049,6 +1061,84 @@ Rows SF-1.. in [plus-radio-test.md](plus-radio-test.md): a quiet zone's round ea
 FM signal and the room's DMR radio found each way, P25.
 
 Cost (`--plus --stack-check --verify-rebuild`): zero warnings, forced rebuild identical, every task's stack fits; FLASH 880,600 -> 882,432 B (+1,832, 97.93 %; on `ddm25` 97c6af7), static RAM +104 B (2,072 -> 1,968 B free; the 1,500 B floor kept): the counters 56 B, the stop's state and the pass and step bookkeeping about 48 B.
+
+### A zone scans slowly (branch `zonescan`, v1.0.2 candidate)
+
+**The owner's report (2026-11-24, v1.0.1):** on Home, a scan of a zone he made (normal channels) is very slow, in both
+classic and fast; the same scan in "All channels" is fast.
+
+**Status: the cause is NOT proven.** What follows is a mechanism found by code reading and shown on the host model; it
+makes a scan slow in both algorithms, and the change below removes it. Whether it is what the owner saw, and why his
+made zone and not All channels, is unknown until radio rows ZS-1 (on 1.0.1) and ZS-2 (on 1.0.2) are run and their
+`scanst` lines read. Other causes the counters can tell apart: real carriers or a noise reading that never reads quiet
+on some channels (`fb` REASON noise), AM channels (REASON am: the fast rule never calls AM quiet), band jumps between
+consecutive stops (`cost` BANDS), slow steps into DMR (`slow` CAUSE dmrcfg).
+
+**What the code says (reading, then the host model).**
+
+- There is no zone-specific path in the scan. A stored zone, zone 0 "All channels" included, is read once when it is
+  chosen (`codeplug_zone` into `sm->zone`, one 176-byte read); every stop then reads its channel with
+  `codeplug_channel` the same way in any zone (`radio_sm.c` `scan_usable` / `scan_step`). Nothing caches "All channels"
+  and nothing re-reads a made zone per stop. No setting differs per zone except DMR roaming (not run while scanning).
+  The one zone-related extra is a priority channel set from another zone: one extra stop every 2 s (`scanst.cost`
+  OTHER_ZONE counts them), measured below as no longer per stop.
+- What does cost time on a stop is reading channels on the radio task. v1.0.1 read **three** channels a stop: upstream
+  `scan.c` `scan_next_pos` read the scan's start channel at every stop (`origin_ok`, needed only for the priority
+  revisits), `scan_usable` read the channel picked, and `scan_step` read that channel again to tune it. With any P25
+  channel in the codeplug every channel read also walks the whole codeplug settings area on the data chip
+  (`codeplug_tag_apply` -> `codeplug_kv_get` -> `codeplug_kv_next`: the chain checked with its CRC, then walked, 16
+  and 4 bytes a transaction): 57 flash transactions for an FM channel with a 72-byte area on the simulated flash, more as
+  the area grows, and several walks for a P25 channel (its tag, its parameters, the unit ID). A P25 channel as the
+  scan's start channel was therefore paid at every stop.
+- The step stamped the stop's tune with the time the poll (or tick) began, before those reads. The next poll is on the
+  radio task's 25 ms grid, so a step that spent X ms reading met its first poll only 25 - X ms after the retune, inside
+  the noise reading's dip (the FD6818 reads low, like a carrier, for about 20 ms after a frequency change): the squelch
+  opened, the scan saw an open squelch after its settle and **held a quiet channel for the resume delay**. Fast had the
+  same: its 30 ms settle counted from the step's start, so its first readings fell into the dip and the stop fell back
+  to classic, and its own squelch guard (25 ms) was short by X too. That is "very slow in both algorithms".
+- Which zone shows it depends on what its stops read: above all the channel the scan starts from (read at every stop;
+  a P25 one costs several walks) and P25 or unusable entries the scan looks at. That a made zone is hit and All
+  channels not is not proven by the code alone: the radio row ZS-1 below says it.
+
+**Host model** (`tests/plus/test_zonescan_radio.inc`, `tools/test_fastscan.py zones`, in `make classic-test`): the
+fast scan model (receiver readings, tick and poll with their lateness, 15 ms noise dip) on zone 0 "All channels" (16 FM
+channels) and zone 1 "Mine" (12 of them in another order), the fixture's channel reads counted and charged a time on
+the radio task. Before the change, at 3 ms a read (3 reads a stop): classic 290 ms a stop instead of 152 (quiet
+channels held), the same in both zones. After:
+
+| Channel read | classic, ms a stop (All / Mine) | fast, ms a stop (All / Mine) | reads a stop |
+|---|---|---|---|
+| 0 ms | 152.5 / 152.5 | 53.3 / 53.3 | 1 |
+| 3 ms | 151.8 / 151.8 | 53.1 / 53.1 | 1 |
+| 12 ms | 152.6 / 152.6 | 62.4 / 62.4 | 1 |
+
+No hold and no fall-back in any row; a priority channel from All channels while Mine is scanned: 10 stops there in
+20 s, Mine's own stops 52.6 ms as without it. The fast scan model's table above is unchanged (same figures with no
+read time), every other suite passes.
+
+**The change (both algorithms, no new limits).**
+
+1. A stop reads one channel: `scan_next_pos` reads the start channel only when the priority revisits need it, and
+   `scan_step` tunes the channel its look read (`scan_pick`, read straight into its own `channel_t`; no RAM).
+2. When the retune is done is noted (`fsc_now`, `hal_millis` after the reads); the fast rule's first reading waits for
+   25 ms after it as well as 30 ms after the step began (`FS_SETTLE_RETUNE_MS`; a quick step reads as in v1.0.1), and
+   the squelch doesn't open in the first 20 ms after it on any other step (`FS_RETUNE_GUARD_MS`) or 25 ms on one the
+   tick stepped to (as before, now from the retune). A stop's dwell, probe and hold are still timed from the step as in
+   v1.0.1. The 20 ms guard is new behaviour, not only after slow reads: a classic step the poll made on time meets its
+   first poll 22 ms or more later (never held back), but a step a request made between two polls (the scan's start, a
+   nuisance skip, a priority stop the poll did not make) or a poll off its grid can meet one sooner, and that poll's
+   squelch now waits for the next one. With a scan dwell under 75 ms (`FS_RETUNE_GUARD_DWELL_MS`; the setting goes down
+   to 50) the held-back poll could be the last before the dwell's end and an FM channel without a tone, which opens the
+   squelch at once, be stepped past on its first open: there the guard is off and the squelch is v1.0.1's exactly (host
+   check: dwell 60 ms, classic, 16 of 16 overs caught). The tick's 25 ms guard is v1.0.1's, counted from the retune.
+3. `scanst` says where the time goes (`slow`, `fb`, `cost`, above), and `pc/radiotools/plus_live.py --scan-stats`
+   reads it (read only). Second round: `cost` counts band jumps between consecutive stops (VHF / UHF / air band) and
+   AM stops; `slow` gives the longest stop's step time and a cause class (held, heard, the fall-back reason, dmrcfg,
+   step, quiet); `fb` gives the fall-back's reason (noise, am, open, strength, dmr). Host checks: Mine with every
+   other channel on 2 m counts a band change about every second stop, a one-band zone none; an FM carrier's stop is
+   the longest with reason noise.
+
+Cost (`--plus --stack-check --verify-rebuild`): zero warnings, forced rebuild identical, every task's stack fits; FLASH 883,076 -> 884,576 B (+1,500, 98.16 %; on `ddm25` ff007ef, VFO step key merged), static RAM +64 B (1,944 -> 1,880 B free; the 1,500 B floor kept; the second round's band, reason and step fields 8 B of it): the counters and the retune note.
 
 ### Airband AM and broadcast FM
 

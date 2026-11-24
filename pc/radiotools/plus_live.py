@@ -9,6 +9,8 @@ read-only queries, refused locally before transmission otherwise:
   0x09 [20|21|23]  GET_VIEW tasks, crash, reset (as plus_txdiag.py --health)
   0x21 [0]         native modem status (as plus_txdiag.py)
   0x21 [12]        P25 zone scan counters (as plus_txdiag.py --scan)
+  0x09 [31]        GET_VIEW scanst, only with --scan-stats: the zone / VFO scan's counters (firmware 1.0.1 and later;
+                   the slow stop, fall-back reading and radio task timing lines from 1.0.2)
 No TX, key, radio operation, flash, storage or register command is ever sent.
 
 Output: one block per poll, '=== poll N' ... '=== end N', each query as '--- NAME (ID) status CODE' followed by
@@ -28,6 +30,8 @@ from radiotools import plus_txdiag as diag  # noqa: E402
 ALLOWED = {(0x09, b'\x00'), (0x09, b'\x14'), (0x09, b'\x15'), (0x09, b'\x17'), (0x21, b'\x00'), (0x21, b'\x0c')}
 ONCE = (('view crash', 0x15), ('view reset', 0x17))
 POLL_VIEWS = (('view core', 0x00), ('view tasks', 0x14))
+SCANST = ('view scanst', 0x1F)      # --scan-stats: GET_VIEW 31, read only
+ALLOWED_SCANST = ALLOWED | {(0x09, bytes([SCANST[1]]))}
 MAX_SILENT_POLLS = 3
 
 
@@ -36,13 +40,14 @@ class Refused(Exception):
 
 
 class GuardedLink:
-    """Any link with request(cmd, payload, **kw); refuses everything outside ALLOWED before it is sent"""
+    """Any link with request(cmd, payload, **kw); refuses everything outside allowed (ALLOWED) before it is sent"""
 
-    def __init__(self, link):
+    def __init__(self, link, allowed=ALLOWED):
         self.link = link
+        self.allowed = allowed
 
     def request(self, cmd, payload=b'', **kw):
-        if (cmd, bytes(payload)) not in ALLOWED:
+        if (cmd, bytes(payload)) not in self.allowed:
             raise Refused(f'plus_live refused command 0x{cmd:02x} {bytes(payload).hex()} before transmission')
         return self.link.request(cmd, payload, **kw)
 
@@ -108,10 +113,10 @@ def print_scan(link, out):
     return code
 
 
-def run(link, interval, count=0, out=sys.stdout, sleep=time.sleep, clock=time.monotonic):
+def run(link, interval, count=0, out=sys.stdout, sleep=time.sleep, clock=time.monotonic, scan_stats=False):
     """The polling loop on an open (guarded) link. Returns the exit code: 0 after count polls, 3 when the radio
-    stopped answering"""
-    link = link if isinstance(link, GuardedLink) else GuardedLink(link)
+    stopped answering. scan_stats: GET_VIEW scanst too, each poll"""
+    link = link if isinstance(link, GuardedLink) else GuardedLink(link, ALLOWED_SCANST if scan_stats else ALLOWED)
     for name, section in ONCE:
         print_view(link, name, section, out)
     out.flush()
@@ -122,6 +127,8 @@ def run(link, interval, count=0, out=sys.stdout, sleep=time.sleep, clock=time.mo
         print(f'=== poll {n}', file=out)
         codes = [print_view(link, name, section, out) for name, section in POLL_VIEWS]
         codes += [print_native(link, out), print_scan(link, out)]
+        if scan_stats:
+            codes.append(print_view(link, SCANST[0], SCANST[1], out))
         print(f'=== end {n}', file=out)
         out.flush()
         silent = silent + 1 if all(c == -1 for c in codes) else 0
@@ -139,15 +146,18 @@ def main():
     ap.add_argument('--port', required=True)
     ap.add_argument('--interval', type=float, default=2.0, help='seconds between polls, 1..5')
     ap.add_argument('--count', type=int, default=0, help='stop after this many polls (0: until stopped)')
+    ap.add_argument('--scan-stats', action='store_true',
+                    help='also read the zone / VFO scan counters (GET_VIEW scanst, read only) each poll')
     args = ap.parse_args()
     if not 1 <= args.interval <= 5:
         ap.error('--interval must be 1..5 seconds')
     if args.count < 0:
         ap.error('--count must be 0 or more')
-    link = diag.open_link(args.port, allowed=ALLOWED)
+    allowed = ALLOWED_SCANST if args.scan_stats else ALLOWED
+    link = diag.open_link(args.port, allowed=allowed)
     print(f'LIVE: {args.port} open, read only, every {args.interval:g} s', flush=True)
     try:
-        code = run(GuardedLink(link), args.interval, args.count)
+        code = run(GuardedLink(link, allowed), args.interval, args.count, scan_stats=args.scan_stats)
     finally:
         link.s.close()
     sys.exit(code)

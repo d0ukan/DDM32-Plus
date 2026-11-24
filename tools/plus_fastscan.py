@@ -9,7 +9,10 @@ reading every few ms from shortly after the retune, a quiet step as short as its
     the native modes three readings 20-40 ms after the retune; DMR a whole 60 ms TDMA frame); anything not clearly
     quiet keeps the classic (v1.0.0) dwell, probe and hold. Engine: integration/radiofoundry/scanfast/;
   - counters for the PC: the debug link section "scanst" (the last one, so every earlier section keeps its number);
-  - the switch: held 0 on Home while a zone or VFO scan runs (fast / classic), kept in RAM.
+  - the switch: held 0 on Home while a zone or VFO scan runs (fast / classic), kept in RAM;
+  - v1.0.2 (the owner's "a zone I made scans very slowly, classic and fast"): a stop reads one channel instead of three,
+    the squelch guard and the fast rule's first reading count from the end of the retune (a slow read no longer makes
+    the first poll meet the noise reading's dip), and scanst says where the time goes (slow, fb, cost).
 Dual watch and the multi-watch ring keep their own timing. Called last from plus_features.prepare(); a module of its
 own so the shared prepare list gains one line."""
 
@@ -36,12 +39,57 @@ def prepare_fastscan(transform, install):
          '#endif\n#ifndef CONFIG_MWATCH_FAST\n'),
     ])
 
+    # v1.0.2: the start channel is looked at only when the priority revisits need it (it was read at every stop, and a
+    # read walks the codeplug's settings area; a P25 start channel several times). The same positions come out
+    transform('core/radio/scan.c', [
+        ('\tbool origin_ok = s->origin_pos < count && pos_ok(s, s->origin_pos, usable, ctx);\n'
+         '\tif (s->cfg.priority && origin_ok && s->since_priority >= SCAN_PRIORITY_EVERY) {\n',
+         '\t// DDM32 Plus: read only when the priority revisits need it (without priority the sweep reaches it anyway)\n'
+         '\tif (s->cfg.priority && s->since_priority >= SCAN_PRIORITY_EVERY && s->origin_pos < count &&\n'
+         '\t    pos_ok(s, s->origin_pos, usable, ctx)) {\n'),
+        ('\tif (origin_ok) {\n\t\ts->since_priority = 0;\n',
+         '\tif (s->cfg.priority && s->origin_pos < count && pos_ok(s, s->origin_pos, usable, ctx)) {\n'
+         '\t\ts->since_priority = 0;\n'),
+    ])
+
     transform('core/radio/radio_sm.c', [
         # the engine's header, and the radio core's side declared for scan_start (defined in radio_scanfast.inc)
         ('#include "radio/srange.h"\t// DDM32 Plus: the search\'s step rides on its start\n#endif\n',
          '#include "radio/srange.h"\t// DDM32 Plus: the search\'s step rides on its start\n#endif\n'
          '#if CONFIG_SCAN_FAST\n#include "radio/scanfast.h"\t// DDM32 Plus faster channel scan\n'
-         'static void fsc_begin(radio_sm_t *sm, uint32_t now_ms);\n#endif\n'),
+         'static void fsc_begin(radio_sm_t *sm, uint32_t now_ms);\n'
+         'static uint32_t fsc_now(const radio_sm_t *sm, uint32_t now_ms);\n#endif\n'),
+        # v1.0.2 (the owner's "a zone I made scans slowly"): a step reads the channel it tunes once. scan_next_pos looks
+        # at each candidate (scan_usable) and scan_step then read the one it picked again: on the radio every read
+        # walks the codeplug's settings area on the data chip (the P25 records), several for a P25 channel. Now the
+        # look reads into scan_step's own channel (scan_pick) and the tune uses it
+        ('static bool scan_usable(uint16_t pos, void *ctx)\n{\n\tconst radio_sm_t *sm = ctx;\n\tchannel_t ch;\n'
+         '\treturn pos < sm->zone.count && codeplug_channel(sm->zone.channels[pos], &ch) && !ch.scan_skip &&\n'
+         '#if CONFIG_P25_SCAN\n\t       (!codeplug_mode_p25(ch.mode) || codeplug_p25_valid(&ch));\n'
+         '#else\n\t       !codeplug_mode_p25(ch.mode);\n#endif\n}\n',
+         'static bool scan_usable_in(uint16_t pos, const radio_sm_t *sm, channel_t *ch)\n{\n'
+         '\treturn pos < sm->zone.count && codeplug_channel(sm->zone.channels[pos], ch) && !ch->scan_skip &&\n'
+         '#if CONFIG_P25_SCAN\n\t       (!codeplug_mode_p25(ch->mode) || codeplug_p25_valid(ch));\n'
+         '#else\n\t       !codeplug_mode_p25(ch->mode);\n#endif\n}\n\n'
+         'static bool scan_usable(uint16_t pos, void *ctx)\n{\n\tchannel_t ch;\n\treturn scan_usable_in(pos, ctx, &ch);\n}\n\n'
+         '// DDM32 Plus: scan_step\'s look, into its own channel (the last one looked at is the one picked: tuned unread)\n'
+         'typedef struct {\n\tconst radio_sm_t *sm;\n\tchannel_t *ch;\n\tint pos;\t// the position *ch holds, -1: none\n'
+         '} scan_pick_t;\n\n'
+         'static bool scan_pick(uint16_t pos, void *ctx)\n{\n\tscan_pick_t *k = ctx;\n'
+         '\tk->pos = scan_usable_in(pos, k->sm, k->ch) ? (int)pos : -1;\n\treturn k->pos >= 0;\n}\n'),
+        ('\t\tint pos = scan_next_pos(sc, sm->zone.count, scan_usable, sm);\n\t\tchannel_t ch;\n'
+         '\t\tif (pos < 0 || !codeplug_channel(sm->zone.channels[pos], &ch)) {\n'
+         '\t\t\tscan_stop(sm, false, now_ms);\n\t\t\treturn false;\n\t\t}\n'
+         '\t\tset_channel(sm, (uint16_t)pos, &ch);\n\t\ttune(sm, now_ms);\n\t}\n'
+         '\tscan_tuned(sc, now_ms);\n\tscan_publish(sm);\n\treturn true;\n}\n',
+         '\t\tchannel_t ch;\n\t\tscan_pick_t pick = { sm, &ch, -1 };\n'
+         '\t\tint pos = scan_next_pos(sc, sm->zone.count, scan_pick, &pick);\n'
+         '\t\tif (pos < 0 || (pos != pick.pos && !codeplug_channel(sm->zone.channels[pos], &ch))) {\n'
+         '\t\t\tscan_stop(sm, false, now_ms);\n\t\t\treturn false;\n\t\t}\n'
+         '\t\tset_channel(sm, (uint16_t)pos, &ch);\n\t\ttune(sm, now_ms);\n\t}\n'
+         '#if CONFIG_SCAN_FAST\n'
+         '\tscan_tuned(sc, fsc_now(sm, now_ms));\t// DDM32 Plus: notes when the retune was done (fsc_guard)\n'
+         '#else\n\tscan_tuned(sc, now_ms);\n#endif\n\tscan_publish(sm);\n\treturn true;\n}\n'),
         # a zone or VFO scan ends: its counters stop (dual watch's are not kept)
         ('\tuint8_t kind = sc->kind;\n\tif (kind == SCAN_DUAL) {\n\t\trx2_release(sm);\n',
          '\tuint8_t kind = sc->kind;\n'

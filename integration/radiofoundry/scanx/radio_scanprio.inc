@@ -22,6 +22,12 @@
 #define SCX_NONE	0xFFFFu
 #define SCX_RING_NONE	0xFFu
 #define SCX_SOON	3u	// zone scan: the sweep's own stop on the priority channel this close makes an extra one pointless
+// A stop here: when its retune was done is noted (reading the zone and the channel takes time: radio_scanfast.inc fsc_now)
+#if CONFIG_SCAN_FAST
+#define SCX_TUNED(sm, now_ms)	fsc_now(sm, now_ms)
+#else
+#define SCX_TUNED(sm, now_ms)	(now_ms)
+#endif
 
 static volatile uint32_t scx_word;	// the setting (radio_scan_prio_set; settings_t.unused_dmr_id at start-up)
 
@@ -232,7 +238,7 @@ static int scx_step(radio_sm_t *sm, uint32_t now_ms)
 			scan_stop(sm, false, now_ms);
 			return 0;
 		}
-		scan_tuned(sc, now_ms);
+		scan_tuned(sc, SCX_TUNED(sm, now_ms));
 		sc->phase = SCAN_PH_RESUME;
 		sc->phase_ms = scx.wait_ms;
 		scan_publish(sm);
@@ -257,7 +263,7 @@ static int scx_step(radio_sm_t *sm, uint32_t now_ms)
 		return -1;
 	}
 	scx.seen_ms = now_ms;
-	scan_tuned(sc, now_ms);
+	scan_tuned(sc, SCX_TUNED(sm, now_ms));
 	scan_publish(sm);
 	return 1;
 }
@@ -303,7 +309,7 @@ static bool scx_service(radio_sm_t *sm, uint32_t now_ms)
 	scx.back = back;
 	scx.wait_ms = wait;
 	scx.seen_ms = now_ms;
-	scan_tuned(sc, now_ms);	// a stop: a signal there holds it
+	scan_tuned(sc, SCX_TUNED(sm, now_ms));	// a stop: a signal there holds it
 	return true;
 }
 

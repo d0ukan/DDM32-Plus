@@ -13,7 +13,9 @@ a build (python3 tools/test_fastscan.py [engine|suites|upstream|model]):
   fail (the monitor pressed while the faster scan is on a DMR channel, where the monitor doesn't pause it in either
   algorithm; and two "moved on from the DMR channel" checks the faster scan has already come round again for);
 - model: the radio core's zone scan on a model of the receiver, classic -> fast (tests/plus/test_fastscan_radio.inc),
-  the table printed for docs/plus.md and its checks."""
+  the table printed for docs/plus.md and its checks;
+- zones (v1.0.2): a zone made on the radio against the stored "All channels" on the same model, with the codeplug's
+  channel reads counted and charged a time on the radio task (tests/plus/test_zonescan_radio.inc)."""
 import os
 import re
 import shlex
@@ -104,6 +106,12 @@ def upstream(ROOT, APP, OUT, host):
     command = run(['make', '-Bn', 'radioFeaturesTest', 'SANITIZE=1'], cwd=host, capture_output=True, text=True).stdout
     command = re.sub(r'\\[ \t]*\n', ' ', command)
     argv = shlex.split(next(line for line in command.splitlines() if ' -o radioFeaturesTest ' in line))
+    # the faster scan notes when a step's retune was done (hal_millis, radio_scanfast.inc fsc_now): this fixture has
+    # no hal_millis of its own, so the wrapper gives it its clock
+    wrapper = OUT / 'radioFeaturesFastscan.c'
+    wrapper.write_text('#include "radioFeaturesTest.c"\nuint32_t hal_millis(void);\n'
+                       'uint32_t hal_millis(void) { return now; }\n')
+    argv[argv.index('radioFeaturesTest.c')] = str(wrapper)
     for fast in (0, 1):
         exe = OUT / f'radioFeaturesTest_fastscan_{fast}'
         a = list(argv)
@@ -136,6 +144,31 @@ def model(ROOT, APP, OUT, host):
     run([OUT / 'test_radio_fastscan_model'], cwd=host)
 
 
+ZONE_READS = (
+    'bool codeplug_channel(uint16_t n, channel_t *out)\n{\n',
+    # the reads counted, each charged zn_cost_us on the clock (the radio task blocked while it reads)
+    'static unsigned zn_reads;\nstatic uint32_t zn_cost_us, zn_us;\n'
+    'bool codeplug_channel(uint16_t n, channel_t *out)\n{\n\tzn_reads++;\n'
+    '\tfor (zn_us += zn_cost_us; zn_us >= 1000u; zn_us -= 1000u)\n\t\tnow++;\n')
+
+
+def zones(ROOT, APP, OUT, host):
+    """v1.0.2: a zone made on the radio against All channels (tests/plus/test_zonescan_radio.inc), on the model"""
+    wrapper = OUT / 'radioCoreZonescan.c'
+    fix = fixture(host)
+    for old, new in (('#define NCH 8\n', '#define NCH 96\n'), ZONE_READS):
+        assert fix.count(old) == 1, old
+        fix = fix.replace(old, new)
+    wrapper.write_text('#include <stdlib.h>\n' + HEAD + '#include "radio/scanprio.h"\n' + fix +
+                       '\n#define main classic_radio_main\n#include "' + str(ROOT / 'tests/classic/test_radio.inc') +
+                       '"\n#undef main\n#define main fastscan_model_main\n#include "' +
+                       str(ROOT / 'tests/plus/test_fastscan_radio.inc') + '"\n#undef main\n#include "' +
+                       str(ROOT / 'tests/plus/test_zonescan_radio.inc') + '"\n')
+    argv = radio_argv(ROOT, APP, OUT, host, wrapper, 'test_radio_zonescan')
+    run([*argv, '-DCONFIG_SCAN_PRIO=1', '-lm'], cwd=host)
+    run([OUT / 'test_radio_zonescan'], cwd=host)
+
+
 def main(ROOT, APP, OUT, flags, host, only=None):
     if not only or 'engine' in only:
         engine(ROOT, APP, OUT, flags)
@@ -145,6 +178,8 @@ def main(ROOT, APP, OUT, flags, host, only=None):
         upstream(ROOT, APP, OUT, host)
     if not only or 'model' in only:
         model(ROOT, APP, OUT, host)
+    if not only or 'zones' in only:
+        zones(ROOT, APP, OUT, host)
 
 
 if __name__ == '__main__':

@@ -20,6 +20,9 @@
 #define FS_SETTLE_MS	30u	/* a reading this soon after the retune is not used: the receiver's noise reading reads
 				 * low (a carrier) for a moment after a frequency change, and a new carrier may show late
 				 * (verifier: 30, so a reading lagging 20 ms still shows an FM carrier 1 dB over the line) */
+#define FS_SETTLE_RETUNE_MS 25u	/* v1.0.2: ... and at least this long after the retune was done (FS_SETTLE_MS counts
+				 * from the step's start; a slow step, reading the channel, ate into it and the readings
+				 * met the noise reading's dip: the stop fell back to the classic rules) */
 #define FS_GAP_MS	12u	/* readings further apart than this (a late tick) start the span again */
 #define FS_SPAN_MS	20u	/* a continuous carrier (FM, P25, YSF, NXDN, dPMR): three readings 10 ms apart (30-50 ms
 				 * after the retune) */
@@ -30,6 +33,16 @@
 #define FS_POLL_GUARD_MS 25u	/* after a step made on the tick (to a stop, or back from a priority look to the wait),
 				 * the radio core's squelch doesn't open until the retune is this old (the age a classic
 				 * stop's first poll has) */
+#define FS_RETUNE_GUARD_MS 20u	/* v1.0.2: after a step the poll made (classic, a priority stop), counted from the end
+				 * of the retune: the noise reading reads low (a carrier) for about this long after a
+				 * frequency change (OpenDMR trusts it from 20 ms). A classic step the poll made on time
+				 * meets its first poll 22 ms or more later, so this holds back only a sooner one: after a
+				 * slow step, a step a request made between polls (the scan's start, a nuisance skip), or
+				 * polls off their grid */
+#define FS_RETUNE_GUARD_DWELL_MS 75u	/* ... and only with a scan dwell of at least this: with a shorter one the poll
+				 * held back could be the last before the dwell's end (an FM channel without a tone that
+				 * opens the squelch at once could be stepped past on its first open) */
+#define FS_TICK_MS	10u	/* the radio task's tick (RADIO_TICK_MS): a tick gap over it is the task's time elsewhere */
 
 enum { FS_M_FM, FS_M_DMR, FS_M_P25, FS_M_OTHER, FS_MODES };	/* P25 counts YSF (the native receiver's modes) */
 enum { FS_WAIT, FS_QUIET, FS_CLASSIC };				/* fs_feed's verdict */
@@ -57,7 +70,35 @@ typedef struct {
 	uint32_t q_ms[FS_MODES];
 	uint32_t start_ms, mark_ms;	/* the scan's start; its end (running: now) */
 	uint32_t pass_ms;	/* the last complete pass's time */
+	/* Where the time goes (v1.0.2, the owner's "a zone I made scans slowly" report): the longest stop since the
+	 * counters started, tune to the next tune (where as for the passes, its channel number, FS_M_*, FS_WHY_* bits) */
+	uint32_t slow_ms, slow_where;
+	uint16_t slow_ch;
+	uint8_t slow_mode, slow_why;
+	/* the last stop the fast rule handed to the classic rules: its channel, mode and the reading that did it (the
+	 * noise reading, the squelch's opening line + FS_NOISE_MARGIN it had to reach, the strength in dBm) */
+	uint16_t fb_ch;
+	int16_t fb_rssi;
+	uint8_t fb_noise, fb_line, fb_mode;
+	/* the radio task: the longest gap between two of its 10 ms ticks while scanning and the longest step (reading
+	 * the next channel, retuning) the tick made, in ms; stops in another zone than the one scanned (a priority
+	 * channel there) and stops that switched the receiver between FM and DMR */
+	uint16_t gap_max, step_max, other_zone, switches;
+	/* stops whose band (FS_B_*) differs from the stop before (VHF / UHF / air band jumps), stops in AM receive; the
+	 * last fall-back's reason (FS_FB_*); the longest stop's step time (ms, at most 255: the tick gap less a tick, or
+	 * the tick's own step) */
+	uint16_t bands, am_stops;
+	uint8_t fb_why, slow_step;
 } fs_stats_t;
+
+/* FS_WHY_* bits; bits 4-6 the fall-back's FS_FB_* reason */
+enum { FS_WHY_NOTICED = 1, FS_WHY_HELD = 2, FS_WHY_FALLBACK = 4, FS_WHY_OTHER_ZONE = 8, FS_WHY_SWITCHED = 0x80 };
+#define FS_WHY_FB_SHIFT	4u
+/* Why the fast rule handed a stop to the classic rules: the noise reading under the line (a carrier, or a noise reading
+ * that never reads quiet here), AM or broadcast receive (never read quiet), the squelch already open, a digital stop's
+ * strength over the line (or no strength reading), DMR activity since the tune (a burst or a call) */
+enum { FS_FB_NONE, FS_FB_NOISE, FS_FB_AM, FS_FB_OPEN, FS_FB_STRENGTH, FS_FB_DMR };
+enum { FS_B_VHF, FS_B_UHF, FS_B_AIR, FS_BANDS };
 
 /* The switch (the UI task); the radio task reads it at every stop */
 void fs_set_fast(bool fast);
@@ -76,6 +117,14 @@ bool fs_fast(void);				/* the running scan's algorithm (taken from the switch at
 void fs_stop_new(uint32_t tuned_ms, uint32_t where, uint8_t prev_mode, bool prev_noticed, bool prev_held);
 void fs_count(uint8_t what);			/* a stop's fast verdict: FS_QUIET or FS_CLASSIC (late readings: fs_feed) */
 fs_stop_t *fs_cur(void);
+/* The stop fs_stop_new just began: its channel number (0 in the VFO), whether it is in another zone than the one
+ * scanned, whether its tune switched the receiver between FM and DMR */
+void fs_stop_about(uint16_t number, bool other_zone, bool switched, uint8_t band, bool am);
+/* The reading that handed the current stop to the classic rules (after fs_count(FS_CLASSIC)), and why (FS_FB_*) */
+void fs_fallback_reading(uint8_t mode, uint8_t why, uint8_t noise, uint8_t line, int16_t rssi);
+/* The radio task's timing: the gap since its last tick, the time a step on the tick took (ms); both counted to the
+ * current stop's step time too */
+void fs_radio_cost(uint32_t gap_ms, uint32_t step_ms);
 
 /* The PC (the debug link task): a copy of the counters (running: mark_ms = now) */
 void fs_view(uint32_t now_ms, fs_stats_t *out);
