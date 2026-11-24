@@ -21,6 +21,7 @@
  * go once the worker says sent, the CW ID on B after the native receiver let go, the stop with the channel back and the
  * memory given back after the native receiver let go. */
 #include "radio/xband.h"
+#include "p25/p25_lab.h"
 #include "radio/beep.h"
 
 /* --- The beeps the radio core plays (the real beep.c behind) --- */
@@ -598,6 +599,10 @@ static void test_xband_p25(void)
 		cw = sm.cw_phase != 0;
 	}
 	CHECK(cw && !native_lab_owns() && hw.tx_hz == 433500000 && hw_mode == RADIO_MODE_FM);
+	if (!cw || native_lab_owns() || hw.tx_hz != 433500000 || hw_mode != RADIO_MODE_FM)
+		printf("  (cw %d: owns %d busy %d ch mode %u hz %u tx %u hwmode %u phase %u state %u ptt %d)\n", cw,
+		       native_lab_owns(), classic_busy, sm.view.ch.mode, (unsigned)sm.view.ch.rx_hz, (unsigned)hw.tx_hz,
+		       (unsigned)hw_mode, (xband_view(&v), v.phase), sm.view.state, sm.ptt);
 	for (int i = 0; i < 600 && (xband_view(&v), v.phase != XB_P_LISTEN); i++)
 		xr_native_tick();
 	xr_native_run(300);

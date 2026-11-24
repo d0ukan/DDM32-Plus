@@ -32,7 +32,7 @@ static struct {
 	int tunes, keys, unkeys, cws, beeps[2];
 	uint8_t tuned, keyed_side, cw_side[4];
 	uint32_t key_dst;
-	bool key_group, refuse_key, refuse_cw, tx;
+	bool key_group, refuse_key, refuse_cw, cw_silent, tx;
 	int req_posts;
 } f;
 static uint32_t now;
@@ -70,7 +70,7 @@ static bool io_cw(uint8_t side)
 	f.cws++;
 	if (f.refuse_cw)
 		return false;
-	f.tx = true;
+	f.tx = !f.cw_silent;	/* (silent: accepted, keyed later or never: in.id_wait) */
 	return true;
 }
 static void io_beep(uint8_t what)
@@ -205,7 +205,7 @@ static void test_rules(void)
 	memset(&r, 0, sizeof r);
 	r.hz[0] = 145500000;
 	r.hz[1] = 433500000;
-	r.mode = XB_MODE_DMR;
+	r.mode[0] = r.mode[1] = XB_MODE_DMR;
 	strcpy(r.call, "TA2DOU");
 	CHECK(xband_check(&r) == XB_R_OK, "VHF / UHF simplex");
 	r.hz[1] = 145500000;
@@ -559,6 +559,7 @@ static void test_id_wait(void)
 	bool order;
 	drain(NULL, NULL, &order);
 	f.tx = in.tx = false;
+	f.cw_silent = true;
 	in.id_wait = true;	/* io_cw said yes, but the channel is not let go yet */
 	poll_ms(50);
 	CHECK(f.cws == 1, "B's ID asked for");

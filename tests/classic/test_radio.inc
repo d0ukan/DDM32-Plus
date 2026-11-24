@@ -23,7 +23,8 @@ int p25_lab_set_channel(uint16_t n,uint16_t tx,uint16_t t,uint32_t i,int selecti
           (n==0xF7E && tx==0x293 && t==42 && i==3101234) ||
           (CONFIG_P25_TRUNK && n==0x293 && tx==0x293 && t==0 && i==0) ||  /* trunk following: the channel NAC, any group */
           (CONFIG_P25_TXNAC && t==42 && i==3101234) ||  /* RX $293 or Any + a TX NAC of its own */
-          CONFIG_VFO_MODES);   /* the VFO's own NACs and talkgroups (tests/plus/test_vfox_radio.inc) */
+          CONFIG_VFO_MODES ||  /* the VFO's own NACs and talkgroups (tests/plus/test_vfox_radio.inc) */
+          CONFIG_XBAND);       /* DDM32 Plus cross-band: its P25 session channel (tests/plus/test_xband_radio.inc) */
     if(!classic_busy){classic_set_nac=n;classic_set_tx_nac=tx;classic_set_tg=t;classic_sets++;}
     return !classic_busy;
 }

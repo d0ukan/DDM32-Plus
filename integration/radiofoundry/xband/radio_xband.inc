@@ -147,6 +147,14 @@ static void xb_native_ptt(radio_sm_t *sm, bool down)
 	xband_native_key = false;
 }
 
+/* A P25 session's channel let go by the native receiver (true: free, nothing of it runs): asked as any request
+ * asks it (native_lab.c channel_let_go stops the worker; the FM placeholder keeps it from taking the channel again) */
+static bool xb_native_free(radio_sm_t *sm)
+{
+	radio_req_t r = { .type = RREQ_RETUNE };
+	return native_lab_request(sm, &r) == 0 && !native_lab_owns() && !p25_lab_busy();
+}
+
 /* The session channel in side's mode on its frequency. FM is a placeholder too: while a P25 session's native receiver
  * must let go (its CW ID, its end) */
 static void xb_channel(radio_sm_t *sm, uint8_t side, uint8_t mode)
@@ -515,7 +523,7 @@ static void xb_rf_poll(radio_sm_t *sm, uint32_t now_ms)
 	}
 	if (xb.ending) {
 		/* the native receiver lets go of the P25 channel (the FM placeholder), then the user's channel */
-		if ((native_lab_owns() || p25_lab_busy()) && now_ms - xb.since_ms < XB_WAIT_MS)
+		if (!xb_native_free(sm) && now_ms - xb.since_ms < XB_WAIT_MS)
 			return;
 		xb_restore(sm, now_ms);
 		return;
@@ -532,10 +540,15 @@ static void xb_rf_poll(radio_sm_t *sm, uint32_t now_ms)
 		}
 		xb_memory(seg, len, n, now_ms);
 	}
-	if (xb.cw_wait && ((!native_lab_owns() && !p25_lab_busy()) || now_ms - xb.since_ms >= XB_WAIT_MS)) {
-		/* a P25 session's CW ID: keyed once the native receiver let go (given up: never on the air, the engine beeps) */
-		xb.cw_wait = false;
-		(void)xb_cw_now(sm, xb.cw_side);
+	if (xb.cw_wait) {
+		/* a P25 session's CW ID: keyed once the native receiver let go; never while it holds the radio (given up
+		 * after XB_WAIT_MS: never on the air, the engine beeps as for a refused ID) */
+		bool free_now = xb_native_free(sm);
+		if (free_now || now_ms - xb.since_ms >= XB_WAIT_MS) {
+			xb.cw_wait = false;
+			if (free_now)
+				(void)xb_cw_now(sm, xb.cw_side);
+		}
 	}
 	if (!xb.cw_wait)
 		xb_send_poll(sm, now_ms);

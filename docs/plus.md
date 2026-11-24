@@ -3795,9 +3795,9 @@ then. Before the CW ID on a P25 side and at the session's end the channel become
 receiver lets go first (`xband_in_t.id_wait` holds the engine meanwhile; an ID that never got keyed beeps and does not
 count); the memory is given back and the user's channel tuned only after it let go (5 s at most).
 
-Cost (`--plus`, base `ddm25` 3c89f8b 890,072 B / 204,968 B): **FLASH 893,512 B (+3,440), static RAM 205,016 B (+48;
-6,440 B free)**; zero warnings, forced rebuild identical, every task fits (the radio task's deepest path now runs
-through the P25 keying into `native_lab_request`: 324 B free).
+Cost (`--plus`, over `ddm25` b2ece2e with rxnac, about 890,276 B / 204,968 B): **FLASH 893,908 B (about +3,630; 7,212
+B left of 901,120), static RAM 205,016 B (+48; 6,440 B free)**; zero warnings, forced rebuild identical, every task
+fits (the radio task's deepest path now runs through the P25 keying into `native_lab_request`: 324 B free).
 
 Host tests: `tests/plus/test_xband.c` (every pair accepted or refused, the sides heard, PMR446 / repeater refusals with
 mixed modes, NXDN -> DMR and DMR -> FM one way both directions, P25 frames of 11 B intact and their capacity, an ID that
@@ -3808,7 +3808,7 @@ deny tone and never handed on, 300 frames recorded and handed back in order with
 the ID after the native receiver let go, the stop), `tests/plus/test_xband_worker.c` (the real P25 worker: the lend,
 no microphone, 120 frames from the ring out bit for bit in LDUs, the same blocks heard back into the ring, nothing
 played, the lent memory untouched, the give back), `tests/plus/test_ui_xband.c` (the mode rows, every pair refused
-with its toast, NXDN -> FM still refused on a repeater segment and PMR446). Radio rows: XB-9..XB-13. **Nothing of
+with its toast, DMR -> FM still refused on a repeater segment and PMR446). Radio rows: XB-9..XB-13. **Nothing of
 this has been on the air.**
 
 Tests: `tests/plus/test_xband.c` (the rules at every segment's edge; an over recorded and sent in order; B to A, a

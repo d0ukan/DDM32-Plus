@@ -257,9 +257,10 @@ static void refusals(void)
 		ok_run("wait:3000");
 	}
 	layout();
-	/* a pair built (NXDN -> FM): the question, still a repeater segment refused first */
+	/* a pair built (DMR -> FM): the question, still a repeater segment refused first (NXDN: no receiver in this
+	 * test's build, refused as a pair) */
 	pair(145500000, 439000000);
-	xband_req()->mode[0] = XB_MODE_NXDN;
+	xband_req()->mode[0] = XB_MODE_DMR;
 	xband_req()->mode[1] = XB_MODE_FM;
 	press_start();
 	expect_tr("toast", "Repeater frequency");
@@ -296,7 +297,7 @@ static void picker(void)
 	ok_run("down ok wait:200");
 	expect("screen=xband shows=433.500");
 	check(xband_req()->hz[0] == 433500000 && xband_req()->cc == 1 && xband_req()->ts == 1, "A from the channel");
-	ok_run("down ok wait:200");	/* B's row: a 2 m DMR channel of the same zone */
+	ok_run("down down ok wait:200");	/* B's row: a 2 m DMR channel of the same zone */
 	ok_run("right right down down down down down down down ok wait:200");	/* 36 DMR SPX 5 */
 	check(xband_req()->hz[1] == 145510000, "B from the channel");
 	ok_run("back");
