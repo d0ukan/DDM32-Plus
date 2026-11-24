@@ -183,12 +183,13 @@ static const char *skip_sp(const char *s)
 	return s;
 }
 
-/* "Pass 72  hits 193  floor -84", then one space apart, then "P72 h193 fl-84" (4-digit pass and hits and a 3-digit
- * floor still fit the 220 px of the DM-32's safe area) */
+/* "Pass 72  hits 193  floor -84", then one space apart, then "Pass 72 hits 193 -84dBm" (the words kept: it fits up
+ * to six digits of pass and hits), then "P72 h193 fl-84" (4-digit pass and hits and a 3-digit floor still fit the
+ * 220 px of the DM-32's safe area) */
 static void pass_line(sbuf_t *b, const void *arg, int form)
 {
 	const dmrs_view_t *v = arg;
-	if (form >= 2) {
+	if (form >= 3) {
 		sb_str(b, TR("P"));
 		sb_u32(b, v->sweeps + 1u, 1);
 		sb_str(b, TR(" h"));
@@ -208,11 +209,15 @@ static void pass_line(sbuf_t *b, const void *arg, int form)
 	sb_u32(b, v->hits, 1);
 	if (form == 0) {
 		sb_str(b, TR("  floor "));
-	} else {
+	} else if (form == 1) {
 		sb_chr(b, ' ');
 		sb_str(b, skip_sp(TR("  floor ")));
+	} else {
+		sb_chr(b, ' ');
 	}
 	sb_i32(b, v->floor_dbm);
+	if (form == 2)
+		sb_str(b, "dBm");
 }
 
 #if CONFIG_ALL_SEARCH
@@ -412,7 +417,7 @@ static void dmrs_draw(void)
 	} else
 #endif
 	if (have && sv.phase != DMRS_OFF) {
-		fit_line(s, gfx_width(), buf, sizeof buf, pass_line, &sv, 3);
+		fit_line(s, gfx_width(), buf, sizeof buf, pass_line, &sv, 4);
 		gfx_text(s, 0, y, buf, ui_col.dim);
 	}
 	y += s->h + 4;

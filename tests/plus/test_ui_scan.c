@@ -404,9 +404,19 @@ static void sf_layouts(ui_scr_t scr)
 			expect("shows=433.5250_P25_$FFF_58m shows=433.5250_P25_$1C8_13m shows=438.7125_DMR_CC1_R_13m");
 			expect(T("shows=TG_2620123_from_2620124", "shows=TG_2620123_<2620124"));
 			if (ph[i].phase == 2 && !ph[i].playing)
-				expect(T("shows=Prb_NXDN_438.7125", "shows=Dnm_NXDN_438.7125"));
+				expect(T("shows=Prb_NXDN_438.7125", "shows=Dene_NXDN_438.7125"));
 		}
 	}
+	/* the owner's photo: pass 72, 193 hits, floor -84 keeps its words */
+	start("srchfix pass words", scr);
+	sf_fill(scr, 1, false);
+	sc_sim.p25.sweeps = sc_sim.dmr.sweeps = 71;
+	sc_sim.p25.hits = sc_sim.dmr.hits = 193;
+	sc_sim.p25.floor_dbm = sc_sim.dmr.floor_dbm = -84;
+	sc_sim_changed();
+	run("wait:300");
+	layout();
+	expect(T("shows=Pass_72_hits_193_-84dBm", "shows=Tur_72_bulgu_193_-84dBm"));
 }
 
 static void sf_p25_layout(void) { sf_layouts(SCR_P25SEARCH); }

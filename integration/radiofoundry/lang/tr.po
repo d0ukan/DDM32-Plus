@@ -1382,7 +1382,7 @@ msgstr "Şif"
 
 #: core/ui/ui_dmrsearch.c
 msgid "Prb "
-msgstr "Dnm "
+msgstr "Dene "
 
 #: core/ui/ui_dmrsearch.c
 msgid "No DMR found yet"
