@@ -101,7 +101,7 @@ uint16_t xband_frames_for(size_t bytes)
 
 static xband_req_t req = { .mode = { XB_MODE_DMR, XB_MODE_DMR }, .cc = 1, .ts = 1, .power = 1 };
 static volatile bool want_start, want_stop;
-bool xband_native_key;
+bool xband_native_key, xband_held;
 static bool active;			/* the radio core runs the session */
 static xband_view_t view;
 

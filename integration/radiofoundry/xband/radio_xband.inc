@@ -428,7 +428,7 @@ static void xb_take(radio_sm_t *sm, uint32_t now_ms)
 #endif
 	sm->view.power = xband_power_level(r->power, board.power_count);
 	memset(&xb, 0, sizeof xb);
-	xb.owned = true;
+	xb.owned = xband_held = true;
 	xb.p25 = r->mode[0] == XB_MODE_P25;
 	xb_pcm = NULL;
 	dmr_call_set_voice(&xb_sink, &xb_source);
@@ -446,7 +446,7 @@ static void xb_take(radio_sm_t *sm, uint32_t now_ms)
 static void xb_restore(radio_sm_t *sm, uint32_t now_ms)
 {
 	xb_let_go(sm);
-	xb.owned = xb.ending = xb.cw_wait = false;
+	xb.owned = xb.ending = xb.cw_wait = xband_held = false;
 	if (sm->cw_phase != CW_OFF) {
 		board.radio->tx_tone(0);
 		board.radio->tx_off();

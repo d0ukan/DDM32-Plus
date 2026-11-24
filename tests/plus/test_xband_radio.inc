@@ -610,6 +610,18 @@ static void test_xband_p25(void)
 	CHECK(v.ids == 1 && v.phase == XB_P_LISTEN && sm.view.ch.mode == RADIO_MODE_P25 && native_lab_owns());
 	/* the stop: the native receiver lets go, the memory comes back, the user's FM channel */
 	xband_stop();
+	for (int i = 0; i < 400 && xband_owns_radio(); i++)
+		xr_native_tick();
+	/* its end: the engine is off, the native receiver still holds the session's channel; PTT now is refused as during
+	 * the session (before: the native transmitter keyed P25 with the session's call on A) */
+	CHECK(!xband_owns_radio() && native_lab_owns() && xr_lent);
+	uint32_t deny0 = xr_beeps[BEEP_TX_DENY];
+	unsigned starts1 = classic_starts;
+	xr_native_req(RREQ_PTT, 1);
+	CHECK(!sm.ptt && classic_starts == starts1 && xr_beeps[BEEP_TX_DENY] == deny0 + 1);
+	xr_native_run(50);
+	CHECK(classic_starts == starts1 && !(classic_busy && classic_live->config.mode == NT_TRANSMIT));
+	xr_native_req(RREQ_PTT, 0);
 	for (int i = 0; i < 400 && (xband_owns_radio() || xr_lent || native_lab_owns()); i++)
 		xr_native_tick();
 	xr_native_run(200);

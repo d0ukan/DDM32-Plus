@@ -153,6 +153,9 @@ void xband_ptt(void);
 /* True only while the radio core keys or lets go of a P25 over itself (native_lab.c passes that PTT request on to the
  * P25 transmitter; every other PTT request during a session is the radio core's, refused) */
 extern bool xband_native_key;
+/* True while the radio core holds a session's channel, its end included (a P25 session's native receiver lets go
+ * after the engine is off): native_lab.c refuses PTT on that channel until the user's channel is back */
+extern bool xband_held;
 /* The voice heard and sent (the radio task: the call stack's sink and source, the NXDN receiver, the P25 worker's frames
  * handed over by the radio core): a call heard and its frames, and the frames to send. A frame is the session's size
  * (xband_frame_bytes) */
