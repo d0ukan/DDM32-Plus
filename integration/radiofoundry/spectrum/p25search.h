@@ -92,6 +92,22 @@ uint32_t p25s_probe_done(bool was_p25, uint32_t now_ms);
 void p25s_level(int16_t rssi_dbm, uint32_t now_ms);
 bool p25s_carrier_gone(uint32_t now_ms);
 #endif
+#if CONFIG_SEARCH_SOFTP25
+/* DDM32 Plus P25 soft probe (docs/p25-soft-probe-design.md, radio/p25soft.h, radio/radio_p25soft.h): with the fast
+ * algorithm and the soft probe chosen (held 0 on the P25 search screen: fast -> fast + soft probe -> classic), a hit
+ * is first read in software on the FM path for P25SOFT_WINDOW_MS. A good NID: P25, its NAC goes into the found list
+ * at once and the native receiver takes the frequency as before (it plays the call). Nothing P25-like on a carrier
+ * well over the floor: not P25, skipped as a probe that heard nothing (without the native receiver's 1.2 s). Anything
+ * else (a weak carrier, a doubtful NID, no heap, no ring): the native receiver probes as before. Off (the default):
+ * nothing here runs and the search is the fast or classic one, unchanged */
+enum { P25S_SOFT_P25, P25S_SOFT_NONE, P25S_SOFT_UNSURE };
+void p25s_set_soft(bool on);		/* the screen's choice (the UI task), taken by the next start */
+bool p25s_soft_wanted(void);
+bool p25s_soft_pending(void);		/* a probe waits for the soft verdict: the native receiver must not take it */
+int16_t p25s_probe_margin(void);	/* the probed carrier's level over the floor, dB */
+/* The soft probe's verdict (radio task). Returns the frequency to tune next when it ended the probe (NONE), else 0 */
+uint32_t p25s_soft_verdict(uint8_t verdict, uint16_t nac, uint32_t now_ms);
+#endif
 /* A consistent copy for the UI */
 bool p25s_snapshot(p25s_view_t *out);
 /* The PC's search log: the state and found entry i, not counted as a look (p25search.c) */

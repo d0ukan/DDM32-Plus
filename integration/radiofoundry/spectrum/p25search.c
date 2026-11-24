@@ -16,6 +16,11 @@
 #endif
 #include "radio/searchhy.h"
 #endif
+#if CONFIG_SEARCH_SOFTP25
+#if !CONFIG_SEARCH_HYBRID
+#error "SEARCH_SOFTP25 builds on SEARCH_HYBRID"
+#endif
+#endif
 
 static p25s_view_t s;
 static uint32_t tuned_ms;
@@ -57,6 +62,12 @@ static uint32_t on_ms, step_ms0, step_q4;
 static bool watching, low_seen_any;
 static int16_t sup_lvl;
 static uint32_t sup_hz;		/* the first weaker run a stronger one ended in the run followed now (and its level) */
+#endif
+#if CONFIG_SEARCH_SOFTP25
+/* The soft probe (p25search.h): wanted (the screen), on (latched at the start, with the fast algorithm), a probe waiting
+ * for its verdict, a probe the soft probe found P25 (never skipped then), the probed carrier's level */
+static bool soft_want, soft_on, soft_wait, soft_p25;
+static int16_t probe_lvl;
 #endif
 
 static void begin_write(void) { seq++; __asm__ volatile("" ::: "memory"); }
@@ -231,6 +242,10 @@ uint32_t p25s_start(uint32_t lo_hz, uint32_t hi_hz, uint32_t step_hz, uint32_t n
 	watching = false;
 	sup_hz = 0;
 #endif
+#if CONFIG_SEARCH_SOFTP25
+	soft_on = soft_want && sh_fast();
+	soft_wait = soft_p25 = false;
+#endif
 	floor_q4 = -125 * 16;
 	memset(skip, 0, sizeof skip);
 	revisiting = false;
@@ -286,6 +301,11 @@ static void probe_here(int16_t lvl, uint32_t now_ms)
 	prev_hz = 0;
 	level_known = false;
 	on_ms = now_ms;
+#if CONFIG_SEARCH_SOFTP25
+	soft_wait = soft_on;	/* the soft probe reads it first */
+	soft_p25 = false;
+	probe_lvl = lvl;
+#endif
 }
 
 /* A step's reading is complete (strong against the floor): follow a run, probe its middle, or go on
@@ -590,6 +610,10 @@ uint32_t p25s_probe_done(bool was_p25, uint32_t now_ms)
 {
 	if (s.phase != P25S_PROBE)
 		return 0;
+#if CONFIG_SEARCH_SOFTP25
+	was_p25 = was_p25 || soft_p25;	/* its NID was read: P25 even when the native receiver then heard nothing */
+	soft_wait = soft_p25 = false;
+#endif
 #if CONFIG_SEARCH_HYBRID
 	sh_end(was_p25 ? SH_END_FOUND : p25s_carrier_gone(now_ms) ? SH_END_GONE : SH_END_NOSYNC, s.at_hz, now_ms);
 	watching = false;
@@ -626,6 +650,28 @@ uint32_t p25s_probe_done(bool was_p25, uint32_t now_ms)
 	epoch++;
 	return s.at_hz;
 }
+
+#if CONFIG_SEARCH_SOFTP25
+void p25s_set_soft(bool on) { soft_want = on; }
+bool p25s_soft_wanted(void) { return soft_want; }
+bool p25s_soft_pending(void) { return soft_wait && s.phase == P25S_PROBE; }
+int16_t p25s_probe_margin(void) { return (int16_t)(probe_lvl - floor_q4 / 16); }
+
+uint32_t p25s_soft_verdict(uint8_t verdict, uint16_t nac, uint32_t now_ms)
+{
+	if (!p25s_soft_pending())
+		return 0;
+	soft_wait = false;
+	if (verdict == P25S_SOFT_P25) {
+		soft_p25 = true;
+		p25s_probe_found(nac, 0, 0, now_ms);	/* the entry with its NAC now; the native receiver adds the call */
+		return 0;
+	}
+	if (verdict == P25S_SOFT_NONE)
+		return p25s_probe_done(false, now_ms);	/* as a probe that heard nothing (gone: not skipped) */
+	return 0;					/* unsure: the native receiver probes as before */
+}
+#endif
 
 void p25s_retuned(uint32_t now_ms)
 {
@@ -672,6 +718,9 @@ void p25s_stop(void)
 	s.phase = P25S_OFF;
 	s.playing = false;
 	end_write();
+#if CONFIG_SEARCH_SOFTP25
+	soft_wait = soft_p25 = false;
+#endif
 }
 
 bool p25s_on(void)

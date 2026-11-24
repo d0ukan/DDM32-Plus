@@ -299,8 +299,21 @@ static bool p25s_key(const input_event_t *ev)
 	/* DDM32 Plus faster searches (radio/searchhy.h): held 0 switches between the fast algorithm and beta.8's (classic),
 	 * so the owner can compare them on the same signal; a running search starts again with it */
 	if (ev->gesture == GESTURE_LONG && ev->action == ACT_DIGIT_0) {
+#if CONFIG_SEARCH_SOFTP25
+		/* DDM32 Plus P25 soft probe (radio/p25search.h): here held 0 goes fast -> fast + soft probe -> classic -> fast;
+		 * the soft probe is off until chosen (the DMR and all digital screens keep fast <-> classic) */
+		if (sh_fast_wanted() && !p25s_soft_wanted()) {
+			p25s_set_soft(true);
+		} else {
+			p25s_set_soft(false);
+			sh_set_fast(!sh_fast_wanted());
+		}
+		ui_toast(!sh_fast_wanted() ? TR("Search: classic (beta.8)") :
+			 p25s_soft_wanted() ? TR("Search: fast + soft probe") : TR("Search: fast"));
+#else
 		sh_set_fast(!sh_fast_wanted());
 		ui_toast(sh_fast_wanted() ? TR("Search: fast") : TR("Search: classic (beta.8)"));
+#endif
 		if (on)
 			restart();
 		ui_dirty();

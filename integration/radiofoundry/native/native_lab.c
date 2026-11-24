@@ -538,6 +538,9 @@ static void channel_service(radio_sm_t *sm)
     if(p25s_on()) {
         /* While searching, only the search's probe may take the receiver */
         if(p25s_phase()==P25S_PROBE && !channel_selected && !channel_handoff && !voice_owner && !test.owned &&
+#if CONFIG_SEARCH_SOFTP25
+           !p25s_soft_pending() &&  /* DDM32 Plus: the soft probe reads the hit first (radio/radio_p25soft.h) */
+#endif
            !p25_lab_busy() && !sm->power_off_req && !sm->view.power_off)
             search_take(sm);
         return;
