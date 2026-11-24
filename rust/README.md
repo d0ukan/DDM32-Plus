@@ -46,38 +46,58 @@ language screen. Menu bar: ui/menubar.slint.
 At the bar's right end the **cable control** ("Kablo: COM14 (otomatik) [Değiştir]" / "Cable: COM14 (auto) [Change]")
 shows the port a radio step will use and opens the cable picker: **Auto (CH340)** (the default: the lowest-numbered
 CH340 / CH341 cable, VID 1A86 PID 7523 / 5523, as before), each CH340 cable found, and under **Advanced** every other
-serial port the OS lists (com0com / tty0tty virtual pairs marked "not a radio", last) with the warning "not a CH340
-cable, only if you know your cable". The choice is kept in `settings.json` (`port`, `port_auto`); when the saved port is
-gone the window falls back to Auto and says so (the saved choice stays and is used again when the port comes back).
-Ports come only from the OS's lists (`radio::portpick`, `radio::cable`: SetupAPI on Windows, `serialport`'s list in a
-`radio` build); the picker never opens a port to probe it. The list is read again on Rescan, when the picker opens and
-every 3 s (Slint 1.16 has no window-focus or device-change event, so a short poll covers both). The port in use is
-shown on Health, Live, Search log, Data packs, Backups (restore) and the update wizard's backup and install steps; the
-control is locked while a radio job, the live view or the search log holds the port. Tests: `tests/ports.rs`.
+serial port the OS lists (virtual pairs, com0com by its device or name and tty0tty by name, marked "virtual port: not a
+radio", last) with the warning "not a CH340 cable, only if you know your cable". The choice is kept in `settings.json`
+(`port`, `port_auto`). When a chosen port is gone the window uses Auto and says so, in the header ("Cable: COM15 not
+found; using COM14 (auto)") and as a line on Home, until dismissed; the saved choice stays and is used again when the
+port comes back. Ports come only from the OS's lists (`radio::portpick`, `radio::cable`: SetupAPI on Windows,
+`serialport`'s list in a `radio` build); the picker never opens a port to probe it. The list is read on a worker thread
+(a driver install can block the device list for seconds) when the picker opens, on Rescan and every 3 s (Slint 1.16
+has no window-focus or device-change event, so a short poll covers both); a radio step's own click reads it once more
+on the window's thread. The port in use is shown on Health, Live, Search log, Data packs, Backups (restore) and the
+update wizard's backup and install steps. The choice is locked while a radio job, the live view or the search log
+holds the port and from the wizard's backup choice to its install (its backup and install go to the same port). A
+files-only build (no `radio` feature) hides the control. Tests: `tests/ports.rs`.
+
+Dialogs (the update question, the cable picker, the no-backup confirmation) are modal for the keyboard too: the
+controls under the shade take no focus or click and read as disabled (`widgets.slint` `Modal`, `tests/modal.rs`).
 
 ## Versions and the update question
 
-The window's title and Home's bottom bar say "Program 3.0.0 · Radio firmware 1.0.1" ("Telsiz firmware" in Turkish);
-About lists both numbers separately. The radio's version is what the program knows from the newest verified backup
-(its program image's signed application); before the first backup it says "not read yet", and "unknown" for an image
-it does not recognise, never a guess. Home's firmware line compares that with the newest version the channel offers:
-"up to date (1.0.1)", "a new radio firmware is ready: 1.0.2 (the radio runs 1.0.1)", or only the newest when the
-radio's version is not known. Known limit: right after an install the newest backup still holds the old image, so Home
-shows the old version until the next backup.
+The window's title and Home's bottom bar say "Program 3.0.0 · Radio firmware 1.0.1 (from your last install)"
+("Telsiz firmware" in Turkish); About lists both numbers separately. What the radio runs is what the program knows:
+
+- After every **verified** radio write the program records what the radio now runs in `settings.json`: the C#
+  program's keys (`installed_sha256`: the installed application's SHA-256, null after a restore; `installed_firmware`:
+  "DDM32 Plus 1.0.1", "stock" or "") and its own `installed_record` (kind, time, version, the backup it came with, the
+  chips' JEDEC IDs of that backup). Paths: install with a new backup, with the last backup (quick update), without a
+  backup, restore of an earlier backup, restore of the factory firmware. A run that stopped after its writes started
+  records "unknown: the last install did not finish"; a run that wrote nothing leaves the record.
+- The record is used unless a verified backup is newer than it (a fresher reading: "from your last backup; may be
+  older"). A C# record keeps no time: it is used unless the newest backup holds a newer DDM32 Plus. The install's
+  SHA-256 is mapped to a listed release through the signed list. Before any backup or install: "not read yet".
+- The radio identity is only as strong as the radio tells: every DM-32UV has the same chips, so the JEDEC IDs name the
+  model, not the unit. The time order decides; the identity is kept for the record.
+
+Home's firmware line compares that with the newest version the channel offers: "up to date (1.0.1)", "a new radio
+firmware is ready: 1.0.2 (the radio runs 1.0.1)", hedged when it comes from a backup ("your last backup shows 1.0.1;
+the radio may run a newer one"), or only the newest when the radio's version is not known.
 
 After the start-up check (Settings > "check at start") one dialog asks when something is newer: "Program 3.0.0 →
-3.1.0" and / or "Radio firmware 1.0.1 → 1.0.2" (only when the radio runs a listed DDM32 Plus older than the newest),
-each with **Update now**, and **Later** / **Skip this version** for both. Update now for the program runs the existing
+3.1.0" and / or "Radio firmware 1.0.1 → 1.0.2". The firmware item appears only from the install record or a backup
+newer than it, never from a backup alone (it may be older than an install it does not know of). Each item has
+**Update now** and **Skip this version** (stored per item: `skip_program_version`, `skip_firmware_version`; the other
+item stays; the versions list and Settings still allow a skipped version by hand); **Later** (the default button) asks
+again at the next start, not again in this session for the same versions. Update now for the program runs the existing
 self-update (Windows: download, size and SHA-256 from the signed manifest, stage, helper, restart; Linux / macOS: the
 release page opens); for the firmware it opens the update wizard at its first step with that version selected and
-never starts a radio step: the backup and every step still start from the user's own click. Later asks again at the
-next start (not again in this session for the same versions); Skip stores `skip_program_version` /
-`skip_firmware_version` in `settings.json` (the versions list and Settings still allow that version by hand). The
-question waits while a radio job, the live view or the search log holds the port, and comes when the port is free.
-While the window stays open the list is checked again every 24 h. A failed check is no longer swallowed: it is
-appended to `logs/update-check.log` and shown as a small dismissable line on Home. The program update follows the
-firmware list's rule: on the default channel, while no stable program build has been published, the betas are offered.
-Tests: `tests/updates.rs`.
+never starts a radio step. The question waits while anything is under way (a radio job, a download, the live view or
+the search log; the wizard past its first step; a ready restore; another dialog) and comes on the 3 s tick once that is
+over; its buttons check again and only close it if something started meanwhile. The program update refuses to start,
+and again to restart after its download, while anything of that is under way. While the window stays open the list is
+checked again every 24 h (not while anything is under way). A failed check is appended to `logs/update-check.log` and
+shown as a small dismissable line on Home. The program update follows the firmware list's rule: on the default
+channel, while no stable program build has been published, the betas are offered. Tests: `tests/updates.rs`.
 
 ## Radio access
 

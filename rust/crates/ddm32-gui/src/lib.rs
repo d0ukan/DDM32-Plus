@@ -13,6 +13,7 @@ slint::include_modules!();
 
 use ddm32_core::datapacks::files::{self as packs, BuiltPack};
 use ddm32_core::pyjson::{self, Py};
+use ddm32_core::radio::cable::CableStatus;
 use ddm32_core::radio::codec::Codec;
 use ddm32_core::radio::flow::{FileSteps, Installable, RestoreFlow, StepResult, Wizard};
 use ddm32_core::radio::port::{RadioAccess, RawSerial, SystemClock};
@@ -29,7 +30,7 @@ use ddm32_core::storage::{today, AppPaths, Os, Settings, Theme as SavedTheme};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-pub use updates::{newer_program, Installed, UpdateOffer};
+pub use updates::{newer_program, Installed, Known, UpdateOffer};
 
 /// The controller's state (UI thread only).
 pub struct State {
@@ -70,8 +71,18 @@ pub struct State {
     pub port_pref: PortPref,
     pub port_opts: PortOptions,
     pub port_now: ResolvedPort,
-    /// What the radio runs as the program knows it (the newest verified backup)
-    pub installed: Installed,
+    /// What the radio runs as the program knows it (the last install record or a newer verified backup)
+    pub known: Known,
+    /// The last cable check (Home's cable line)
+    pub cable: Option<CableStatus>,
+    /// A port listing runs on its worker thread
+    pub scan_running: bool,
+    /// The "COM15 not found" line was dismissed for this port
+    pub port_missing_ack: Option<String>,
+    /// settings.json `auto_check`, read once (the 3 s tick must not read the file)
+    pub auto_check: bool,
+    /// The backup a running restore writes back (recorded when it is verified)
+    pub restore_backup: Option<PathBuf>,
     /// The last failed update check (shown on Home until dismissed or a check succeeds)
     pub check_error: Option<String>,
     /// The start-up question: shown now, waiting for a radio job to end, answered "Later" in this session
@@ -186,7 +197,12 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
             port_pref: PortPref::default(),
             port_opts: PortOptions::default(),
             port_now: ResolvedPort::default(),
-            installed: Installed::NotRead,
+            known: Known { installed: Installed::NotRead, source: updates::Source::None, may_prompt: false },
+            cable: None,
+            scan_running: false,
+            port_missing_ack: None,
+            auto_check: auto,
+            restore_backup: None,
             check_error: None,
             prompt: None,
             prompt_pending: false,
@@ -227,78 +243,116 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
     }
 }
 
-/// Every 3 s: the ports the OS lists (a cable plugged in or out, the window back in front; listing never opens a
-/// port), the update question that waited for a radio job, and the 24 h re-check while the window stays open.
+/// Every 3 s (also driven by tests): the ports the OS lists (a cable plugged in or out, the window back in front;
+/// listed on a worker thread, never opened), the update question that waited, and the 24 h re-check while the window
+/// stays open (not while anything is under way).
+pub fn tick(ui: &AppWindow) {
+    request_scan(ui);
+    if with(|s| s.prompt_pending) {
+        consider_prompt(ui);
+    }
+    let due = with(|s| s.auto_check && s.last_check.is_some_and(|t| t.elapsed().as_secs() >= updates::RECHECK_SECONDS));
+    if due && !busy_state(ui).any() {
+        load_catalog(ui.as_weak(), true);
+    }
+}
+
 fn start_tick(ui: &AppWindow) {
     let timer = slint::Timer::default();
     let w = ui.as_weak();
     timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(3), move || {
-        let Some(ui) = w.upgrade() else { return };
-        scan_ports(&ui);
-        if with(|s| s.prompt_pending) {
-            consider_prompt(&ui);
-        }
-        let due = with(|s| {
-            s.settings.auto_check() && s.last_check.is_some_and(|t| t.elapsed().as_secs() >= updates::RECHECK_SECONDS)
-        });
-        if due && !port_held(&ui) {
-            load_catalog(ui.as_weak(), true);
+        if let Some(ui) = w.upgrade() {
+            tick(&ui);
         }
     });
     with(|s| s.tick = Some(timer));
 }
 
-/// A radio job, the live view or the search log holds the port, or another dialog is open.
-fn port_held(ui: &AppWindow) -> bool {
+/// What is under way in the window: the question and the program update's restart wait for all of it.
+pub fn busy_state(ui: &AppWindow) -> updates::Busy {
     let app = ui.global::<App>();
-    app.get_menu_radio_locked() || app.get_confirm_open() || ui.global::<Radio>().get_picker_open()
+    updates::Busy {
+        port_held: app.get_menu_radio_locked(),
+        wizard_active: app.get_wizard_active(),
+        restore_ready: app.get_restore_ready(),
+        dialog_open: app.get_confirm_open() || app.get_prompt_open() || ui.global::<Radio>().get_picker_open(),
+    }
 }
 
-/// The OS's serial ports and the cable check, read without opening any port.
-fn list_ports() -> (ddm32_core::radio::cable::CableStatus, PortOptions) {
+/// The OS's serial ports and the cable check, read without opening any port (on the calling thread).
+fn list_ports() -> (CableStatus, Vec<portpick::SerialPortEntry>) {
     let status = ddm32_core::radio::cable::check();
-    let opts = portpick::options(&portpick::list_serial_ports_with(&status), Os::current());
-    (status, opts)
+    let entries = portpick::list_serial_ports_with(&status);
+    (status, entries)
 }
 
-/// Reads the OS's port list (never opening a port) and shows what changed: the header, the port line of the radio
-/// pages, the picker's lists, Home's cable line.
-pub(crate) fn scan_ports(ui: &AppWindow) {
-    let (status, opts) = list_ports();
-    let changed = with(|s| {
-        let now = portpick::resolve(&s.port_pref, &opts, None);
-        let changed = s.port_opts != opts || s.port_now != now;
-        s.port_opts = opts.clone();
-        s.port_now = now;
-        changed
+/// Lists the ports on a worker thread (a driver being installed can block the device list for seconds) and applies
+/// the result in the window's thread. One listing at a time.
+pub(crate) fn request_scan(ui: &AppWindow) {
+    if with(|s| std::mem::replace(&mut s.scan_running, true)) {
+        return;
+    }
+    let w = ui.as_weak();
+    std::thread::spawn(move || {
+        let (status, entries) = list_ports();
+        // without an event loop (tests) nothing is applied
+        let _ = slint::invoke_from_event_loop(move || {
+            with(|s| s.scan_running = false);
+            if let Some(ui) = w.upgrade() {
+                apply_port_scan(&ui, &status, &entries);
+            }
+        });
     });
+}
+
+/// A port listing's result: the port in use, Home's cable line and what changed in the picker.
+pub fn apply_port_scan(ui: &AppWindow, status: &CableStatus, entries: &[portpick::SerialPortEntry]) {
+    let opts = portpick::options(entries, Os::current());
+    with(|s| {
+        s.port_now = portpick::resolve(&s.port_pref, &opts, None);
+        if s.port_now.missing.is_none() {
+            // the port is back: a later loss is said again
+            s.port_missing_ack = None;
+        }
+        s.port_opts = opts.clone();
+        s.cable = Some(status.clone());
+    });
+    show_cable(ui);
+    show_ports(ui);
+}
+
+/// Home's cable line from the last listing.
+fn show_cable(ui: &AppWindow) {
     let app = ui.global::<App>();
     if !RadioAccess::ENABLED {
         app.set_radio_text(tr("radio_disabled").into());
         app.set_radio_kind("warning".into());
-    } else {
-        let (text, kind) = with(|s| cable_text(&s.lang, &status, &opts.cables));
-        app.set_radio_text(text.into());
-        app.set_radio_kind(kind.into());
+        return;
     }
-    if changed || ui.global::<Radio>().get_port_head().is_empty() {
-        show_ports(ui);
-    }
+    let Some((text, kind)) = with(|s| s.cable.as_ref().map(|st| cable_text(&s.lang, st, &s.port_opts.cables))) else {
+        return;
+    };
+    app.set_radio_text(text.into());
+    app.set_radio_kind(kind.into());
 }
 
 /// The picker's texts and lists from the state (in the window's language).
 fn show_ports(ui: &AppWindow) {
-    let (lang, pref, opts, now) =
-        with(|s| (s.lang.clone(), s.port_pref.clone(), s.port_opts.clone(), s.port_now.clone()));
-    let v = port_view(&lang, &opts, &now);
+    let (lang, pref, opts, now, ack) = with(|s| {
+        (s.lang.clone(), s.port_pref.clone(), s.port_opts.clone(), s.port_now.clone(), s.port_missing_ack.clone())
+    });
+    let acknowledged = now.missing.is_some() && ack == now.missing;
+    let v = port_view(&lang, &opts, &now, acknowledged);
     let r = ui.global::<Radio>();
+    r.set_access(RadioAccess::ENABLED);
     r.set_port_head(v.head.into());
     r.set_port_line(v.line.into());
-    r.set_port_note(v.note.into());
+    r.set_port_note(v.note.clone().into());
     r.set_port_auto(pref.auto || now.missing.is_some());
     r.set_port_selected(now.port.clone().unwrap_or_default().into());
     r.set_port_auto_detail(v.auto_detail.into());
     set_port_rows(&r, v.cables, v.others);
+    ui.global::<App>().set_port_missing(if acknowledged { String::new() } else { v.note }.into());
 }
 
 fn set_port_rows(r: &Radio<'_>, cables: Vec<(String, String)>, others: Vec<(String, String)>) {
@@ -314,11 +368,12 @@ fn set_port_rows(r: &Radio<'_>, cables: Vec<(String, String)>, others: Vec<(Stri
 /// What the cable picker shows (tests/ports.rs).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PortView {
-    /// The header: "Cable: COM14 (auto)"
+    /// The header: "Cable: COM14 (auto)"; while a chosen port is gone and not dismissed: "Cable: COM15 not found;
+    /// using COM14 (auto)"
     pub head: String,
     /// The radio pages: "Port used: COM14 (auto)", with the fallback said
     pub line: String,
-    /// The saved port is gone: "The saved port COM5 is not there; using Auto."
+    /// The chosen port is gone: "The saved port COM15 is not there; using Auto." (Home, the picker)
     pub note: String,
     /// Under "Auto (CH340)": the port Auto picks now
     pub auto_detail: String,
@@ -327,7 +382,8 @@ pub struct PortView {
     pub others: Vec<(String, String)>,
 }
 
-pub fn port_view(lang: &str, opts: &PortOptions, now: &ResolvedPort) -> PortView {
+/// The picker's texts. `acknowledged`: the user dismissed the "not found" line for this port.
+pub fn port_view(lang: &str, opts: &PortOptions, now: &ResolvedPort, acknowledged: bool) -> PortView {
     let mut name = now.port.clone().unwrap_or_else(|| i18n::t(lang, "cable_none"));
     if now.not_ch340 {
         name = i18n::tf(lang, "port_not_ch340", &name);
@@ -340,9 +396,14 @@ pub fn port_view(lang: &str, opts: &PortOptions, now: &ResolvedPort) -> PortView
     if !note.is_empty() {
         line = format!("{line}. {note}");
     }
+    let head_name = match (&now.missing, acknowledged) {
+        (Some(m), false) if now.port.is_none() => i18n::tf(lang, "port_missing_none", m),
+        (Some(m), false) => i18n::t(lang, "port_missing_head").replacen("{}", m, 1).replacen("{}", &name, 1),
+        _ => name,
+    };
     let auto_now = portpick::resolve(&PortPref::default(), opts, None).port;
     PortView {
-        head: i18n::tf(lang, "cable_head", &name),
+        head: i18n::tf(lang, "cable_head", &head_name),
         line,
         note,
         auto_detail: match auto_now {
@@ -358,19 +419,23 @@ pub fn port_view(lang: &str, opts: &PortOptions, now: &ResolvedPort) -> PortView
     }
 }
 
-/// The picker's choice: "" is Auto. Saved at once (settings.json `port`, `port_auto`); never while the port is held.
-fn choose_port(ui: &AppWindow, name: &str) {
-    if ui.global::<App>().get_menu_radio_locked() {
-        return;
+/// The picker's choice: "" is Auto. Saved at once (settings.json `port`, `port_auto`). Refused while the port is
+/// held or the update wizard is between its radio steps (its backup and install go to the same port).
+pub fn choose_port(ui: &AppWindow, name: &str) -> bool {
+    if ui.global::<App>().get_port_locked() {
+        return false;
     }
     let pref = if name.is_empty() { PortPref::default() } else { PortPref::fixed(name) };
     with(|s| {
         s.port_pref = pref.clone();
+        s.port_missing_ack = None;
+        s.port_now = portpick::resolve(&pref, &s.port_opts, None);
         s.settings.set_port_pref(&pref)
     })
     .ok();
-    scan_ports(ui);
     show_ports(ui);
+    request_scan(ui);
+    true
 }
 
 fn wire(ui: &AppWindow) {
@@ -404,7 +469,11 @@ fn wire(ui: &AppWindow) {
         refresh(&ui);
     });
     app.on_set_auto_check(move |v| {
-        with(|s| s.settings.set_auto_check(v)).ok();
+        with(|s| {
+            s.auto_check = v;
+            s.settings.set_auto_check(v)
+        })
+        .ok();
     });
     let w = ui.as_weak();
     app.on_wizard_next(move || wizard_next(&w.unwrap()));
@@ -475,61 +544,115 @@ fn wire(ui: &AppWindow) {
         w.unwrap().global::<App>().set_check_error("".into());
     });
     let w = ui.as_weak();
-    app.on_prompt_later(move || {
+    app.on_dismiss_port_missing(move || {
         let ui = w.unwrap();
-        with(|s| s.prompt_later = s.prompt.take());
-        ui.global::<App>().set_prompt_open(false);
+        with(|s| s.port_missing_ack = s.port_now.missing.clone());
+        show_ports(&ui);
     });
     let w = ui.as_weak();
-    app.on_prompt_skip(move || {
-        let ui = w.unwrap();
-        with(|s| {
-            if let Some(offer) = s.prompt.take() {
-                let (p, f) = updates::skip_versions(&offer);
-                if let Some(p) = p {
-                    let _ = s.settings.set_skip_program_version(&p);
-                }
-                if let Some(f) = f {
-                    let _ = s.settings.set_skip_firmware_version(&f);
-                }
-            }
-        });
-        ui.global::<App>().set_prompt_open(false);
-    });
+    app.on_prompt_later(move || prompt_later(&w.unwrap()));
     let w = ui.as_weak();
-    app.on_prompt_update_program(move || {
-        let ui = w.unwrap();
-        with(|s| s.prompt_later = s.prompt.take());
-        ui.global::<App>().set_prompt_open(false);
-        // the program update card shows the download, the signature check and the restart (Windows); elsewhere the
-        // release page opens
-        navigate(&ui, 4);
-        app_update(&ui);
-    });
+    app.on_prompt_skip_program(move || prompt_skip(&w.unwrap(), true));
     let w = ui.as_weak();
-    app.on_prompt_update_firmware(move || {
-        let ui = w.unwrap();
-        let version = with(|s| {
-            let v = s.prompt.as_ref().and_then(|o| o.firmware.as_ref().map(|f| f.1.clone()));
-            s.prompt_later = s.prompt.take();
-            v
-        });
-        ui.global::<App>().set_prompt_open(false);
-        open_wizard_at(&ui, version.as_deref());
-    });
+    app.on_prompt_skip_firmware(move || prompt_skip(&w.unwrap(), false));
+    let w = ui.as_weak();
+    app.on_prompt_update_program(move || prompt_update_program(&w.unwrap()));
+    let w = ui.as_weak();
+    app.on_prompt_update_firmware(move || prompt_update_firmware(&w.unwrap()));
     let r = ui.global::<Radio>();
     let w = ui.as_weak();
-    r.on_port_choose(move |name| choose_port(&w.unwrap(), &name));
+    r.on_port_choose(move |name| {
+        choose_port(&w.unwrap(), &name);
+    });
     let w = ui.as_weak();
-    r.on_port_rescan(move || {
-        let ui = w.unwrap();
-        scan_ports(&ui);
-        show_ports(&ui);
+    r.on_port_rescan(move || request_scan(&w.unwrap()));
+}
+
+/// Closes the question; what it asked is not asked again in this session.
+fn close_prompt(ui: &AppWindow) -> Option<UpdateOffer> {
+    ui.global::<App>().set_prompt_open(false);
+    with(|s| {
+        let offer = s.prompt.take();
+        s.prompt_later.clone_from(&offer);
+        offer
+    })
+}
+
+/// Anything under way besides the question itself (a radio job, a download, the wizard, a ready restore, another
+/// dialog): the question's buttons do nothing then but close it (it is asked again later).
+fn blocked_besides_prompt(ui: &AppWindow) -> bool {
+    let mut b = busy_state(ui);
+    b.dialog_open = ui.global::<App>().get_confirm_open() || ui.global::<Radio>().get_picker_open();
+    b.any()
+}
+
+/// Something started meanwhile: the question closes without an answer and is asked again once it is over.
+fn postpone_prompt(ui: &AppWindow) {
+    ui.global::<App>().set_prompt_open(false);
+    with(|s| {
+        s.prompt = None;
+        s.prompt_pending = true;
     });
 }
 
-/// The update wizard at its first step with this version selected. It never starts a radio step: the backup and
-/// every step after it start only from the user's own click.
+pub fn prompt_later(ui: &AppWindow) {
+    close_prompt(ui);
+}
+
+/// "Skip this version" for the program (`program`) or the firmware: stored in settings.json; the question stays
+/// open for the other item, if any.
+pub fn prompt_skip(ui: &AppWindow, program: bool) {
+    let Some(offer) = with(|s| s.prompt.clone()) else { return };
+    let (version, rest) = updates::skip_item(&offer, program);
+    if let Some(v) = version {
+        with(
+            |s| {
+                if program {
+                    s.settings.set_skip_program_version(&v)
+                } else {
+                    s.settings.set_skip_firmware_version(&v)
+                }
+            },
+        )
+        .ok();
+    }
+    if rest.is_empty() {
+        ui.global::<App>().set_prompt_open(false);
+        with(|s| {
+            s.prompt = None;
+            s.prompt_later = Some(rest);
+        });
+    } else {
+        let lang = with(|s| s.lang.clone());
+        show_prompt(ui, &lang, &rest);
+        with(|s| s.prompt = Some(rest));
+    }
+}
+
+/// "Update now" for the program: the program update card (Settings) and the signed self-update; nothing while
+/// anything else is under way.
+pub fn prompt_update_program(ui: &AppWindow) {
+    if blocked_besides_prompt(ui) {
+        postpone_prompt(ui);
+        return;
+    }
+    close_prompt(ui);
+    navigate(ui, 4);
+    app_update(ui);
+}
+
+/// "Update now" for the radio firmware: the update wizard at its first step with that version selected. It never
+/// starts a radio step: the backup and every step after it start only from the user's own click.
+pub fn prompt_update_firmware(ui: &AppWindow) {
+    if blocked_besides_prompt(ui) {
+        postpone_prompt(ui);
+        return;
+    }
+    let version = close_prompt(ui).and_then(|o| o.firmware.map(|f| f.1));
+    open_wizard_at(ui, version.as_deref());
+}
+
+/// The update wizard at its first step with this version selected (no radio step).
 pub fn open_wizard_at(ui: &AppWindow, version: Option<&str>) {
     navigate(ui, 1);
     if let Some(v) = version {
@@ -539,7 +662,7 @@ pub fn open_wizard_at(ui: &AppWindow, version: Option<&str>) {
     }
 }
 
-/// After a check: the one question when something is newer (or later, when a radio job holds the port).
+/// After a check: the one question when something is newer (or later, when anything is under way).
 pub fn consider_prompt(ui: &AppWindow) {
     let app = ui.global::<App>();
     if app.get_prompt_open() {
@@ -551,13 +674,13 @@ pub fn consider_prompt(ui: &AppWindow) {
             &cat,
             app.get_channel(),
             ddm32_core::app_info::VERSION,
-            &s.installed,
+            &s.known,
             s.settings.skip_program_version().as_deref(),
             s.settings.skip_firmware_version().as_deref(),
         )
     });
     let later = with(|s| s.prompt_later.clone());
-    match updates::prompt_decision(&offer, later.as_ref(), port_held(ui), app.get_page() == 6) {
+    match updates::prompt_decision(&offer, later.as_ref(), busy_state(ui).any(), app.get_page() == 6) {
         updates::PromptDecision::No => with(|s| s.prompt_pending = false),
         updates::PromptDecision::Wait => with(|s| s.prompt_pending = true),
         updates::PromptDecision::Show => {
@@ -688,9 +811,11 @@ fn navigate(ui: &AppWindow, page: i32) {
     if page == 9 {
         radio_pages::load_channels(ui);
     }
+    // a planned restore belongs to the Backups page: leaving it (or opening it afresh) drops the plan, so it never
+    // holds the update question or the program update back from another page
+    app.set_restore_ready(false);
     if page == 2 {
         app.set_selected_backup(-1);
-        app.set_restore_ready(false);
     }
     refresh(ui);
     app.set_page(page);
@@ -722,9 +847,10 @@ pub fn offered(cat: &Catalog, channel: i32) -> Vec<catalog::FirmwareVersion> {
 fn refresh(ui: &AppWindow) {
     let app = ui.global::<App>();
     let channel = app.get_channel();
-    // the cable and the port in use (listing ports never opens one)
-    scan_ports(ui);
+    // the cable and the port in use: the last listing now, a new one on its worker thread (never opening a port)
+    show_cable(ui);
     show_ports(ui);
+    request_scan(ui);
     // versions
     let rows = with(|s| {
         let cat = s.catalog.clone().unwrap_or_default();
@@ -755,17 +881,26 @@ fn refresh(ui: &AppWindow) {
         (s.found.clone(), s.quick.clone())
     });
     app.set_backups_text(trf("backups_found", &found.len().to_string()).into());
-    // what the radio runs, by the newest verified backup (files only), and the newest version against it
-    let folders: Vec<PathBuf> = found.iter().map(|b| b.folder.clone()).collect();
-    let installed = updates::installed_from_backups(&folders, &all, &lang);
-    app.set_installed_text(updates::installed_text(&installed, &lang).into());
+    // what the radio runs: the record of the last verified install / restore, or a verified backup newer than it
+    // (files only), and the newest version against it
+    let newest_backup = found.iter().find_map(|b| {
+        let imgs = ddm32_core::radio::unit_image::saved_images(&b.folder).ok()?;
+        let t = b.modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        Some((t, updates::installed_firmware(imgs.get("progmem-pass1.bin")?, &all, &lang)))
+    });
+    let record = with(|s| updates::read_record(&s.settings));
+    let known = updates::known_firmware(
+        record.as_ref().map(|r| (r, updates::installed_from_record(r, &all, &lang))),
+        newest_backup,
+    );
+    app.set_installed_text(updates::installed_text(&known.installed, &lang).into());
     let program = ddm32_core::app_info::VERSION;
-    app.set_version_line(updates::version_text(&lang, program, &installed).into());
-    app.set_title_text(updates::title_text(&lang, program, &installed).into());
-    app.set_installed_firmware(updates::installed_short(&installed, &lang).into());
-    let status = updates::firmware_status(&installed, &rows);
-    app.set_update_text(updates::firmware_status_text(&lang, &status, &rows, &all).into());
-    with(|s| s.installed = installed);
+    app.set_version_line(updates::version_text(&lang, program, &known).into());
+    app.set_title_text(updates::title_text(&lang, program, &known).into());
+    app.set_installed_firmware(updates::installed_short(&known, &lang).into());
+    let status = updates::firmware_status(&known.installed, &rows);
+    app.set_update_text(updates::firmware_status_text(&lang, &status, known.source, &rows, &all).into());
+    with(|s| s.known = known);
     app.set_check_error(with(|s| s.check_error.clone()).unwrap_or_default().into());
     // the program's own update
     let channel = app.get_channel();
@@ -804,6 +939,11 @@ fn refresh(ui: &AppWindow) {
 /// package (AppImage, .app) is replaced from the download page.
 fn app_update(ui: &AppWindow) {
     let app = ui.global::<App>();
+    // never over a radio job, the live view, the search log, the wizard between its steps or a ready restore
+    if blocked_besides_prompt(ui) {
+        app.set_app_update_text(tr("pu_blocked").into());
+        return;
+    }
     let Some(rel) =
         with(|s| s.catalog.as_ref().and_then(|c| newer_program(c, ddm32_core::app_info::VERSION, app.get_channel())))
     else {
@@ -840,6 +980,11 @@ fn app_update(ui: &AppWindow) {
             let Some(ui) = w.upgrade() else { return };
             let app = ui.global::<App>();
             app.set_busy(false);
+            // the program closes for the swap: not if anything started meanwhile (the download is redone later)
+            if blocked_besides_prompt(&ui) {
+                app.set_app_update_text(tr("pu_blocked").into());
+                return;
+            }
             match r.and_then(|(helper, args)| {
                 std::process::Command::new(&helper).args(&args).spawn().map_err(|e| e.to_string()).map(|_| ())
             }) {
@@ -913,7 +1058,8 @@ fn set_step(ui: &AppWindow, step: i32) {
 /// The port a radio step uses: the picker's choice while the OS lists it, else the CH340 cable (Auto). Read fresh
 /// from the OS's list (never by opening a port).
 pub(crate) fn port() -> Option<String> {
-    let (_, opts) = list_ports();
+    let (_, entries) = list_ports();
+    let opts = portpick::options(&entries, Os::current());
     with(|s| {
         s.port_now = portpick::resolve(&s.port_pref, &opts, None);
         s.port_opts = opts;
@@ -1202,6 +1348,11 @@ fn start_install(ui: &AppWindow) {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
     };
+    // what goes on the radio, recorded after a verified install (settings.json, the C# program's keys too)
+    let (pkg_sha, pkg_version) = with(|st| {
+        let p = Package::new(&st.package.clone().unwrap_or_default(), None);
+        (p.sha256, p.version)
+    });
     let (tool, argv, out) = match with(|st| -> Result<_, String> {
         st.wizard.set_port(Some(&port)).map_err(|e| e.0.to_string())?;
         // the install log goes to backups too (never anywhere the user picks)
@@ -1222,7 +1373,17 @@ fn start_install(ui: &AppWindow) {
         let r = StepResult::install(&out, err.as_ref());
         let none = with(|st| {
             st.wizard.install_finished(&r);
-            st.wizard.path == ddm32_core::radio::flow::BackupPath::None
+            let none = st.wizard.path == ddm32_core::radio::flow::BackupPath::None;
+            let backup = if none { None } else { st.wizard.backup_dir.clone() };
+            let _ = updates::record_install_result(
+                &st.settings,
+                &r,
+                &pkg_sha,
+                &pkg_version,
+                backup.as_deref(),
+                updates::now_unix(),
+            );
+            none
         });
         if r.passed {
             set_step(ui, 5);
@@ -1283,6 +1444,7 @@ fn start_restore(ui: &AppWindow) {
         st.restore.port = Some(port.clone());
         let (tool, extra, _) = st.restore.tool().ok_or("no tool")?;
         let backup = st.restore.backup_dir.clone().unwrap_or_default();
+        st.restore_backup = Some(backup.clone());
         let out = unique_folder(&st.paths.backups(), &format!("restore-{}", today()));
         st.restore.start_restore().map_err(|e| e.0.to_string())?;
         let mut argv = vec![
@@ -1310,7 +1472,18 @@ fn start_restore(ui: &AppWindow) {
     let tool: &'static str = if tool == "install_firstboot" { "install_firstboot" } else { "install_plus" };
     run_tool(ui, tool, argv, true, move |ui, err| {
         let r = StepResult::install(&out, err.as_ref());
-        with(|st| st.restore.restore_finished(&r));
+        with(|st| {
+            st.restore.restore_finished(&r);
+            if let Some(b) = st.restore_backup.take() {
+                let _ = updates::record_restore_result(
+                    &st.settings,
+                    &r,
+                    &b,
+                    tool == "install_firstboot",
+                    updates::now_unix(),
+                );
+            }
+        });
         if r.passed {
             set_message(ui, &tr("msg_restore_done"), "success");
         } else if r.writes_started {
@@ -1386,14 +1559,19 @@ pub fn demo(ui: &AppWindow) {
     app.set_radio_text(i18n::tf(&lang, "radio_ready", "COM14").into());
     app.set_radio_kind("success".into());
     app.set_radio_access(true);
-    let installed = Installed::Plus { version: "1.0.0".into(), label: i18n::t(&lang, "label_stable") };
+    let known = Known {
+        installed: Installed::Plus { version: "1.0.0".into(), label: i18n::t(&lang, "label_stable") },
+        source: updates::Source::Install,
+        may_prompt: true,
+    };
     let st = updates::FirmwareStatus::Newer { installed: "1.0.0".into(), newest: "1.0.1".into() };
-    app.set_update_text(updates::firmware_status_text(&lang, &st, &[], &[]).into());
+    app.set_update_text(updates::firmware_status_text(&lang, &st, known.source, &[], &[]).into());
     app.set_backups_text(i18n::tf(&lang, "backups_found", "3").into());
-    app.set_installed_text(updates::installed_text(&installed, &lang).into());
-    app.set_version_line(updates::version_text(&lang, ddm32_core::app_info::VERSION, &installed).into());
-    app.set_title_text(updates::title_text(&lang, ddm32_core::app_info::VERSION, &installed).into());
-    app.set_installed_firmware(updates::installed_short(&installed, &lang).into());
+    app.set_installed_text(updates::installed_text(&known.installed, &lang).into());
+    app.set_version_line(updates::version_text(&lang, ddm32_core::app_info::VERSION, &known).into());
+    app.set_title_text(updates::title_text(&lang, ddm32_core::app_info::VERSION, &known).into());
+    app.set_installed_firmware(updates::installed_short(&known, &lang).into());
+    app.set_port_missing("".into());
     app.set_check_error("".into());
     app.set_prompt_open(false);
     demo_ports(ui, &lang);
@@ -1454,8 +1632,9 @@ pub fn demo_ports(ui: &AppWindow, lang: &str) {
     ];
     let opts = portpick::options(&entries, Os::Windows);
     let now = portpick::resolve(&PortPref::default(), &opts, None);
-    let v = port_view(lang, &opts, &now);
+    let v = port_view(lang, &opts, &now, false);
     let r = ui.global::<Radio>();
+    r.set_access(true);
     r.set_port_head(v.head.into());
     r.set_port_line(v.line.into());
     r.set_port_note(v.note.into());
@@ -1465,4 +1644,9 @@ pub fn demo_ports(ui: &AppWindow, lang: &str) {
     set_port_rows(&r, v.cables, v.others);
     r.set_picker_open(false);
     r.set_picker_advanced(false);
+}
+
+/// The versions the wizard offers now (tests: which one "Update now" selected).
+pub fn with_shown<R>(f: impl FnOnce(&[catalog::FirmwareVersion]) -> R) -> R {
+    with(|s| f(&s.shown))
 }

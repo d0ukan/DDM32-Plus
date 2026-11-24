@@ -52,6 +52,15 @@ impl Settings {
         self.write(&s)
     }
 
+    /// Several keys in one atomic write (a value of null is kept as null, as the C# program writes it).
+    pub fn save_all(&self, entries: Vec<(&str, Value)>) -> std::io::Result<()> {
+        let mut s = self.load();
+        for (k, v) in entries {
+            s.insert(k.to_string(), v);
+        }
+        self.write(&s)
+    }
+
     fn write(&self, s: &Map<String, Value>) -> std::io::Result<()> {
         if let Some(dir) = self.file_path.parent() {
             std::fs::create_dir_all(dir)?;

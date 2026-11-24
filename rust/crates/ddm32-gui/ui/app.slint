@@ -3,10 +3,10 @@
 // pages (backups, data packs, settings, about). Every colour from Theme, every text from Tr (tr / en).
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, Progress, PageHeader } from "widgets.slint";
+import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, Progress, PageHeader, Modal } from "widgets.slint";
 import { MenuBar } from "menubar.slint";
 import { Radio, Fact, TableRow, PortRow, HealthPage, LivePage, ChannelsPage, SearchLogPage } from "radio_pages.slint";
-export { Theme, Tr, Radio, Fact, TableRow, PortRow }
+export { Theme, Tr, Radio, Fact, TableRow, PortRow, Modal }
 
 export struct VersionRow { version: string, label: string, notes: string, local: bool }
 export struct BackupRow { name: string, detail: string, origin: string, kind: string }
@@ -35,7 +35,12 @@ export global App {
     callback prompt-update-program();
     callback prompt-update-firmware();
     callback prompt-later();
-    callback prompt-skip();
+    // "Skip this version" for one item (the program, the firmware)
+    callback prompt-skip-program();
+    callback prompt-skip-firmware();
+    // a chosen port is gone: "COM15 not found; using COM14", on Home until dismissed
+    in property <string> port-missing;
+    callback dismiss-port-missing();
     // the wizard: 0 version, 1 backup choice, 2 backup, 3 check, 4 install, 5 done
     in-out property <int> step: 0;
     in property <[VersionRow]> versions;
@@ -96,6 +101,10 @@ export global App {
     callback menu-action(string);
     // the menu bar: the radio entries are off while any radio step, the live panel or the search log holds the port
     out property <bool> menu-radio-locked: root.busy || Radio.busy || Radio.live-running || Radio.slog-running;
+    // the update wizard is between its steps (backup choice .. install): the port is not changed now and no question
+    // pops up over it
+    out property <bool> wizard-active: root.page == 1 && root.step >= 1 && root.step <= 4;
+    out property <bool> port-locked: root.menu-radio-locked || root.wizard-active;
     // the program's own update
     in property <string> app-update-text;
     in property <bool> app-update-available;
@@ -141,6 +150,11 @@ component Home inherits VerticalLayout {
         Notice { text: App.radio-text; kind: App.radio-kind; }
         if App.update-text != "" : Muted { text: App.update-text; font-size: Theme.font; }
         // a failed update check: one small line, dismissable
+        if App.port-missing != "" : HorizontalLayout {
+            spacing: Theme.gap;
+            Notice { text: App.port-missing; kind: "warning"; horizontal-stretch: 1; }
+            Button { text: Tr.t(Tr.lang, "b_dismiss"); horizontal-stretch: 0; clicked => { App.dismiss-port-missing(); } }
+        }
         if App.check-error != "" : HorizontalLayout {
             spacing: Theme.gap;
             Muted { text: App.check-error; vertical-alignment: center; horizontal-stretch: 1; }
@@ -290,7 +304,7 @@ component Wizard inherits Page {
             if App.step == 2 : VerticalLayout {
                 spacing: Theme.gap;
                 alignment: start;
-                Muted { text: Radio.port-line; }
+                if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
                 Notice { text: App.power-prompt; kind: "warning"; big: true; }
                 HorizontalLayout {
                     alignment: start;
@@ -311,7 +325,7 @@ component Wizard inherits Page {
             if App.step == 4 : VerticalLayout {
                 spacing: Theme.gap;
                 alignment: start;
-                Muted { text: Radio.port-line; }
+                if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
                 Notice { text: App.power-prompt; kind: "warning"; big: true; }
                 HorizontalLayout {
                     alignment: start;
@@ -378,7 +392,7 @@ component Wizard inherits Page {
 component Backups inherits Page {
     heading: Tr.t(Tr.lang, "home_backups");
     Muted { text: Tr.t(Tr.lang, "backups_where") + " " + App.backups-folder; }
-    Muted { text: Radio.port-line; }
+    if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
     ScrollView {
         vertical-stretch: 1;
         VerticalLayout {
@@ -415,7 +429,7 @@ component Backups inherits Page {
 component Packs inherits Page {
     heading: Tr.t(Tr.lang, "home_packs");
     Label { text: Tr.t(Tr.lang, "packs_intro"); }
-    Muted { text: Radio.port-line; }
+    if Radio.access && Radio.port-line != "" : Muted { text: Radio.port-line; }
     HorizontalLayout {
         spacing: Theme.gap;
         alignment: start;
@@ -551,13 +565,17 @@ export component AppWindow inherits Window {
     min-height: 560px;
     background: Theme.window;
     default-font-size: Theme.font;
+    // a dialog is open: the controls under it take no keyboard focus and no click (widgets.slint Modal)
+    property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open;
+    changed modal => { Modal.open = self.modal; }
 
     VerticalLayout {
         padding: 0;
         spacing: 0;
         if App.page != 6 : MenuBar {
             radio-locked: App.menu-radio-locked || App.confirm-open;
-            cable-text: Radio.port-head;
+            cable-text: Radio.access ? Radio.port-head : "";
+            cable-locked: App.port-locked;
             action(a) => { App.menu-action(a); }
             cable-clicked => { Radio.picker-open = true; Radio.port-rescan(); }
         }
@@ -594,7 +612,9 @@ export component AppWindow inherits Window {
                     Muted { text: App.prompt-program-detail; }
                     HorizontalLayout {
                         alignment: start;
-                        Button { text: Tr.t(Tr.lang, "b_update_now"); kind: "primary"; default-focus: true; clicked => { App.prompt-update-program(); } }
+                        spacing: Theme.gap;
+                        Button { text: Tr.t(Tr.lang, "b_update_now"); kind: "primary"; in-dialog: true; clicked => { App.prompt-update-program(); } }
+                        Button { text: Tr.t(Tr.lang, "b_skip_version"); in-dialog: true; clicked => { App.prompt-skip-program(); } }
                     }
                 }
                 if App.prompt-firmware != "" : VerticalLayout {
@@ -603,13 +623,14 @@ export component AppWindow inherits Window {
                     Muted { text: App.prompt-firmware-detail; }
                     HorizontalLayout {
                         alignment: start;
-                        Button { text: Tr.t(Tr.lang, "b_update_now"); kind: "primary"; default-focus: App.prompt-program == ""; clicked => { App.prompt-update-firmware(); } }
+                        spacing: Theme.gap;
+                        Button { text: Tr.t(Tr.lang, "b_update_now"); kind: "primary"; in-dialog: true; clicked => { App.prompt-update-firmware(); } }
+                        Button { text: Tr.t(Tr.lang, "b_skip_version"); in-dialog: true; clicked => { App.prompt-skip-firmware(); } }
                     }
                 }
                 HorizontalLayout {
                     spacing: Theme.gap; alignment: end;
-                    Button { text: Tr.t(Tr.lang, "b_skip_version"); clicked => { App.prompt-skip(); } }
-                    Button { text: Tr.t(Tr.lang, "b_later"); clicked => { App.prompt-later(); } }
+                    Button { text: Tr.t(Tr.lang, "b_later"); in-dialog: true; default-focus: true; clicked => { App.prompt-later(); } }
                 }
             }
         }
@@ -636,11 +657,13 @@ export component AppWindow inherits Window {
                         alignment: start;
                         Choice {
                             title: Tr.t(Tr.lang, "port_auto"); detail: Radio.port-auto-detail;
+                            in-dialog: true;
                             selected: Radio.port-auto;
                             clicked => { Radio.port-choose(""); }
                         }
                         for p in Radio.port-cables : Choice {
                             title: p.name; detail: p.detail;
+                            in-dialog: true;
                             selected: !Radio.port-auto && Radio.port-selected == p.name;
                             clicked => { Radio.port-choose(p.name); }
                         }
@@ -648,6 +671,7 @@ export component AppWindow inherits Window {
                             alignment: start;
                             Button {
                                 text: (Radio.picker-advanced ? "− " : "+ ") + Tr.t(Tr.lang, "port_advanced");
+                                in-dialog: true;
                                 clicked => { Radio.picker-advanced = !Radio.picker-advanced; }
                             }
                         }
@@ -656,6 +680,7 @@ export component AppWindow inherits Window {
                             spacing: 8px;
                             for p in Radio.port-others : Choice {
                                 title: p.name; detail: p.detail;
+                                in-dialog: true;
                                 selected: !Radio.port-auto && Radio.port-selected == p.name;
                                 clicked => { Radio.port-choose(p.name); }
                             }
@@ -666,8 +691,8 @@ export component AppWindow inherits Window {
                 if Radio.port-note != "" : Notice { text: Radio.port-note; kind: "warning"; }
                 HorizontalLayout {
                     spacing: Theme.gap; alignment: end;
-                    Button { text: Tr.t(Tr.lang, "b_rescan"); clicked => { Radio.port-rescan(); } }
-                    Button { text: Tr.t(Tr.lang, "b_close"); kind: "primary"; default-focus: true; clicked => { Radio.picker-open = false; } }
+                    Button { text: Tr.t(Tr.lang, "b_rescan"); in-dialog: true; clicked => { Radio.port-rescan(); } }
+                    Button { text: Tr.t(Tr.lang, "b_close"); kind: "primary"; in-dialog: true; default-focus: true; clicked => { Radio.picker-open = false; } }
                 }
             }
         }
@@ -686,8 +711,8 @@ export component AppWindow inherits Window {
                 Label { text: Tr.t(Tr.lang, "confirm_text"); }
                 HorizontalLayout {
                     spacing: Theme.gap; alignment: end;
-                    Button { text: Tr.t(Tr.lang, "b_cancel"); default-focus: true; clicked => { App.confirm-open = false; } }
-                    Button { text: Tr.t(Tr.lang, "b_confirm_none"); kind: "danger"; clicked => { App.confirm-no-backup(); } }
+                    Button { text: Tr.t(Tr.lang, "b_cancel"); in-dialog: true; default-focus: true; clicked => { App.confirm-open = false; } }
+                    Button { text: Tr.t(Tr.lang, "b_confirm_none"); kind: "danger"; in-dialog: true; clicked => { App.confirm-no-backup(); } }
                 }
             }
         }

@@ -126,6 +126,7 @@ fn every_screen_in_both_themes() {
         ("home-update-prompt", 0, 0, 0, "prompt"),
         ("home-cable-picker", 0, 0, 0, "picker"),
         ("home-check-error", 0, 0, 0, "check-error"),
+        ("home-port-missing", 0, 0, 0, "port-missing"),
         ("update-1-version", 1, 0, 0, ""),
         ("update-2-backup-choice", 1, 1, 0, ""),
         ("update-2-no-backup-warning", 1, 1, 2, "understood"),
@@ -195,6 +196,13 @@ fn every_screen_in_both_themes() {
                     "picker" => {
                         ui.global::<ddm32_gui::Radio>().set_picker_open(true);
                         ui.global::<ddm32_gui::Radio>().set_picker_advanced(true);
+                    }
+                    "port-missing" => {
+                        app.set_port_missing(i18n::tf(lang, "port_missing", "COM15").into());
+                        let auto = i18n::tf(lang, "cable_auto", "COM14");
+                        let head =
+                            i18n::t(lang, "port_missing_head").replacen("{}", "COM15", 1).replacen("{}", &auto, 1);
+                        ui.global::<ddm32_gui::Radio>().set_port_head(i18n::tf(lang, "cable_head", &head).into());
                     }
                     "check-error" => app
                         .set_check_error(i18n::tf(lang, "check_failed", "NetError: api.github.com: timed out").into()),

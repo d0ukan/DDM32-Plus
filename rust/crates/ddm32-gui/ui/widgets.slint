@@ -9,6 +9,12 @@ export global Tr {
     pure callback t(string, string) -> string;
 }
 
+// A dialog is open (lib.rs / app.slint keep it in step): the controls under its shade take no keyboard focus and no
+// click, and read as disabled to a screen reader; only the dialog's own controls (`in-dialog`) stay live.
+export global Modal {
+    in-out property <bool> open: false;
+}
+
 export component Label inherits Text {
     color: Theme.text;
     font-size: Theme.font;
@@ -48,8 +54,11 @@ export component Button {
     in property <bool> even: false;
     // takes the keyboard focus when the page opens, so Enter runs it
     in property <bool> default-focus: false;
+    // a control of the open dialog (stays live while Modal.open)
+    in property <bool> in-dialog: false;
+    property <bool> live: root.enabled && (root.in-dialog || !Modal.open);
     callback clicked;
-    init => { if root.default-focus && root.enabled { fs.focus(); } }
+    init => { if root.default-focus && root.live { fs.focus(); } }
     // grows with a label that wraps (large scaling, narrow window), so no line is ever cut
     min-height: max(root.big ? 40px : Theme.control-height, lbl.preferred-height + 10px);
     max-height: max(root.big ? 40px : Theme.control-height, lbl.preferred-height + 10px);
@@ -58,12 +67,13 @@ export component Button {
     min-width: 88px;
     accessible-role: button;
     accessible-label: root.text;
-    accessible-action-default => { if root.enabled { root.clicked(); } }
+    accessible-enabled: root.live;
+    accessible-action-default => { if root.live { root.clicked(); } }
 
     fs := FocusScope {
-        enabled: root.enabled;
+        enabled: root.live;
         key-pressed(event) => {
-            if (event.text == " " || event.text == "\n") && root.enabled { root.clicked(); return accept; }
+            if (event.text == " " || event.text == "\n") && root.live { root.clicked(); return accept; }
             reject
         }
     }
@@ -91,8 +101,8 @@ export component Button {
         }
     }
     ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: root.enabled ? pointer : default;
+        enabled: root.live;
+        mouse-cursor: root.live ? pointer : default;
         clicked => { fs.focus(); root.clicked(); }
     }
 }
@@ -180,12 +190,16 @@ export component Notice inherits Rectangle {
 export component Check {
     in property <string> text;
     in-out property <bool> checked;
+    in property <bool> in-dialog: false;
+    property <bool> live: root.in-dialog || !Modal.open;
     callback toggled;
     min-height: max(Theme.control-height, ct.preferred-height + 8px);
     accessible-role: checkbox;
     accessible-checked: root.checked;
     accessible-label: root.text;
+    accessible-enabled: root.live;
     fs := FocusScope {
+        enabled: root.live;
         key-pressed(event) => {
             if event.text == " " { root.checked = !root.checked; root.toggled(); return accept; }
             reject
@@ -211,7 +225,7 @@ export component Check {
         }
         ct := Text { text: root.text; color: Theme.text; font-size: Theme.font; wrap: word-wrap; vertical-alignment: center; }
     }
-    TouchArea { clicked => { fs.focus(); root.checked = !root.checked; root.toggled(); } }
+    TouchArea { enabled: root.live; clicked => { fs.focus(); root.checked = !root.checked; root.toggled(); } }
 }
 
 // One choice of a list: a row with a round mark, a title and a line under it
@@ -221,15 +235,18 @@ export component Choice {
     in property <bool> selected;
     in property <bool> danger: false;
     in property <bool> enabled: true;
+    in property <bool> in-dialog: false;
+    property <bool> live: root.enabled && (root.in-dialog || !Modal.open);
     callback clicked;
     min-height: max(Theme.control-height + 4px, cl.preferred-height);
     vertical-stretch: 0;
     accessible-role: button;
     accessible-label: root.title;
+    accessible-enabled: root.live;
     fs := FocusScope {
-        enabled: root.enabled;
+        enabled: root.live;
         key-pressed(event) => {
-            if (event.text == " " || event.text == "\n") && root.enabled { root.clicked(); return accept; }
+            if (event.text == " " || event.text == "\n") && root.live { root.clicked(); return accept; }
             reject
         }
     }
@@ -268,7 +285,7 @@ export component Choice {
             }
         }
     }
-    TouchArea { enabled: root.enabled; clicked => { fs.focus(); root.clicked(); } }
+    TouchArea { enabled: root.live; clicked => { fs.focus(); root.clicked(); } }
 }
 
 export component Progress inherits Rectangle {

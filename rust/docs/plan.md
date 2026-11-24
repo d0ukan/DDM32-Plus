@@ -114,6 +114,11 @@ install is locked and the page points to "Yedekler ve geri dönüş".
   `port` / `port_auto`; fallback to Auto; `ddm32-core` `radio::portpick`, `tests/ports.rs`).
 - "Program 3.0.0 · Radio firmware 1.0.1" in the title bar and on Home; About lists both. README "Versions and the
   update question". Host-tested only.
+- Verifier fixes (same day): the install record (`installed_sha256` / `installed_firmware` as the C# program, plus
+  `installed_record`) after every verified install and restore, used unless a newer backup exists; the source said in
+  the version line; the question and the program update wait for the wizard, a ready restore and downloads; per-item
+  Skip, Later as the default button; dialogs modal for the keyboard (`tests/modal.rs`); port listing on a worker
+  thread; the port choice locked through the wizard's radio steps; a gone port said on Home and in the header.
 
 ### Still to do in stage 2
 

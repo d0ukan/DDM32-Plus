@@ -2,7 +2,7 @@
 // The classic menu bar across the top of the window: File, Radio, Tools, Help. It only reaches what the window
 // already has (pages, folders, links); it never starts a radio step. Every colour from Theme, every text from Tr.
 import { Theme } from "theme.slint";
-import { Tr } from "widgets.slint";
+import { Tr, Modal } from "widgets.slint";
 
 export struct MenuEntry { text: string, action: string, enabled: bool, separator: bool }
 
@@ -15,7 +15,8 @@ component MenuHead inherits Rectangle {
     preferred-width: lbl.preferred-width + 24px;
     accessible-role: button;
     accessible-label: root.text;
-    accessible-action-default => { pop.show(); }
+    accessible-enabled: !Modal.open;
+    accessible-action-default => { if !Modal.open { pop.show(); } }
     background: ta.has-hover ? Theme.button-hover : transparent;
     lbl := Text {
         text: root.text;
@@ -25,6 +26,7 @@ component MenuHead inherits Rectangle {
         horizontal-alignment: center;
     }
     ta := TouchArea {
+        enabled: !Modal.open;
         clicked => { pop.show(); }
     }
     pop := PopupWindow {
@@ -127,6 +129,8 @@ export component MenuBar inherits Rectangle {
     in property <bool> radio-locked;
     // the cable picker's header text; Change opens the picker (not while the port is held)
     in property <string> cable-text;
+    // the port is held, or the update wizard is between its radio steps: the port is not changed now
+    in property <bool> cable-locked;
     callback cable-clicked;
     callback action(string);
     background: Theme.surface;
@@ -182,7 +186,7 @@ export component MenuBar inherits Rectangle {
         if root.cable-text != "" : CableHead {
             horizontal-stretch: 1;
             text: root.cable-text;
-            enabled: !root.radio-locked;
+            enabled: !root.cable-locked && !Modal.open;
             clicked => { root.cable-clicked(); }
         }
     }

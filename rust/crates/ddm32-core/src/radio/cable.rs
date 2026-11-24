@@ -38,7 +38,9 @@ pub fn is_ch340(d: &PnpDevice) -> bool {
 
 /// "(COM14)" in the device name.
 pub fn port_of(d: &PnpDevice) -> Option<String> {
-    let re = regex::Regex::new(r"\((COM\d+)\)").unwrap();
+    // compiled once (the window lists devices every few seconds)
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"\((COM\d+)\)").unwrap());
     re.captures(&d.name).map(|c| c[1].to_string())
 }
 
