@@ -13,6 +13,18 @@
  *     quiet stops (nothing heard) by mode and their total time, tune to the next tune (P25 counts YSF; OTHER NXDN and
  *     dPMR); FM_MS / FM_N is an FM channel's quiet dwell
  *   scanst.rate=CPS_X10    quiet channels a second, times ten (all modes: quiet stops / their time)
+ *   scanst.slow=MS,WHERE,CH,MODE,WHY
+ *     the longest stop since the counters started: its time (tune to the next tune), the sweep position (VFO: Hz), the
+ *     channel number (0: VFO), FM | DMR | P25 | OTHER, WHY bits 1 something heard (probe or hold), 2 held, 4 handed
+ *     to the classic rules by the fast rule, 8 in another zone (a priority channel there)
+ *   scanst.fb=CH,MODE,NOISE,LINE,RSSI
+ *     the last stop the fast rule handed to the classic rules: its channel, mode, and the reading that did it: the
+ *     noise reading (0: the squelch was already open), the noise it had to reach (the squelch's opening line + the
+ *     margin) and the strength in dBm (DMR and the native modes must be FS_RSSI_MARGIN under DMR's strength line)
+ *   scanst.cost=GAP_MAX,STEP_MAX,OTHER_ZONE,SWITCHES
+ *     the radio task: the longest gap between two of its 10 ms ticks while a stop listened, the longest step the tick
+ *     made (reading the next channel and retuning), both ms; stops in another zone than the one scanned; stops whose
+ *     tune switched the receiver between FM and DMR
  * Counts are modulo 65536. */
 #include "config.h"
 #include "debuglink/debuglink.h"
@@ -41,6 +53,13 @@ void scanfast_view(dl_text_t *t)
 		(unsigned)v.q_n[FS_M_DMR], (unsigned long)v.q_ms[FS_M_DMR], (unsigned)v.q_n[FS_M_P25],
 		(unsigned long)v.q_ms[FS_M_P25], (unsigned)v.q_n[FS_M_OTHER], (unsigned long)v.q_ms[FS_M_OTHER]);
 	dl_text(t, "scanst.rate=%lu\n", ms != 0 ? (unsigned long)((n * 10000u + ms / 2u) / ms) : 0ul);
+	static const char *const mode[FS_MODES + 1] = { "FM", "DMR", "P25", "OTHER", "-" };
+	dl_text(t, "scanst.slow=%lu,%lu,%u,%s,%u\n", (unsigned long)v.slow_ms, (unsigned long)v.slow_where,
+		(unsigned)v.slow_ch, mode[v.slow_mode < FS_MODES ? v.slow_mode : FS_MODES], (unsigned)v.slow_why);
+	dl_text(t, "scanst.fb=%u,%s,%u,%u,%d\n", (unsigned)v.fb_ch, mode[v.fb_mode < FS_MODES ? v.fb_mode : FS_MODES],
+		(unsigned)v.fb_noise, (unsigned)v.fb_line, (int)v.fb_rssi);
+	dl_text(t, "scanst.cost=%u,%u,%u,%u\n", (unsigned)v.gap_max, (unsigned)v.step_max, (unsigned)v.other_zone,
+		(unsigned)v.switches);
 #else
 	dl_text(t, "scanst.built=0\n");
 #endif

@@ -17,6 +17,14 @@
 // priority look to the wait it interrupted (radio_scanprio.inc scx_step: phase RESUME there). Only the opening waits:
 // the rest of the poll (VOX, roaming, the floor) runs as always. The counters (scanfast.c) follow every
 // stop from here: the scan's own probe and hold counts say which stops heard something.
+//
+// v1.0.2 (docs/plus.md "A zone scans slowly"): those ages count from the end of the retune (fsc_now), and a step the
+// poll made (classic, a priority stop) gets the guard too (FS_RETUNE_GUARD_MS), so the time a step spends reading the
+// channel never puts the first reading or the first poll inside the noise reading's dip. Where the time goes is
+// counted for scanst: the longest stop, the reading behind the last fall-back, the radio task's tick gap and step time,
+// stops in another zone, FM / DMR switches.
+
+#include "hal_time.h"	// hal_millis: a step's time (fs_radio_cost)
 
 static uint16_t fsc_steps;	// scan_t.steps when last looked at
 static uint16_t fsc_seen;	// scan_t.probes + holds then
@@ -24,6 +32,11 @@ static uint16_t fsc_holds;	// scan_t.holds then
 static uint8_t fsc_mode;	// the current stop's FS_M_*
 static uint32_t fsc_stepped_ms;	// the tune of the last stop the tick stepped to (fsc_guard)
 static bool fsc_stepped;
+static uint32_t fsc_retune_tag;	// the stop fsc_now saw (its scan_t.tuned_ms) and when its retune was done
+static uint32_t fsc_retune_ms;
+static uint16_t fsc_zone;	// the zone scanned (a stop elsewhere is a priority channel's)
+static uint32_t fsc_tick_ms;	// the last tick while a stop listened (the radio task's gaps, fs_radio_cost)
+static bool fsc_tick_listen;
 
 static uint8_t fsc_mode_of(const radio_sm_t *sm)
 {
@@ -40,6 +53,30 @@ static bool fsc_kind(const radio_sm_t *sm)
 	return sm->scan.kind == SCAN_ZONE || sm->scan.kind == SCAN_VFO;
 }
 
+// scan_step and the priority channel's stops (radio_scanprio.inc), as the stop is tuned: notes when its retune was
+// done and returns now_ms (the stop's tuned_ms, so its dwell, probe and hold are timed as in v1.0.1). The step began
+// at now_ms (the poll or the tick), then read the next channel (on the radio each read walks the codeplug's settings
+// area on the data chip, several for a P25 channel) and retuned. The squelch guard and the fast rule's first reading
+// count from the retune, so the time those reads took never eats into them (v1.0.2: after a slow step the first poll
+// met the noise reading's dip right after the retune, the squelch opened and the scan held a quiet channel for its
+// resume delay, classic and fast). Dual watch: not noted. More than a second later: not a read (a clock that isn't
+// this one, as in some host tests): now_ms
+static uint32_t fsc_now(const radio_sm_t *sm, uint32_t now_ms)
+{
+	uint32_t t = hal_millis();
+	if (fsc_kind(sm)) {
+		fsc_retune_tag = now_ms;
+		fsc_retune_ms = t - now_ms > 1000u ? now_ms : t;
+	}
+	return now_ms;
+}
+
+// When the current stop's retune was done (its tuned_ms when fsc_now didn't see it: a pause's end, our transmission)
+static uint32_t fsc_retuned(const scan_t *sc)
+{
+	return sc->tuned_ms == fsc_retune_tag ? fsc_retune_ms : sc->tuned_ms;
+}
+
 // scan_start: a zone or VFO scan begins (its first stop follows)
 static void fsc_begin(radio_sm_t *sm, uint32_t now_ms)
 {
@@ -48,6 +85,8 @@ static void fsc_begin(radio_sm_t *sm, uint32_t now_ms)
 	fsc_seen = fsc_holds = 0;
 	fsc_mode = FS_MODES;
 	fsc_stepped = false;
+	fsc_zone = sm->view.zone_index;
+	fsc_tick_listen = false;
 }
 
 // A new stop since the last look (scan_tuned), or the same one tuned anew (a pause's end: a fresh listen)
@@ -62,18 +101,28 @@ static void fsc_observe(radio_sm_t *sm)
 		fsc_steps = (uint16_t)sc->steps;
 		fsc_seen = seen;
 		fsc_holds = (uint16_t)sc->holds;
-		fsc_mode = fsc_mode_of(sm);
+		uint8_t m = fsc_mode_of(sm);
+		bool chan = sc->kind == SCAN_ZONE && !sm->view.vfo;
+		fs_stop_about(chan ? sm->view.channel_number : 0, chan && sm->view.zone_index != fsc_zone,
+			      fsc_mode != FS_MODES && (fsc_mode == FS_M_DMR) != (m == FS_M_DMR));
+		fsc_mode = m;
 	} else if (s->state != FS_ST_OFF && s->tuned_ms != sc->tuned_ms) {
 		s->tuned_ms = s->first_ms = s->last_ms = sc->tuned_ms;
 		s->state = FS_ST_SAMPLING;
 	}
 }
 
+// The noise reading a quiet reading must reach: the squelch's opening line and the margin
+static uint16_t fsc_line(const radio_sm_t *sm)
+{
+	uint8_t sq = sm->view.squelch != 0 ? sm->view.squelch : RADIO_SQUELCH_DEFAULT;
+	return (uint16_t)((uint16_t)radio_sm_squelch_open_below(sq) + FS_NOISE_MARGIN);
+}
+
 // One reading: clearly nothing the scan would stop or probe for
 static bool fsc_quiet(const radio_sm_t *sm, const radio_status_t *st)
 {
-	uint8_t sq = sm->view.squelch != 0 ? sm->view.squelch : RADIO_SQUELCH_DEFAULT;
-	if ((uint16_t)st->noise < (uint16_t)radio_sm_squelch_open_below(sq) + FS_NOISE_MARGIN)
+	if ((uint16_t)st->noise < fsc_line(sm))
 		return false;
 	if (fsc_mode == FS_M_FM)
 		return true;
@@ -94,12 +143,21 @@ static bool fsc_quiet(const radio_sm_t *sm, const radio_status_t *st)
 static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 {
 	scan_t *sc = &sm->scan;
-	if (!scan_on(sc) || !fsc_kind(sm))
+	if (!scan_on(sc) || !fsc_kind(sm)) {
+		fsc_tick_listen = false;
 		return;
+	}
+	// The radio task's gap since the last tick, both in a listen phase (a hold, the native receiver's or a pause's
+	// time is not the task's): what reading the next channel and retuning cost, whoever stepped
+	if (fsc_tick_listen && sc->phase == SCAN_PH_LISTEN)
+		fs_radio_cost(now_ms - fsc_tick_ms, 0);
+	fsc_tick_ms = now_ms;
+	fsc_tick_listen = sc->phase == SCAN_PH_LISTEN;
 	fsc_observe(sm);
 	fs_stop_t *s = fs_cur();
 	if (s->state != FS_ST_SAMPLING || sc->phase != SCAN_PH_LISTEN || sm->view.monitor || sm->ptt || sm->hotspot ||
-	    sm->view.state == RS_TX || sm->view.state == RS_TX_DENIED || now_ms - sc->tuned_ms < FS_SETTLE_MS)
+	    sm->view.state == RS_TX || sm->view.state == RS_TX_DENIED || now_ms - sc->tuned_ms < FS_SETTLE_MS ||
+	    (int32_t)(now_ms - fsc_retuned(sc)) < (int32_t)FS_SETTLE_RETUNE_MS)
 		return;
 #if CONFIG_APRS
 	if (sm->aprs_phase != APRS_RF_OFF)
@@ -109,9 +167,9 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 	if (sm->save_asleep)
 		return;
 #endif
-	bool quiet = sm->view.state == RS_IDLE && !sm->view.am && !sm->view.bcast;
-	if (quiet) {
-		radio_status_t st;
+	bool idle = sm->view.state == RS_IDLE && !sm->view.am && !sm->view.bcast, quiet = idle;
+	radio_status_t st = { 0 };
+	if (idle) {
 		board.radio->status(&st);
 		quiet = fsc_quiet(sm, &st);
 	}
@@ -119,13 +177,19 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 	if (v == FS_WAIT)
 		return;
 	fs_count(v);
-	if (v != FS_QUIET)
+	if (v != FS_QUIET) {
+		// What handed it to the classic rules (noise 0: the squelch was already open, or AM / broadcast)
+		uint16_t line = fsc_line(sm);
+		fs_fallback_reading(fsc_mode, idle ? st.noise : 0u, (uint8_t)(line > 255u ? 255u : line),
+				    idle ? st.rssi_dbm : 0);
 		return;
+	}
 #if CONFIG_P25_SCAN
 	if (sc->kind == SCAN_ZONE && codeplug_mode_p25(sm->view.ch.mode))
 		(void)native_lab_scan_stop(native_lab_scan_key(sm), (uint8_t)sc->steps, false);	// its stop count
 #endif
 	scan_step(sm, now_ms);
+	fs_radio_cost(0, hal_millis() - now_ms);	// reading the next channel and retuning
 	fsc_stepped = true;
 	fsc_stepped_ms = sc->tuned_ms;
 	outputs(sm);
@@ -136,9 +200,16 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 // stop is at its first poll (the squelch doesn't open yet). By the retune, not the phase or the algorithm: a quiet
 // priority look ended on the tick tunes back to its wait (RESUME), and the switch to classic takes effect at the stop
 // the tick has just stepped to, which is as young
+// v1.0.2: also after a step the poll made (classic, a priority stop), FS_RETUNE_GUARD_MS: a classic stop's first poll
+// is 22 ms or more after its retune when the step took no time (as in v1.0.0: never held back then); after a slow step
+// it can come sooner, inside the noise reading's dip
 static bool fsc_guard(const radio_sm_t *sm, uint32_t now_ms)
 {
 	const scan_t *sc = &sm->scan;
-	return scan_on(sc) && fsc_kind(sm) && fsc_stepped && sc->tuned_ms == fsc_stepped_ms && sm->view.state == RS_IDLE &&
-	       now_ms - sc->tuned_ms < FS_POLL_GUARD_MS;
+	if (!scan_on(sc) || !fsc_kind(sm) || sm->view.state != RS_IDLE)
+		return false;
+	int32_t age = (int32_t)(now_ms - fsc_retuned(sc));
+	if (fsc_stepped && sc->tuned_ms == fsc_stepped_ms)
+		return age < (int32_t)FS_POLL_GUARD_MS;
+	return sc->tuned_ms == fsc_retune_tag && age < (int32_t)FS_RETUNE_GUARD_MS;
 }

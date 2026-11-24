@@ -732,3 +732,4 @@ __pycache__/
 !/tools/test_vfostep.py
 !/integration/radiofoundry/vfostep/ui_vfostep.c
 !/tests/plus/test_ui_vfostep.c
+!/tests/plus/test_zonescan_radio.inc

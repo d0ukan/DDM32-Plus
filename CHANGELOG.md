@@ -14,6 +14,23 @@ Firmware. Host-tested only (simulator flows in English and Turkish, normal and L
   multi-watch it still selects the other letter, held SK2 is untouched, and while a scan runs or a frequency is typed it
   is not the step key. See docs/plus.md "VFO step key".
 
+- Zone scan slow in a zone you made, classic and fast (owner's report 2026-11-24, v1.0.1; host-tested only, rows
+  ZS-1..ZS-5; docs/plus.md "A zone scans slowly"). The scan has no zone-specific path: a stored zone, "All channels"
+  included, is read once when chosen. What cost time is reading channels on the radio task: a stop read three (the
+  scan's start channel at every stop, needed only for the priority revisits, and the channel picked twice), and with
+  any P25 channel in the codeplug each read walks the codeplug settings area on the data chip (several walks for a P25
+  channel). The stop's timing started before those reads, so after a slow step the first poll met the receiver's
+  noise-reading dip right after the retune: the squelch opened and the scan held a quiet channel for its resume delay
+  (classic), or the fast rule's first readings fell in the dip and handed the stop to classic (fast). Host model at
+  3 ms a read: classic 290 ms a stop instead of 152. Fixed: a stop reads one channel; the squelch guard and the fast
+  rule's first reading count from the end of the retune (a quick step reads as before); the same model now gives
+  152 ms classic and 53 ms fast at 0 and 3 ms a read, in a made zone and in All channels alike. Which zone it hit
+  depends on its channels and on the channel the scan starts from: row ZS-1 (1.0.1's counters for both zones) is the
+  proof on the radio. New `scanst` lines say where a scan's time goes: `slow` (the longest stop, its channel and why),
+  `fb` (the reading that handed the last stop to classic), `cost` (the radio task's longest tick gap and step,
+  stops in another zone, FM / DMR switches); `pc/radiotools/plus_live.py --scan-stats` reads them (read only). No new
+  limits. FLASH +1,004 B (883,436 B, 98.04 %), RAM +56 B (1,912 B free), stacks fit (--stack-check passed; radio task 656 B free).
+
 ## v1.1.0 (candidate, not released yet)
 
 Programmer (Rust, `rust/`; the version numbers are not bumped yet). The Rust program becomes the only programmer for

@@ -94,6 +94,33 @@ class PlusLiveToolTest(unittest.TestCase):
                 g.request(cmd, payload)
         self.assertEqual(g.link.sent, [])
 
+    def test_scan_stats_only_when_asked(self):
+        scanst = ('scanst.built=1\nscanst.on=1\nscanst.st=fast,30000,560,40,750,14,0,0,560,0,3\n'
+                  'scanst.slow=2140,6,9,FM,7\nscanst.fb=9,FM,40,60,-105\nscanst.cost=13,2,0,0\n')
+
+        class ScanLink(FakeLink):
+            def request(self, cmd, payload=b'', **kw):
+                if (cmd, bytes(payload)) == (0x09, b'\x1f'):
+                    self.sent.append((cmd, bytes(payload)))
+                    return 0, view(scanst)
+                return super().request(cmd, payload, **kw)
+
+        link = ScanLink()
+        code, text = self.run_tool(link, count=1)      # without --scan-stats: never asked
+        self.assertEqual(code, 0)
+        self.assertNotIn((0x09, b'\x1f'), link.sent)
+        with self.assertRaises(plus_live.Refused):
+            plus_live.GuardedLink(ScanLink()).request(0x09, b'\x1f')
+        link = ScanLink()
+        out = io.StringIO()
+        code = plus_live.run(link, 1, 2, out=out, sleep=lambda s: None, scan_stats=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(link.sent.count((0x09, b'\x1f')), 2)
+        self.assertTrue(set(link.sent) <= plus_live.ALLOWED_SCANST)
+        self.assertEqual(plus_live.ALLOWED_SCANST - plus_live.ALLOWED, {(0x09, b'\x1f')})
+        self.assertIn('--- view scanst (31) status 0', out.getvalue())
+        self.assertIn('scanst.slow=2140,6,9,FM,7', out.getvalue())
+
     def test_unavailable_counters_and_parse(self):
         code, text = self.run_tool(FakeLink(scan=None), count=1)
         self.assertEqual(code, 0)

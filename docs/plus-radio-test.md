@@ -850,6 +850,19 @@ the host model's.
 | SF-7 | Fast: monitor held while scanning (FM channel); PTT while stepping and while stopped on a signal; # 1 skip, # 5 priority; a VFO band scan | as in v1.0.0: monitor pauses (on a DMR channel the key toggles DMR monitor, as before), PTT goes back to the start channel / talks back on the signal, skip and priority as before; the VFO scan steps about 2.8x faster on FM |
 | SF-8 | Dual watch and a triple watch running | unchanged (their own timing); held 0 there does nothing new |
 
+## A zone scans slowly (branch `zonescan`, docs/plus.md "A zone scans slowly", v1.0.2 candidate)
+
+Receive only: our radio keys nothing. Reading the counters opens the serial port: each run of
+`pc/radiotools/plus_live.py` needs the owner's approval in chat first (read only: GET_VIEW queries only).
+
+| # | Do | Expect |
+|---|---|---|
+| ZS-1 | **Before installing 1.0.2, on 1.0.1 (the evidence).** Nothing on air. Write down the zone you made: how many channels, their modes (FM / DMR / P25), how it was made (Zones > New, Add channels, Find & save, DOTA), and the channel Home is on when you start. Start the scan on Home in that zone, 30 s, then read `python pc/radiotools/plus_live.py --port COM14 --count 1 --scan-stats` (1.0.1 shows `scanst.st` and `scanst.quiet` only); stop; the same in All channels from the same kind of channel | 1.0.1 slow zone: NOTICED / HELD high with nothing on air, or FALLBACK about equal to STOPS (fast) = quiet channels held or handed to classic. Send both runs' lines and the notes |
+| ZS-2 | 1.0.2: ZS-1 again in both zones, fast and classic (held 0 switches), each 30 s, `--scan-stats` after each | in both zones PASS_MS / PASS_STOPS about 55 ms (fast, FM) or 150 ms (classic); NOTICED 0, FALLBACK near 0; `scanst.cost` STEP_MAX and GAP_MAX a few ms (a GAP_MAX over 25 ms = a step still reads slowly: send it); `scanst.slow` names the longest stop: with nothing on air under 200 ms |
+| ZS-3 | ZS-2 started from a P25 channel of the zone (and from an FM one) | the same speed from both start channels (1.0.1 read the start channel at every stop) |
+| ZS-4 | A priority channel set from All channels (Zones > the channel > # > Set as priority), not in the zone you made; scan the made zone 30 s | one short stop on it about every 2 s (`scanst.cost` OTHER_ZONE about 15 in 30 s), the zone's own channels as fast as in ZS-2 |
+| ZS-5 | The other radio FM on a channel of the made zone, overs of 3-5 s; then DMR direct mode on a DMR channel of it | both stop and play as in SF-3 / SF-5; `scanst.slow` names that channel with WHY 3 (heard, held) or 7 (fast handed it to classic first); `scanst.fb` its channel and a noise under the line |
+
 ## Upstream RadioFoundry fixes (branch `rfports`, docs/plus.md "Upstream RadioFoundry fixes")
 
 Each step that opens the serial port, installs, restarts or transmits needs the owner's approval in chat first.
