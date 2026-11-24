@@ -6659,6 +6659,10 @@ msgstr "Arama: hızlı"
 msgid "Search: classic (beta.8)"
 msgstr "Arama: klasik (beta.8)"
 
+#: core/ui/ui_p25search.c
+msgid "Search: fast + soft probe"
+msgstr "Arama: hızlı + yazılım sonda"
+
 #: core/ui/ui_scanfast.c
 msgid "Scan: fast"
 msgstr "Tarama: hızlı"

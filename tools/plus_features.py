@@ -207,6 +207,7 @@ def prepare(transform, install):
     __import__((__package__ + "." if __package__ else "") + "plus_vfostep", fromlist=["x"]).prepare_vfostep(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_ramsave", fromlist=["x"]).prepare_ramsave(transform, install)
     __import__((__package__ + "." if __package__ else "") + "plus_p25rxgl", fromlist=["x"]).prepare_p25rxgl(transform, install)
+    __import__((__package__ + "." if __package__ else "") + "plus_softp25", fromlist=["x"]).prepare_softp25(transform, install)
 
 
 def prepare_large_scale(transform):
