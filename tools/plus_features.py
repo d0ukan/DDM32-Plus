@@ -5639,7 +5639,7 @@ def prepare_cw_rx(transform, install):
         ('\tcase T_ZONE_OFFER: ui_push(SCR_OFFER, 0); break;\n',
          '\tcase T_CW: ui_push(SCR_CW, 0); break;\n\tcase T_ZONE_OFFER: ui_push(SCR_OFFER, 0); break;\n'),
         ('\t\t[T_ZONE_OFFER] = ART_ICON_ZONE_OFFER + 1,\n',
-         '\t\t[T_CW] = ART_ICON_BEACON + 1,\t// the CW beacon\'s\n\t\t[T_ZONE_OFFER] = ART_ICON_ZONE_OFFER + 1,\n'),
+         '\t\t[T_CW] = ART_ICON_CW + 1,\t// the key\n\t\t[T_ZONE_OFFER] = ART_ICON_ZONE_OFFER + 1,\n'),
     ])
 
 

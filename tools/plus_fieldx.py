@@ -98,8 +98,8 @@ def prepare_fieldx(transform, install):
         ('\t\tcase SA_LANGUAGE: ui_push(SCR_LANGUAGE, 0); break;\n',
          '\t\tcase SA_LANGUAGE: ui_push(SCR_LANGUAGE, 0); break;\n'
          '#if CONFIG_SOS_KEY\n\t\tcase SA_SOS_KEY: ui_push(SCR_SOS_SET, 0); break;\t// DDM32 Plus\n#endif\n'),
-        ('\t\t[T_CW] = ART_ICON_BEACON + 1,\t// the CW beacon\'s\n',
-         '\t\t[T_SOS] = ART_ICON_BEACON + 1,\t// the SOS beacon\'s\n\t\t[T_CW] = ART_ICON_BEACON + 1,\t// the CW beacon\'s\n'),
+        ('\t\t[T_CW] = ART_ICON_CW + 1,\t// the key\n',
+         '\t\t[T_SOS] = ART_ICON_SOS + 1,\t// the warning triangle\n\t\t[T_CW] = ART_ICON_CW + 1,\t// the key\n'),
         # Settings > Keys: "SOS" for a press and a long press (not assigned by default: Default stays)
         ('\t\t\t\t\t KEYFN_AB, KEYFN_DUAL_WATCH,\n#endif\n};\nstatic const char *const n_keyfn_press[]',
          '\t\t\t\t\t KEYFN_AB, KEYFN_DUAL_WATCH,\n#endif\n#if CONFIG_SOS_KEY\n\t\t\t\t\t KEYFN_SOS,\n#endif\n};\n'

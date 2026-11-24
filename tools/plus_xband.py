@@ -203,7 +203,7 @@ def prepare_crossband(transform, install):
         ('#if CONFIG_DOTA\n\tcase T_DOTA: ui_push(SCR_DOTA, 0); break;\n#endif\n',
          '#if CONFIG_DOTA\n\tcase T_DOTA: ui_push(SCR_DOTA, 0); break;\n#endif\n'
          + XB_ON + '\tcase T_XBAND: ui_push(SCR_XBAND, 0); break;\n#endif\n'),
-        ('[T_DOTA] = ART_ICON_BEACON + 1,', '[T_DOTA] = ART_ICON_BEACON + 1, [T_XBAND] = ART_ICON_BEACON + 1,'),
+        ('[T_DOTA] = ART_ICON_DOTA + 1,', '[T_DOTA] = ART_ICON_DOTA + 1, [T_XBAND] = ART_ICON_XBAND + 1,'),
     ])
     transform('core/ui/ui_app.c', [
         (LC_ON + '#include "ui/ui_lastcall.h"\n#endif\n',
