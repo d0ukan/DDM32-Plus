@@ -166,6 +166,9 @@ pub fn version_line(fv: &catalog::FirmwareVersion, all: &[catalog::FirmwareVersi
     format!("{} ({})", fv.version(), label_in(lang, catalog::label_for(fv, all)))
 }
 
+/// `--demo`: example contents; setup() saves nothing for it (main sets it before setup).
+pub static DEMO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Sets up the window: the state, every callback, the first contents. `fetch` loads the release list in the
 /// background when the settings allow it.
 pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
@@ -179,7 +182,12 @@ pub fn setup(ui: &AppWindow, paths: AppPaths, fetch: bool) {
     let app = ui.global::<App>();
     // this program's channel, or the C# program's include_beta during the hand-over (Settings::channel)
     // decided once and saved, so a key written later (an install record) never changes it
-    app.set_channel(settings.settle_channel().unwrap_or_else(|_| settings.channel()));
+    let channel = if DEMO.load(std::sync::atomic::Ordering::SeqCst) {
+        settings.channel()
+    } else {
+        settings.settle_channel().unwrap_or_else(|_| settings.channel())
+    };
+    app.set_channel(channel);
     let disclaimer_ok = settings.disclaimer_accepted(&disclaimer::version());
     ui.global::<Radio>().set_disclaimer_ok(disclaimer_ok);
     app.set_auto_check(settings.auto_check());
@@ -1055,6 +1063,11 @@ pub fn force_close(ui: &AppWindow) -> bool {
     let app = ui.global::<App>();
     app.set_force_close_open(false);
     if with(|s| s.writing) {
+        let text = tr("busy_close");
+        set_message(ui, &text, "warning");
+        let r = ui.global::<Radio>();
+        r.set_message(text.into());
+        r.set_message_kind("warning".into());
         return false;
     }
     let _ = slint::quit_event_loop();
@@ -1375,14 +1388,18 @@ fn wizard_next(ui: &AppWindow) {
             set_message(ui, &tr("msg_downloading"), "info");
             let releases = with(|s| s.paths.releases());
             let w = ui.as_weak();
-            std::thread::spawn(move || {
-                let net = HttpReleaseNet::real();
-                let r = match &fv.source {
-                    Some(local) => client::download_firmware(&fv, &releases, local.as_ref(), None, None),
-                    None => client::download_firmware(&fv, &releases, &net, None, None),
-                };
-                let r = r.map_err(|e| e.to_string());
-                let _ = slint::invoke_from_event_loop(move || {
+            worker::spawn(
+                move || {
+                    let net = HttpReleaseNet::real();
+                    let r = match &fv.source {
+                        Some(local) => client::download_firmware(&fv, &releases, local.as_ref(), None, None),
+                        None => client::download_firmware(&fv, &releases, &net, None, None),
+                    };
+                    r.map_err(|e| e.to_string())
+                },
+                move |r| {
+                    // a panic in the download ends here too (busy cleared, its text shown)
+                    let r = r.and_then(|x| x);
                     let Some(ui) = w.upgrade() else { return };
                     ui.global::<App>().set_busy(false);
                     match r {
@@ -1401,8 +1418,8 @@ fn wizard_next(ui: &AppWindow) {
                         }
                         Err(e) => set_message(&ui, &trf("msg_download_failed", &e), "danger"),
                     }
-                });
-            });
+                },
+            );
         }
         1 => match app.get_backup_choice() {
             0 => set_step(ui, 2),
@@ -1526,6 +1543,10 @@ fn run_tool(
         s.progress = ProgressView::new();
         s.writing = writes;
     });
+    if writes {
+        // the radio is written from now on: "Close anyway?" no longer applies
+        app.set_force_close_open(false);
+    }
     let w = ui.as_weak();
     let w2 = w.clone();
     worker::spawn(
@@ -1608,6 +1629,10 @@ fn start_backup(ui: &AppWindow) {
 
 /// start_backup once the port is known (crate::with_port).
 fn start_backup_on(ui: &AppWindow, found: Option<String>) {
+    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
+    if !radio_allowed(ui) || reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -1644,6 +1669,10 @@ fn start_install(ui: &AppWindow) {
 
 /// start_install once the port is known (crate::with_port).
 fn start_install_on(ui: &AppWindow, found: Option<String>) {
+    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
+    if !radio_allowed(ui) || reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -1741,6 +1770,10 @@ fn start_restore(ui: &AppWindow) {
 
 /// start_restore once the port is known (crate::with_port).
 fn start_restore_on(ui: &AppWindow, found: Option<String>) {
+    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
+    if !radio_allowed(ui) || reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -1849,6 +1882,10 @@ fn pack_write(ui: &AppWindow) {
 
 /// pack_write once the port is known (crate::with_port).
 fn pack_write_on(ui: &AppWindow, found: Option<String>) {
+    // the gates again: the listing took a moment, the disclaimer or a reader may have changed meanwhile
+    if !radio_allowed(ui) || reader_holds_port(ui) {
+        return;
+    }
     let Some(port) = found else {
         set_message(ui, &tr("radio_nocable"), "warning");
         return;

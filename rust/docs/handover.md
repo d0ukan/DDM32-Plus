@@ -72,6 +72,9 @@ The install folder, the data folder and `settings.json` are the same, so the use
   them too). Choosing a channel writes both keys (`set_channel`).
 - `installed_sha256` / `installed_firmware`: read as the C# install record. A C# restore after a Rust install (sha
   null, "stock" or "") supersedes the Rust `installed_record` (factory firmware or unknown, never the older install).
+  Known limit: the C# keys hold no time, so after a Rust **stock** restore, a C# backup note cleared to "" reads the
+  same as a C# "previous version" restore and shows **unknown** instead of factory firmware (the safe side: never a
+  claim the radio might not match). The same holds after an interrupted Rust write (it stays "interrupted").
 - `port`: without `port_auto` (a C# file) it is the user's last chosen port and becomes the fixed choice.
 - `language`, `auto_check` are shared. C#-only keys (`window`, `last_check_utc`, `pack_*`, ...) are kept unused.
 

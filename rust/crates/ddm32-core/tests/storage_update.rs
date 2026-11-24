@@ -295,6 +295,19 @@ fn the_channel_is_settled_once() {
     assert_eq!(1, s.channel(), "settled: a later include_beta does not change it");
 }
 
+/// A settings.json that is there but cannot be read is never rewritten by the start-up (byte for byte).
+#[test]
+fn settling_never_overwrites_an_unreadable_file() {
+    let t = tmp();
+    let path = t.path().join("settings.json");
+    let s = Settings::new(&path);
+    for bytes in [&b"{ \"language\": \"tr\", trunc"[..], &[0xFF, 0xFE, 0x00, 0x7B][..], &b"{}"[..], &b""[..]] {
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(0, s.settle_channel().unwrap());
+        assert_eq!(bytes, std::fs::read(&path).unwrap().as_slice());
+    }
+}
+
 /// A C# settings file keeps `port` without `port_auto`: the user's last chosen port, a fixed choice here.
 #[test]
 fn the_csharp_port_is_the_first_fixed_choice() {

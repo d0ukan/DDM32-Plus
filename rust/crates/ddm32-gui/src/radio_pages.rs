@@ -216,6 +216,14 @@ fn read_health(ui: &AppWindow) {
 
 /// read_health once the port is known (crate::with_port).
 fn read_health_on(ui: &AppWindow, found: Option<String>) {
+    // the gates again: the listing took a moment
+    if !radio_allowed(ui) {
+        return;
+    }
+    if slog_holds_port() {
+        message(ui, &tr("slog_busy"), "warning");
+        return;
+    }
     let Some(p) = found else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -326,6 +334,14 @@ fn live_start(ui: &AppWindow) {
 
 /// live_start once the port is known (crate::with_port).
 fn live_start_on(ui: &AppWindow, found: Option<String>) {
+    // the gates again: the listing took a moment
+    if !radio_allowed(ui) {
+        return;
+    }
+    if slog_holds_port() {
+        message(ui, &tr("slog_busy"), "warning");
+        return;
+    }
     let Some(p) = found else {
         message(ui, &tr("radio_nocable"), "warning");
         return;
@@ -707,6 +723,10 @@ fn slog_start(ui: &AppWindow) {
 
 /// slog_start once the port is known (crate::with_port).
 fn slog_start_on(ui: &AppWindow, found: Option<String>) {
+    // the disclaimer again (the listing took a moment); the busy check below covers the readers
+    if !radio_allowed(ui) {
+        return;
+    }
     let Some(p) = found else {
         message(ui, &tr("radio_nocable"), "warning");
         return;

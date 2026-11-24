@@ -17,6 +17,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let paths =
         ddm32_core::storage::AppPaths::for_this_program().unwrap_or_else(|| ddm32_core::storage::AppPaths::new("."));
     let demo = args.iter().any(|a| a == "--demo");
+    ddm32_gui::DEMO.store(demo, std::sync::atomic::Ordering::SeqCst);
     ddm32_gui::setup(&ui, paths, !demo);
     if demo {
         ddm32_gui::demo(&ui);

@@ -89,7 +89,8 @@ controls under the shade take no focus or click and read as disabled (`widgets.s
 - **Release channel** taken over from the C# program: `channel` when set, else its `include_beta`, else Beta for a
   settings file the C# program wrote (its default showed betas), else Latest for a fresh install. Decided once and
   saved at the first start (an install record written later never flips it); a choice writes both keys. A C# restore
-  after a Rust install (`installed_sha256` null, "stock" / "") supersedes the Rust install record. Hand-over from C#
+  after a Rust install (`installed_sha256` null, "stock" / "") supersedes the Rust install record (limit: after a Rust
+  stock restore a C# note cleared to "" also reads as a restore and shows unknown; `docs/handover.md`). Hand-over from C#
   2.0.x through its self-update: `docs/handover.md`.
 - **Backup age**: from the backup's manifest (`completed_utc`, else `started_utc`); the folder time only without them.
 

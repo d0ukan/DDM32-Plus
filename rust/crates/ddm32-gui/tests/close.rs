@@ -259,7 +259,9 @@ fn a_second_press_offers_close_anyway_but_never_during_a_radio_write() {
         assert_eq!(i18n::t("en", "busy_close"), app.get_message().as_str());
     }
     // and "Yes" itself checks again
+    app.set_message("".into());
     assert!(!ddm32_gui::force_close(&ui));
+    assert_eq!(i18n::t("en", "busy_close"), app.get_message().as_str(), "a refused Yes says why");
     let ui_src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/app.slint")).unwrap();
     let dlg = &ui_src[ui_src.find("if App.force-close-open").unwrap()..];
     assert!(dlg.contains(r#"Button { text: Tr.t(Tr.lang, "b_no"); in-dialog: true; default-focus: true;"#));
@@ -281,5 +283,19 @@ fn a_panicked_tool_clears_the_busy_state() {
     assert!(!app.get_busy());
     assert!(!ddm32_gui::with_state(|s| s.writing));
     assert_eq!(CloseRequestResponse::HideWindow, ddm32_gui::close_requested(&ui), "closing works again");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A settings.json that is there but cannot be read: the start-up leaves it byte for byte as it was.
+#[test]
+fn an_unreadable_settings_file_is_left_as_it_is() {
+    let root = root("unreadable");
+    let bytes: &[u8] = b"{ \"language\": \"en\", \"disclaimer\": { trunc";
+    std::fs::write(root.join("settings.json"), bytes).unwrap();
+    init();
+    let ui = AppWindow::new().unwrap();
+    ddm32_gui::setup(&ui, AppPaths::new(&root), false);
+    assert_eq!(0, ui.global::<App>().get_channel());
+    assert_eq!(bytes, std::fs::read(root.join("settings.json")).unwrap().as_slice());
     let _ = std::fs::remove_dir_all(&root);
 }

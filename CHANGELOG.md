@@ -60,7 +60,11 @@ Windows, Linux and macOS; host-tested only (fakes, no serial port, no network), 
   "Close anyway?" (No by default); never during an install, restore or pack write.
 - `DDM32Plus.exe` carries the program icon; the Windows setup installs `ddm32.exe` too and needs nothing from `win/`.
 - Backups are ordered by the time in their manifest, not the folder's (copying a backup no longer makes it "newest").
-- A radio step's start no longer lists the serial ports on the window's thread; a C# `port` setting is taken over.
+- A radio step's start no longer lists the serial ports on the window's thread (its gates are checked again when the
+  listing returns); a C# `port` setting is taken over.
+- The wizard's firmware download reports back like every other worker; "Close anyway?" closes when a radio write
+  starts and a refused "Yes" says why; start-up never rewrites an unreadable settings.json, and `--demo` saves no
+  channel.
 
 ## v1.0.1 (2026-11-24)
 

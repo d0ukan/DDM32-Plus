@@ -136,9 +136,14 @@ impl Settings {
 
     /// The channel at start-up, saved when this program has none yet: decided once (from the C# keys or as a fresh
     /// install), so a key written later (an install record, a C# key) can never change it.
+    /// A file that is there but reads as empty (unreadable, truncated, damaged) is never overwritten for this.
     pub fn settle_channel(&self) -> std::io::Result<i32> {
         let c = self.channel();
-        if !self.load().contains_key(CHANNEL_KEY) {
+        let s = self.load();
+        if s.is_empty() && self.file_path.exists() {
+            return Ok(c);
+        }
+        if !s.contains_key(CHANNEL_KEY) {
             self.save(CHANNEL_KEY, Value::from(c))?;
         }
         Ok(c)
