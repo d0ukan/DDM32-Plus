@@ -42,10 +42,16 @@
 
 static p25_voice voice;
 #if CONFIG_XBAND
-static volatile uint8_t xb_lent;   /* DDM32 Plus cross-band: voice, fifo and rp_buf are lent (p25_lab_lend) */
-#define XB_LENT xb_lent
+/* DDM32 Plus cross-band (p25_lab_lend): 1 voice, fifo and rp_buf are lent; 2 a P25 session's, fifo past the frame ring
+ * and rp_buf (the worker receives and transmits for it, never with audio) */
+static volatile uint8_t xb_lent;
+#define XB_LENT (xb_lent==1)
+#define XB_P25 (xb_lent==2)
+#define XB_ANY (xb_lent!=0)
 #else
 #define XB_LENT 0
+#define XB_P25 0
+#define XB_ANY 0
 #endif
 #if CONFIG_P25_BENCH || CONFIG_DEV_TX
 static p25_selftest_result result;
@@ -711,6 +717,92 @@ static void replay_service(void)
     sink(NULL,pcm);
 }
 #endif
+#if CONFIG_XBAND
+/* DDM32 Plus cross-band, a P25 session (p25_lab.h): the frames between the worker and the radio task wait in the lent
+ * FIFO's first bytes, a ring of P25_LAB_XB_FRAMES; both sides touch it only inside a critical section, and only while
+ * it is lent (xb_lent 2) */
+typedef struct {
+    uint8_t head,tail,send,eof;     /* send: the ring feeds the next transmission; eof: no more frames come */
+    uint8_t frame[P25_LAB_XB_FRAMES][P25_LAB_XB_BYTES];
+} xb_ring_t;
+_Static_assert(sizeof(xb_ring_t)==P25_LAB_XB_RING_BYTES && sizeof(xb_ring_t)<sizeof(p25_audio_fifo) &&
+               (int)P25_LAB_XB_BYTES==(int)REPLAY_BYTES,"the frame ring in the FIFO");
+#define XBR ((xb_ring_t *)(void *)&fifo)
+static volatile uint8_t xb_sent;
+static uint16_t xb_nac,xb_tg;
+static uint32_t xb_src;
+static int xb_push(const uint8_t f[P25_LAB_XB_BYTES])
+{
+    xb_ring_t *r=XBR;
+    if((uint8_t)(r->head-r->tail)>=P25_LAB_XB_FRAMES)return 0;
+    memcpy(r->frame[r->head%P25_LAB_XB_FRAMES],f,P25_LAB_XB_BYTES);r->head++;
+    return 1;
+}
+static int xb_pop(uint8_t f[P25_LAB_XB_BYTES])
+{
+    xb_ring_t *r=XBR;
+    if(r->head==r->tail)return 0;
+    memcpy(f,r->frame[r->tail%P25_LAB_XB_FRAMES],P25_LAB_XB_BYTES);r->tail++;
+    return 1;
+}
+/* The worker's receive: every IMBE frame that would play (admitted, decoded) to the ring, the call it is from noted */
+static void xb_tap(void *ctx,const uint16_t u[8])
+{
+    (void)ctx;
+    uint8_t f[P25_LAB_XB_BYTES];
+    rp_pack(u,f);
+    taskENTER_CRITICAL();
+    if(XB_P25 && !XBR->send && xb_push(f)) { xb_nac=voice.active_nac;xb_tg=voice.active_group;xb_src=voice.active_source; }
+    taskEXIT_CRITICAL();
+}
+/* The worker's transmission: the next frame to send (1), none yet (0), or none will come (-1: the end, or given up) */
+static int xb_tx_pop(uint16_t u[8])
+{
+    uint8_t f[P25_LAB_XB_BYTES];
+    taskENTER_CRITICAL();
+    int got=XB_P25 && XBR->send ? xb_pop(f) : 0;
+    int end=!got && (!XB_P25 || !XBR->send || XBR->eof);
+    taskEXIT_CRITICAL();
+    if(got)rp_unpack(f,u);
+    return got?1:end?-1:0;
+}
+int p25_lab_xb_take(uint8_t frame[P25_LAB_XB_BYTES])
+{
+    taskENTER_CRITICAL();
+    int ok=XB_P25 && !XBR->send && xb_pop(frame);
+    taskEXIT_CRITICAL();
+    return ok;
+}
+int p25_lab_xb_put(const uint8_t frame[P25_LAB_XB_BYTES])
+{
+    taskENTER_CRITICAL();
+    int ok=XB_P25 && XBR->send && !XBR->eof && xb_push(frame);
+    taskEXIT_CRITICAL();
+    return ok;
+}
+void p25_lab_xb_heard(uint16_t *heard_nac,uint16_t *tg,uint32_t *src)
+{
+    taskENTER_CRITICAL();*heard_nac=xb_nac;*tg=xb_tg;*src=xb_src;taskEXIT_CRITICAL();
+}
+void p25_lab_xb_send(int on)
+{
+    taskENTER_CRITICAL();
+    if(XB_P25) {
+        xb_ring_t *r=XBR;
+        if(on>0) { r->head=r->tail=0;r->send=1;r->eof=0;xb_sent=0; }
+        else if(on==0) r->eof=1;
+        else { r->head=r->tail=0;r->send=r->eof=0; }   /* (-1) sent, or given up: the ring receives again */
+    }
+    taskEXIT_CRITICAL();
+}
+int p25_lab_xb_sent(void) { return xb_sent; }
+void p25_lab_xb_call(uint16_t tx_nac,uint16_t tg,uint32_t id)
+{
+    taskENTER_CRITICAL();
+    channel_call=(p25_call){.nac=tx_nac,.talkgroup=tg,.source_id=id};
+    taskEXIT_CRITICAL();
+}
+#endif
 int p25_lab_channel_receiving(void)
 {
 #if CONFIG_CALL_REPLAY
@@ -742,6 +834,9 @@ int p25_lab_live_begin(uint32_t sid)
     taskENTER_CRITICAL();
     int ok=worker && state!=1 && !XB_LENT && board.native_mic_route && board.audio &&
            board.audio->start && board.audio->stop;
+#if CONFIG_XBAND
+    ok=ok && (!XB_P25 || XBR->send);  /* a P25 cross-band session transmits its ring only, never the microphone */
+#endif
 #if CONFIG_YSF_TX
     /* DM32 Plus: a YSF channel transmits YSF Voice FR, and only with a callsign (docs/ysf-nxdn-tx.md) */
     ok=ok && (!ysf_rx || ysf_tx_call[0]!='\0');
@@ -779,7 +874,7 @@ int p25_lab_channel_rx(uint32_t hz)
         nac=0x293;group=1;
 #endif
         duration_ms=0;
-        request_mode=5;play_requested=1;delay_seconds=0;stop_requested=0;
+        request_mode=5;play_requested=!XB_P25;delay_seconds=0;stop_requested=0;   /* (a P25 cross-band session: silent) */
         state=1;
     }
     taskEXIT_CRITICAL();
@@ -950,13 +1045,20 @@ static int live_run(void)
     bool kicked=false,sealed=false,closed=false;
     bool ok=p25_voice_tx_begin(&voice,&call)!=0;
     uint32_t sid=live_sid;
+#if CONFIG_XBAND
+    /* DDM32 Plus cross-band: the frames of an over heard, from the ring, in place of the microphone (p25_lab_xb_send) */
+    const bool xb=XB_P25;
+    uint16_t xu[8];
+#else
+    const bool xb=false;
+#endif
     live_mic_frames=live_peak=live_encode_max=live_encode_us=live_slow=live_encoded=0;
     live_first_us=live_last_us=live_fifo_high=live_overflows=0;
     live_key_frame=UINT32_MAX;
     native_state=NT_ARMED;
     native_reason=NT_OK;
-    p25_audio_fifo_reset(&fifo);
-    if (ok) {
+    if (!xb) p25_audio_fifo_reset(&fifo);
+    if (ok && !xb) {
         board.native_mic_route(true);
         live_capturing=1;
         ok=board.audio->start(mic_block,NULL);
@@ -965,7 +1067,7 @@ static int live_run(void)
     while (ok && !stop_requested) {
         if (!native_lab_live_poll(sid,&native_state,&native_reason,&queued) || native_state==NT_FAULT) { ok=false;break; }
         if (native_state==NT_STOPPED) { ok=sealed && native_reason==NT_TX_COMPLETE;break; }
-        bool closing=live_released || !input_ptt_down();
+        bool closing=live_released || (!xb && !input_ptt_down());
         if (closing && live_capturing) {
             live_capturing=0;
             board.audio->stop();
@@ -993,10 +1095,22 @@ static int live_run(void)
             if (!kicked) { ok=false;break; }
         }
         if (!closed && (voice.count<P25_VOICE_QUEUE || voice.voice_count<8)) {
+            int have;
+#if CONFIG_XBAND
+            if (xb) {
+                have=closing?-1:xb_tx_pop(xu);
+                if (have<0) { closing=true;have=0; }    /* the over is out (or the session gave it up) */
+                if (have) last_input=hal_millis();
+            } else
+#endif
+            {
             taskENTER_CRITICAL();
-            int have=p25_audio_fifo_take(&fifo,pcm);
+            have=p25_audio_fifo_take(&fifo,pcm);
             taskEXIT_CRITICAL();
-            if (have) {
+            }
+            if (have && xb) {
+                /* (stored parameters: no microphone level, no conditioning) */
+            } else if (have) {
                 last_input=hal_millis();
                 for (unsigned i=0;i<160;i++) {
                     int sample=pcm[i];
@@ -1013,6 +1127,9 @@ static int live_run(void)
             }
             if (have) {
                 uint32_t at=hal_micros();
+#if CONFIG_XBAND
+                if (xb) ok=p25_voice_tx_imbe(&voice,xu)!=0; else
+#endif
                 ok=p25_voice_tx_pcm(&voice,pcm)!=0;
                 uint32_t elapsed=hal_micros()-at;
                 live_encode_us+=elapsed;
@@ -1024,18 +1141,24 @@ static int live_run(void)
                 continue;
             }
         }
-        if (!closing && hal_millis()-last_input>300u) { ok=false;break; }
+        /* (cross-band: the radio task tops the ring up every poll; a second without a frame is a stall) */
+        if (!closing && !closed && hal_millis()-last_input>(xb?1000u:300u)) { ok=false;break; }
         vTaskDelay(pdMS_TO_TICKS(2));
     }
     live_capturing=0;
     native_lab_voice_stop(sid);
-    board.audio->stop();
-    board.native_mic_route(false);
+    if (!xb) {
+        board.audio->stop();
+        board.native_mic_route(false);
+    }
     /* The radio task owns cleanup; do not abandon its reservation on a delay. */
     while (!native_lab_voice_release(sid))
         vTaskDelay(pdMS_TO_TICKS(2));
-    live_fifo_high=fifo.high_water;live_overflows=fifo.overflows;
+    if (!xb) { live_fifo_high=fifo.high_water;live_overflows=fifo.overflows; }
     p25_voice_tx_abort(&voice);
+#if CONFIG_XBAND
+    if (xb) { p25_lab_xb_send(-1);xb_sent=1; }    /* the ring receives again; the radio task lets go of PTT */
+#endif
     return ok && !stop_requested && !live_overflows;
 }
 #endif
@@ -1091,7 +1214,7 @@ static void reset_stream(void)
     if(ysf_rx)ysf_resync();   /* a gap in the records: the YSF frame in hand is broken too (only YSF owns it) */
 #endif
     p25_voice_rx_reset(&voice);
-    taskENTER_CRITICAL();fifo.head=fifo.tail=fifo.count=fifo.playing=0;taskEXIT_CRITICAL();
+    taskENTER_CRITICAL();if(!XB_P25)fifo.head=fifo.tail=fifo.count=fifo.playing=0;taskEXIT_CRITICAL();
     memset(&phy,0,sizeof phy);
 }
 #endif
@@ -1109,7 +1232,7 @@ static void consume(uint32_t seq,uint8_t kind,const uint8_t raw[36])
     if(p25_phy_rx_record(&phy,&voice,seq,kind,raw)) {
         gaps+=phy.gaps-prior_gaps;unsupported=phy.unsupported;
         if(unsupported)stop_requested=1;
-        taskENTER_CRITICAL();fifo.head=fifo.tail=fifo.count=fifo.playing=0;taskEXIT_CRITICAL();
+        taskENTER_CRITICAL();if(!XB_P25)fifo.head=fifo.tail=fifo.count=fifo.playing=0;taskEXIT_CRITICAL();
     }
 #if CONFIG_P25_CHANNELS
     if(voice.rx_voice!=prior_voice) { channel_voice_ms=hal_millis();channel_voice_seen=true; }
@@ -1155,7 +1278,7 @@ static void consume(uint32_t seq,uint8_t kind,const uint8_t raw[36])
         taskENTER_CRITICAL();channel_frames++;channel_frame_ms=hal_millis();taskEXIT_CRITICAL();
 #endif
         taskENTER_CRITICAL();
-        fifo.draining=voice.framer.nid.duid==P25_DUID_TDU || voice.framer.nid.duid==P25_DUID_TDULC;
+        if(!XB_P25)fifo.draining=voice.framer.nid.duid==P25_DUID_TDU || voice.framer.nid.duid==P25_DUID_TDULC;
         taskEXIT_CRITICAL();
     }
     uint32_t dt=hal_micros()-at;
@@ -1195,7 +1318,8 @@ static int receive_run(void)
 {
     records=pcm_blocks=nonzero=record_max_us=decode_us=callbacks=played=played_nonzero=0;
     session=gaps=unsupported=0;native_state=native_reason=0;pcm_crc=sample_checks?0xffffffffu:0;
-    memset(&phy,0,sizeof phy);p25_audio_fifo_reset(&fifo);
+    memset(&phy,0,sizeof phy);
+    if(!XB_P25)p25_audio_fifo_reset(&fifo);   /* (a P25 cross-band session: the FIFO is lent; nothing plays) */
     p25_voice_init(&voice,nac,group,sink,NULL);voice.micros=sample_checks?hal_micros:NULL;
 #if CONFIG_P25_CALLER
     /* DDM32 Plus multi-watch: a receive starts without the last call's talkgroup, source and kind (they were never
@@ -1223,6 +1347,9 @@ static int receive_run(void)
 #endif
 #if CONFIG_CALL_REPLAY
     voice.tap=request_mode==5 ? replay_tap : NULL;  /* P25 channel receive only (a YSF one never decodes IMBE here) */
+#if CONFIG_XBAND
+    if(request_mode==5 && XB_P25)voice.tap=xb_tap;  /* DDM32 Plus cross-band: the frames to the ring, not the replay */
+#endif
 #endif
     int ok=1;
 #if CONFIG_P25_NATIVE
@@ -1334,7 +1461,7 @@ static int receive_run(void)
     }
 #endif
     if(sample_checks)pcm_crc^=0xffffffffu;
-    return ok && !fifo.overflows && !unsupported;
+    return ok && (XB_P25 || !fifo.overflows) && !unsupported;
 }
 static void run(void *ctx)
 {
@@ -1369,30 +1496,38 @@ static void run(void *ctx)
  * plain bytes while it is idle; every start refuses meanwhile (XB_LENT), and nothing else reads it then (the caller
  * fields Home shows are copies outside voice). Given back zeroed: the state the worker finds at power on, which its
  * next receive or transmission initializes anyway */
-uint8_t p25_lab_lend(uint8_t *seg[],size_t len[])
+uint8_t p25_lab_lend(uint8_t *seg[],size_t len[],bool p25)
 {
     taskENTER_CRITICAL();
     int ok=!xb_lent && state!=1;
-    if(ok)xb_lent=1;
+    if(ok) {
+        if(p25)memset(&fifo,0,P25_LAB_XB_RING_BYTES);   /* an empty ring, receiving */
+        xb_lent=p25?2:1;
+        rp_request=rp_playing=0;rp_count=rp_head=0;     /* the last call's frames go */
+    }
     taskEXIT_CRITICAL();
     if(!ok)return 0;
     uint8_t n=0;
-    seg[n]=(uint8_t *)&voice;len[n++]=sizeof voice;
-    seg[n]=(uint8_t *)&fifo;len[n++]=sizeof fifo;
-#if CONFIG_CALL_REPLAY && CONFIG_DEV_TX && CONFIG_P25_CHANNELS
-    rp_request=rp_playing=0;rp_count=rp_head=0;   /* the last call's frames go */
+    if(p25) {
+        /* P25: the voice context stays the worker's, the ring stays at the FIFO's start */
+        seg[n]=(uint8_t *)&fifo+P25_LAB_XB_RING_BYTES;len[n++]=sizeof fifo-P25_LAB_XB_RING_BYTES;
+    } else {
+        seg[n]=(uint8_t *)&voice;len[n++]=sizeof voice;
+        seg[n]=(uint8_t *)&fifo;len[n++]=sizeof fifo;
+    }
     seg[n]=&rp_buf[0][0];len[n++]=sizeof rp_buf;
-#endif
     return n;
 }
+/* Given back cleared. A P25 session's may come back while the worker still runs its receive: it reads xb_lent under
+ * the same lock before every touch of the FIFO or the ring, and finds an empty FIFO after */
 void p25_lab_give_back(void)
 {
-    memset(&voice,0,sizeof voice);
+    if(!XB_P25)memset(&voice,0,sizeof voice);
+    taskENTER_CRITICAL();
     memset(&fifo,0,sizeof fifo);
-#if CONFIG_CALL_REPLAY && CONFIG_DEV_TX && CONFIG_P25_CHANNELS
     memset(rp_buf,0,sizeof rp_buf);rp_count=rp_head=rp_pos=0;
-#endif
-    taskENTER_CRITICAL();xb_lent=0;taskEXIT_CRITICAL();
+    xb_lent=0;
+    taskEXIT_CRITICAL();
 }
 #endif
 void p25_lab_start(void)
@@ -1479,7 +1614,7 @@ size_t p25_lab_command(const uint8_t *req,uint16_t len,uint8_t *out,size_t cap)
     if((req[0]>=(CONFIG_DEV_TX?2:1) && req[0]<=4) || req[0]==9 || req[0]==12) { out[0]=DL_ST_UNAVAILABLE;return 1; }
 #endif
     taskENTER_CRITICAL();
-    int busy=state==1 || XB_LENT;
+    int busy=state==1 || XB_ANY;
 #if CONFIG_P25_NATIVE
     busy=busy || native_lab_reserved();
 #endif

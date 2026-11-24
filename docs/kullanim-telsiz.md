@@ -124,16 +124,21 @@ Paketler DOTA ile başka bir telsize de gönderilebilir.
 
 ## 10. Çapraz bant (kaydet-ilet)
 
-**Araçlar > Çapraz bant**, iki frekans (A ve B) arasında **DMR** kaydet-ilet röledir: birinde duyulan konuşma bütün
-olarak kaydedilir, sonra diğerinde gönderilir. Kurallar (telsiz uygular):
+**Araçlar > Çapraz bant**, iki frekans (A ve B) arasında kaydet-ilet röledir: birinde duyulan konuşma bütün olarak
+kaydedilir, sonra diğerinde gönderilir. A ve B'nin her birinin kendi modu vardır (**A modu**, **B modu**). Olan
+çiftler: **DMR -> DMR**, **NXDN -> DMR**, **DMR -> FM**, **NXDN -> FM**, **P25 -> P25**. Tek yönlü çiftte (ör. A NXDN,
+B DMR) yalnız kaynak taraf dinlenir. Başka her çift "Bu mod çifti desteklenmiyor" ile reddedilir (P25 ile DMR arası,
+NXDN gönderme, FM dinleme, YSF yok). Kurallar (telsiz uygular):
 
 - **Yalnız başındayken**: her başlatmada sorar. Çalışırken ekran kilitlidir; yalnız **Geri** durdurur. Her ekranda
   **CROSS** işareti görünür.
 - Yalnız amatör simpleks frekanslar (144-146, 430-440 MHz); röle ve uydu bölümleri, APRS 144.800, PMR446 ve röle
   listesindeki frekanslar reddedilir. A ve B aynı renk kodu ve slotu kullanır.
-- Bir konuşma en çok yaklaşık 38 saniye kaydedilir; daha uzunu kesilir. Her 10 dakikada çağrı işaretiniz CW ile
-  gönderilir (telsiz adı çağrı işareti olmalı).
-- FM ve P25 çapraz bant yoktur (bellek ve tek alıcı yetmez).
+- Bir konuşma en çok yaklaşık 38 saniye (FM tarafı varsa 32, P25'te 18 saniye) kaydedilir; daha uzunu kesilir. Her
+  10 dakikada çağrı işaretiniz CW ile gönderilir (telsiz adı çağrı işareti olmalı).
+- P25 ilerken P25 sizin DMR ID'niz ve duyulan NAC / konuşma grubu ile gider; kaydedilirken hoparlörden duyulmaz.
+- FM tarafına giden ses telsizin kendi AMBE kodlayıcısıyla çözülür. NXDN, FM ve P25 çiftleri telsizde henüz
+  denenmedi.
 
 ## 11. Tanılama ve diğer araçlar
 

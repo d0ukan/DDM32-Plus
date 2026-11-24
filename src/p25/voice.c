@@ -244,9 +244,9 @@ int p25_voice_tx_begin(p25_voice *v, const p25_call *call)
     return 1;
 }
 
-static int encode_frame(p25_voice *v, int16_t pcm[160])
+/* The frame at voice[voice_count] is in: an LDU once nine are */
+static int frame_in(p25_voice *v)
 {
-    if (!dm32_imbe_encode(&v->codec, pcm, v->voice[v->voice_count])) return fail(v);
     if (++v->voice_count < 9) return 1;
     p25_voice_packet *p = next_packet(v);
     const uint8_t lsd[2] = {0, 0};
@@ -258,11 +258,29 @@ static int encode_frame(p25_voice *v, int16_t pcm[160])
     return 1;
 }
 
+static int encode_frame(p25_voice *v, int16_t pcm[160])
+{
+    if (!dm32_imbe_encode(&v->codec, pcm, v->voice[v->voice_count])) return fail(v);
+    return frame_in(v);
+}
+
 int p25_voice_tx_pcm(p25_voice *v, int16_t pcm[160])
 {
     if (!v->transmitting || v->stopping || !pcm) return 0;
     return encode_frame(v, pcm);
 }
+
+#if defined(CONFIG_XBAND) && CONFIG_XBAND
+int p25_voice_tx_imbe(p25_voice *v, const uint16_t u[8])
+{
+    if (!v->transmitting || v->stopping || !u) return 0;
+    /* A ninth frame waits for room as an encoded one does (finish_call's rule): the caller only hands one in while
+     * count < P25_VOICE_QUEUE or voice_count < 8 */
+    if (v->voice_count == 8 && v->count >= P25_VOICE_QUEUE) return 0;
+    memcpy(v->voice[v->voice_count], u, sizeof v->voice[0]);
+    return frame_in(v);
+}
+#endif
 
 static void append_terminator(p25_voice *v)
 {

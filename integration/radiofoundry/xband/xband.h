@@ -6,12 +6,19 @@
  * heard. Attended operation only (the screen says so before it starts); the radio's screen is locked while it runs,
  * only the stop key works (ui_xband.c).
  *
- * DMR only (owner: DMR first): an over is kept as the 72-bit AMBE+2 air frames the call stack hands its voice sink (9
- * bytes a 20 ms frame) and sent again through the call stack's voice source, so nothing is decoded or encoded again.
- * The memory is the P25 worker's (its voice context, its audio FIFO and the call replay's frames, ~17 KB, about 38 s)
- * lent while the session runs and given back after (p25_lab.c, plus_xband.py). FM (PCM is 16 KB/s; through the AMBE
- * codec it would need the owner's stock codec, which no host test can run) and P25 (its frames would need the very
- * buffers the recording takes, and an IMBE transmit path the P25 worker does not have) are refused (XB_R_MODE).
+ * A mode per side (owner, 2026-11-24; docs/xband-multiproto-study.md steps 2 and 3): A and B each have their own
+ * frequency and mode, and an over goes from one side to the other only where the pair is built (xband_pair_ok):
+ *   DMR -> DMR, NXDN -> DMR    the 72-bit AMBE+2 air frames as heard (an NXDN voice field is a DMR air frame), 9 bytes
+ *                              a 20 ms frame, sent again through the call stack's voice source;
+ *   DMR -> FM, NXDN -> FM      the same frames kept, decoded by the stock AMBE+2 codec while it sends and played into
+ *                              the FM modulator (the SSTV / APRS tone path, hal_afsk.h tx_pcm);
+ *   P25 -> P25                 the IMBE voice parameters as heard (88 bits in 11 bytes a frame), sent again through the
+ *                              P25 transmitter with its encoder skipped (p25_lab.c).
+ * Nothing else: no transcoding (P25 <-> DMR), no transmitter for NXDN, no YSF, no FM receive (XB_R_MODE). A pair that
+ * works one way only (NXDN -> DMR, DMR -> FM, ...) listens on its source side only. The memory is the P25 worker's
+ * lent while the session runs and given back after (p25_lab.c, plus_xband.py): its voice context, audio FIFO and the
+ * call replay's frames (~17 KB, about 38 s of AMBE+2 frames; less the FM side's 160 ms of decoded audio), or for a P25
+ * session, which needs the worker's voice context, the FIFO and the call replay's frames only (~10 KB, about 18 s).
  *
  * Rules (owner, 2026-11-20): both frequencies in the amateur bands (144-146, 430-440 MHz), never PMR446
  * (446.000-446.200 MHz: no repeaters there, the radio is not type-approved for it), never a repeater input or output
@@ -28,6 +35,8 @@
 #include <stdint.h>
 
 #define XB_FRAME_BYTES	9u		/* one 72-bit AMBE+2 air frame */
+#define XB_P25_FRAME_BYTES 11u		/* one IMBE frame's eight parameters, 88 bits (p25_lab.c's call replay packing) */
+#define XB_FRAME_MAX	11u
 #define XB_FRAME_MS	20u
 #define XB_DWELL_MS	1000u		/* listening: each frequency this long, longer while bursts are heard */
 #define XB_HOLD_MS	400u		/* bursts heard this recently hold the frequency */
@@ -40,7 +49,7 @@
 #define XB_SEGMENTS	3u
 #define XB_CALL_MAX	7u		/* a callsign: radio_cwid_callsign's 4 to 7 characters */
 
-enum { XB_MODE_DMR, XB_MODE_FM, XB_MODE_P25, XB_MODES };
+enum { XB_MODE_DMR, XB_MODE_FM, XB_MODE_P25, XB_MODE_NXDN, XB_MODES };
 
 /* Why a frequency or a request is refused (0: allowed) */
 enum {
@@ -51,7 +60,7 @@ enum {
 	XB_R_REPEATER,		/* a repeater input or output segment */
 	XB_R_SATELLITE,		/* a satellite segment */
 	XB_R_APRS,		/* the APRS frequency */
-	XB_R_MODE,		/* FM / P25: not built (DMR only) */
+	XB_R_MODE,		/* the pair of modes is not built either way (xband_pair_ok) */
 	XB_R_CALL,		/* no callsign for the CW ID */
 	XB_R_ID,		/* no DMR ID */
 	XB_R_OFFSET,		/* a channel whose RX and TX frequencies differ (a repeater channel) */
@@ -67,8 +76,8 @@ enum { XB_BEEP_CUT, XB_BEEP_ERROR };
 
 typedef struct {
 	uint32_t hz[2];			/* A, B */
-	uint8_t mode;			/* XB_MODE_* */
-	uint8_t cc, ts;			/* DMR colour code 0-15, slot 1-2 (both sides) */
+	uint8_t mode[2];		/* XB_MODE_* of A, B */
+	uint8_t cc, ts;			/* DMR colour code 0-15, slot 1-2 (the DMR sides) */
 	uint8_t power;			/* 1 low, 2 mid, 3 high (a power class) */
 	char call[XB_CALL_MAX + 1];	/* the CW ID's callsign (radio_cwid_callsign of the radio name) */
 } xband_req_t;
@@ -86,11 +95,17 @@ typedef struct {
 
 /* --- The rules (any task) --- */
 uint8_t xband_check_hz(uint32_t hz);
-/* Both frequencies, the pair, the mode, the callsign */
+/* An over heard in mode from can be sent in mode to (the pairs built) */
+bool xband_pair_ok(uint8_t from, uint8_t to);
+/* The sides an over is heard on: bit 0 A (relayed to B), bit 1 B (relayed to A); 0: the pair is refused */
+uint8_t xband_listens(const xband_req_t *r);
+/* The bytes a frame of r's session takes: XB_P25_FRAME_BYTES for P25, else XB_FRAME_BYTES */
+uint8_t xband_frame_bytes(const xband_req_t *r);
+/* Both frequencies, the pair, the modes, the callsign */
 uint8_t xband_check(const xband_req_t *r);
 /* A power class (1 low, 2 mid, 3 high) as the board's level */
 uint8_t xband_power_level(uint8_t cls, uint8_t power_count);
-/* The frames that n bytes hold; their length in ms */
+/* The frames that n bytes hold (of the session's size, XB_FRAME_BYTES before the first) */
 uint16_t xband_frames_for(size_t bytes);
 
 /* --- The UI (any task) --- */
@@ -107,9 +122,12 @@ void radio_req_xband(bool on);
 
 /* --- The radio core (radio task) --- */
 typedef struct {
-	void (*tune)(uint8_t side);			/* receive on hz[side] (the session's DMR channel) */
+	void (*tune)(uint8_t side);			/* receive on hz[side] in its mode (the session's channel) */
 	bool (*key)(uint8_t side, uint32_t dst, bool group);	/* transmit the over on hz[side] to dst (false: refused) */
-	void (*unkey)(void);				/* the over is out: let go (the call stack ends its superframe) */
+	/* the over's frames are all out of the store: let go once they are on the air (DMR: the call stack ends its
+	 * superframe; FM: the decoded audio still queued plays out; P25: the transmitter sends what it holds, then its
+	 * terminator). The radio core cuts what is still on the air at the latest XB_SEND_SLACK_MS later */
+	void (*unkey)(void);
 	bool (*cw)(uint8_t side);			/* the CW ID on hz[side] (false: refused) */
 	void (*beep)(uint8_t what);			/* XB_BEEP_* */
 } xband_io_t;
@@ -118,6 +136,7 @@ typedef struct {
 	bool activity;			/* a burst heard on our slot and colour code within XB_HOLD_MS */
 	bool tx;			/* our transmitter is on (an over or the CW ID) */
 	bool battery_critical;
+	bool id_wait;			/* the CW ID io->cw accepted is not keyed yet (a P25 channel lets go first) */
 } xband_in_t;
 /* RREQ_XBAND arg 1: the session to take; false when none waits (then xband_req() is what the core tunes) */
 bool xband_begin(uint32_t now);
@@ -131,10 +150,18 @@ bool xband_owns_radio(void);
 void xband_release(void);
 /* PTT pressed during a session: refused (the core plays the deny tone) */
 void xband_ptt(void);
-/* The call stack's voice (dmr_call_poll, the radio task): a call heard and its frames, and the frames to send */
+/* True only while the radio core keys or lets go of a P25 over itself (native_lab.c passes that PTT request on to the
+ * P25 transmitter; every other PTT request during a session is the radio core's, refused) */
+extern bool xband_native_key;
+/* True while the radio core holds a session's channel, its end included (a P25 session's native receiver lets go
+ * after the engine is off): native_lab.c refuses PTT on that channel until the user's channel is back */
+extern bool xband_held;
+/* The voice heard and sent (the radio task: the call stack's sink and source, the NXDN receiver, the P25 worker's frames
+ * handed over by the radio core): a call heard and its frames, and the frames to send. A frame is the session's size
+ * (xband_frame_bytes) */
 void xband_rx_begin(uint32_t src, uint32_t dst, bool group, bool encrypted);
-void xband_rx_frame(const uint8_t frame[XB_FRAME_BYTES]);
+void xband_rx_frame(const uint8_t *frame);
 void xband_rx_end(void);
-bool xband_tx_next(uint8_t frame[XB_FRAME_BYTES]);
+bool xband_tx_next(uint8_t *frame);
 
 #endif

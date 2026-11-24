@@ -3,7 +3,7 @@
 # DDM32 Plus art: splash, wordmark and icons
 
 Our own look for DDM32 Plus (working name DM32 Plus until 2026-11-19): a boot mark, a "DDM32 Plus" wordmark, the
-author's callsign TA2DOU small at the splash's bottom centre, and 28 list icons. Nothing here is taken from
+author's callsign TA2DOU small at the splash's bottom centre, and 32 list icons. Nothing here is taken from
 RadioFoundry (its radio-in-a-hexagon mark and two-color "RadioFoundry" wordmark), from the upstream Open25-DM32
 Classic/Next releases, OnurP25 or the DM32-nxdn-p25 avatar. The name on screen is "DDM32 Plus" (`art.h`
 `ART_PRODUCT`, `ART_CALLSIGN`; docs/plus.md "Name and public build"). `art/preview.png` and `art/mock-splash.png`
@@ -16,7 +16,7 @@ test done; not yet seen on the real screen (the radio still runs 7c90427b, which
 
 | Path | What |
 |---|---|
-| `art/icons.txt` | 28 icons, 16x16, `#` ink / `.` none; order = `ART_ICON_*` enum order |
+| `art/icons.txt` | 32 icons, 16x16, `#` ink / `.` none; order = `ART_ICON_*` enum order |
 | `art/mark.txt` | splash mark, 38x56, `.` none, `a` `b` `c` = its three colors (RGB + role in the header: ink, paper or fg) |
 | `art/mark_gen.py` | traces `mark.txt` from the owner's drawing `art/mark-src.png` (needs Pillow; `mark.txt` may be edited by hand instead) |
 | `art/mark-src.png` | the owner's logo drawing, the source of the mark |
@@ -58,7 +58,7 @@ row is 24 px (`ui_layout_init`), so 16x16 icons fit with 4 px above and below.
 
 | Part | Flash (csky-elf-gcc 14.3 -Os, ck803s) | RAM |
 |---|---|---|
-| `art_data.o` (28 icons 896 B, mark 784 B, colors 9 B, wordmark 120 B) | 1809 B | 0 |
+| `art_data.o` (32 icons 1024 B, mark 784 B, colors 9 B, wordmark 120 B) | 1937 B | 0 |
 | `art.o` (drawing) | 736 B | 0 |
 | `splash_plus.o` | 626 B | 0 |
 | **Total** | **≈ 3.1 KiB** (budget 24 KiB) | 0 static; stack < 100 B |
@@ -82,7 +82,7 @@ cc -std=gnu11 -Wall -Wextra -Wshadow -Wconversion -Werror -fsanitize=address,und
 ```
 
 Verified 2026-11-17: gcc 15 and clang (WSL), ASan+UBSan, `-Wconversion -Wsign-conversion -Werror`: zero warnings,
-`art: 28 icons, 1797 bytes of tables: ok`. A pixel flipped in `icons.txt` fails the test. `art.c`,
+`art: 32 icons, 1725 bytes of tables: ok`. A pixel flipped in `icons.txt` fails the test. `art.c`,
 `splash_plus.c` and `art_data.c` also pass `-fsyntax-only -Wall -Wextra -Wshadow -Wdouble-promotion -Werror`
 against the patched tree's headers (`build/dm32-p25-plus/gen`) with `CONFIG_PLUS_ART=1`, and build with the csky
 toolchain. Not done: a full firmware build, the simulator, the radio.

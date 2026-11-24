@@ -119,8 +119,8 @@ def prepare_alldigital(transform, install):
         ('TRN("CW decoder"), TRN("Battery"),', 'TRN("CW decoder"), TRN("All digital search"), TRN("Battery"),'),
         ('\tcase T_CW: ui_push(SCR_CW, 0); break;\n',
          '\tcase T_CW: ui_push(SCR_CW, 0); break;\n\tcase T_ALLSEARCH: ui_push(SCR_ALLSEARCH, 0); break;\n'),
-        ('\t\t[T_CW] = ART_ICON_BEACON + 1,', '\t\t[T_ALLSEARCH] = ART_ICON_P25SEARCH + 1,\t// the searches\' magnifier\n'
-         '\t\t[T_CW] = ART_ICON_BEACON + 1,'),
+        ('\t\t[T_CW] = ART_ICON_CW + 1,', '\t\t[T_ALLSEARCH] = ART_ICON_P25SEARCH + 1,\t// the searches\' magnifier\n'
+         '\t\t[T_CW] = ART_ICON_CW + 1,'),
     ])
     # * opens the range editor there too (as on the two other search screens)
     transform('core/ui/ui_app.c', [

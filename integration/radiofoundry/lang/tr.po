@@ -6279,8 +6279,20 @@ msgid "Satellite segment"
 msgstr "Uydu bölümü"
 
 #: core/ui/ui_xband.c
-msgid "DMR only for now"
-msgstr "Şimdilik yalnız DMR"
+msgid "Mode pair not supported"
+msgstr "Bu mod çifti desteklenmiyor"
+
+#: core/ui/ui_xband.c
+msgid "A mode"
+msgstr "A modu"
+
+#: core/ui/ui_xband.c
+msgid "B mode"
+msgstr "B modu"
+
+#: core/ui/ui_xband.c
+msgid "Type the MHz: 433500"
+msgstr "MHz yazın: 433500"
 
 #: core/ui/ui_xband.c
 msgid "Repeater channel (RX and TX differ)"

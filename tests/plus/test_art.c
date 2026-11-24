@@ -100,13 +100,13 @@ static int upper_eq(const char *a, const char *b)
 static const char *const enum_names[] = {
 	"SCAN", "POSITION", "HOTSPOT", "USB_NET", "SFR", "ROAM", "DIAG", "APRS", "SPECTRUM", "FOX", "BEACON", "LONE",
 	"ALMANAC", "GOTO", "P25SEARCH", "AIRBAND", "BATTERY", "ZONE_OFFER", "MAP", "SETTINGS", "ZONES", "CONTACTS",
-	"MESSAGES", "DUAL", "LANGUAGE", "CHANNELS", "RECENT", "LAST_CALLER",
+	"MESSAGES", "DUAL", "LANGUAGE", "CHANNELS", "RECENT", "LAST_CALLER", "DOTA", "XBAND", "CW", "SOS",
 };
 
 static void test_icons(const char *dir)
 {
 	CHECK(ART_ICON_COUNT == sizeof enum_names / sizeof enum_names[0], "icon count %d", ART_ICON_COUNT);
-	CHECK(ART_ICON_SCAN == 0 && ART_ICON_SPECTRUM == 8 && ART_ICON_LAST_CALLER == ART_ICON_COUNT - 1, "enum order");
+	CHECK(ART_ICON_SCAN == 0 && ART_ICON_SPECTRUM == 8 && ART_ICON_SOS == ART_ICON_COUNT - 1, "enum order");
 	if (load(dir, "icons.txt") != 0) {
 		fails++;
 		return;

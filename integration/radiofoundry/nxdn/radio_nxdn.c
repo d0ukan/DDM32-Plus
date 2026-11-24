@@ -29,6 +29,9 @@
 #include "task.h"
 #include "dmr/ambe/ambeVoice.h"
 #include "nxdn/nxdn_rx.h"
+#if CONFIG_XBAND
+#include "radio/xband.h"
+#endif
 #if CONFIG_DPMR
 #include "radio/radio_dpmr.h"
 #include "dpmr/dpmr_rx.h"
@@ -154,6 +157,8 @@ static void dpmr_event(void *ctx, unsigned ev, const dpmr_call_t *m)
 #endif
 
 /* --- voice to the DMR vocoder, one field per 20 ms --- */
+/* (DDM32 Plus cross-band, radio/xband.h: an NXDN side's call is recorded as it plays, each 72-bit voice field being a
+ * DMR air frame; the engine takes them only while a session listens here, and never an encrypted call's) */
 static void voice_out(uint32_t now_ms)
 {
 	const dmr_voice_sink_t *sink = ambeVoiceSink();
@@ -165,9 +170,17 @@ static void voice_out(uint32_t now_ms)
 		v_next_ms = now_ms;
 		if (sink->begin)
 			sink->begin(NULL, sink->ctx);
+#if CONFIG_XBAND
+		if (kind == KIND_NXDN)
+			xband_rx_begin(caller.source, caller.destination, caller.group, caller.encrypted);
+#endif
 	}
 	while ((int32_t)(now_ms - v_next_ms) >= 0 && st->vq_tail != st->vq_head) {
 		sink->frame(st->vq[st->vq_tail % VQ], sink->ctx);
+#if CONFIG_XBAND
+		if (kind == KIND_NXDN)
+			xband_rx_frame(st->vq[st->vq_tail % VQ]);
+#endif
 		st->vq_tail++;
 		v_next_ms += 20u;
 	}
@@ -175,6 +188,10 @@ static void voice_out(uint32_t now_ms)
 		v_open = false;
 		if (sink->end)
 			sink->end(sink->ctx);
+#if CONFIG_XBAND
+		if (kind == KIND_NXDN)
+			xband_rx_end();
+#endif
 	}
 }
 

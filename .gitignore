@@ -562,6 +562,7 @@ __pycache__/
 # DDM32 Plus round 14 xband: last calls (item 43), cross-band store and forward (item 46) (tools/plus_xband.py)
 !/tools/plus_xband.py
 !/tools/test_xband.py
+!/tools/test_toolicons.py
 !/integration/radiofoundry/lastcall/lastcall.c
 !/integration/radiofoundry/lastcall/lastcall.h
 !/integration/radiofoundry/lastcall/ui_lastcall.c
@@ -576,6 +577,8 @@ __pycache__/
 !/tests/plus/test_xband.c
 !/tests/plus/test_xband_radio.inc
 !/tests/plus/test_ui_xband.c
+!/tests/plus/test_ui_toolicons.c
+!/tests/plus/test_xband_worker.c
 # DDM32 Plus DMR receive audio diagnostics (tools/plus_dmraudio.py, branch fix-dmr-audio)
 !/tools/plus_dmraudio.py
 !/tools/test_dmraudio.py

@@ -91,8 +91,24 @@ uint32_t p25_lab_call(p25_lab_call_t *out);
  * memory (up to 3 segments: their addresses and sizes); 0 while the worker runs (or they are lent already). Until they
  * come back no receive, transmission or bench request starts; given back cleared, as at power on (the call replay's
  * last call is gone) */
-uint8_t p25_lab_lend(uint8_t *seg[], size_t len[]);
+uint8_t p25_lab_lend(uint8_t *seg[], size_t len[], bool p25);
 void p25_lab_give_back(void);
+/* A P25 session (p25 true above): the voice context stays the worker's; the audio FIFO's first P25_LAB_XB_RING_BYTES
+ * hold the frames on their way between the worker and the radio task, the rest of it and the call replay's frames are
+ * lent. Until given back a channel receive plays nothing and hands every IMBE frame it would play (the call replay's
+ * packing, 11 bytes) to the ring; after p25_lab_xb_send(1) the next transmission takes its frames from the ring (never
+ * the microphone, which stays off) until p25_lab_xb_send(0) and the ring is empty, then ends with its terminator.
+ * Radio task, except where the worker is named */
+enum { P25_LAB_XB_FRAMES = 16, P25_LAB_XB_BYTES = 11 };
+#define P25_LAB_XB_RING_BYTES (4u + P25_LAB_XB_FRAMES * P25_LAB_XB_BYTES)
+int p25_lab_xb_take(uint8_t frame[P25_LAB_XB_BYTES]);	/* a frame heard: 1, none waiting: 0 */
+int p25_lab_xb_put(const uint8_t frame[P25_LAB_XB_BYTES]);	/* a frame to send queued: 1, the ring full: 0 */
+void p25_lab_xb_heard(uint16_t *nac, uint16_t *tg, uint32_t *src);	/* the call the frames heard last came from */
+void p25_lab_xb_send(int on);	/* 1: the next transmission sends the ring (emptied now); 0: no more frames come */
+int p25_lab_xb_sent(void);	/* the ring's transmission ran and ended (sent whole or not) */
+/* The next transmission's link control: NAC, talkgroup and our unit ID (p25_lab_set_channel's, but also while a
+ * receive runs; the transmission takes them when it starts) */
+void p25_lab_xb_call(uint16_t nac, uint16_t tg, uint32_t id);
 #endif
 #if CONFIG_CALL_REPLAY
 /* The last P25 call kept for replay: its frames (20 ms each, 0 = none) and who it was; start (1) plays it on the

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* DDM32 Plus Tools > Cross-band (radio/xband.h, docs/plus.md "Cross-band store and forward"): the form (A and B typed
- * or picked from a zone's channels, the mode, colour code, slot, power, Start), the checks before a start, the
+ * or picked from a zone's channels, each with its mode, then colour code, slot, power, Start), the checks before a start, the
  * attended-operation question, then Home. While it runs the screen is locked: every key but Back is refused with a
  * toast, Back stops it (owner, 2026-11-20); Home's status strip says CROSS and its bottom line what the relay does
  * ("Record A 0:12  Back"). Each page is a list (ui_draw_list). The form edits xband_req() itself (no copy);
@@ -55,7 +55,7 @@ static const char *why_text(uint8_t why)
 		[XB_R_REPEATER] = TRN("Repeater frequency"),
 		[XB_R_SATELLITE] = TRN("Satellite segment"),
 		[XB_R_APRS] = TRN("APRS frequency"),
-		[XB_R_MODE] = TRN("DMR only for now"),
+		[XB_R_MODE] = TRN("Mode pair not supported"),
 		[XB_R_CALL] = TRN("Set your callsign (the radio name) in qdmr."),
 		[XB_R_ID] = TRN("Set your DMR ID first"),
 		[XB_R_OFFSET] = TRN("Repeater channel (RX and TX differ)"),
@@ -81,7 +81,9 @@ const char *ui_xband_refusal(uint32_t hz)
 #endif
 
 #if CONFIG_XBAND
-enum { R_A, R_B, R_MODE, R_CC, R_TS, R_POWER, R_GO, R_ROWS };
+enum { R_A, R_AM, R_B, R_BM, R_CC, R_TS, R_POWER, R_GO, R_ROWS };
+#define FREQ_ROW(r)	((r) == R_A || (r) == R_B)
+#define SIDE(r)		((r) >= R_B ? 1u : 0u)	/* A / B of a frequency or mode row */
 
 static uint8_t focus, ndigits, page;	/* page 1: the attended-operation question */
 static char digits[8];			/* a frequency being typed on A / B */
@@ -98,6 +100,10 @@ static bool checks(void)
 	if (radio_cwid_callsign(name, r->call, sizeof r->call) == 0)
 		r->call[0] = '\0';
 	uint8_t why = xband_check(r);
+#if !CONFIG_NXDN
+	if (why == XB_R_OK && (r->mode[0] == XB_MODE_NXDN || r->mode[1] == XB_MODE_NXDN))
+		why = XB_R_MODE;	/* no NXDN receiver in this build */
+#endif
 	for (uint8_t k = 0; why == XB_R_OK && k < 2; k++)
 		why = hz_why(r->hz[k]);	/* the repeater list's (the band plan's passed in xband_check) */
 	if (why == XB_R_OK && ui_view()->dmr.own_id == 0)
@@ -135,22 +141,23 @@ static void go(void)
 
 static void row_text(uint8_t r, bool f, sbuf_t *b, const char **label)
 {
-	static const char *const labels[R_ROWS] = { "A", "B", TRN("Mode"), TRN("Color code"), TRN("Slot"), TRN("Power"),
-						    TRN("Start") };
-	static const char *const modes[XB_MODES] = { "DMR", "FM", "P25" };
+	static const char *const labels[R_ROWS] = { "A", TRN("A mode"), "B", TRN("B mode"), TRN("Color code"), TRN("Slot"),
+						    TRN("Power"), TRN("Start") };
+	static const char *const modes[XB_MODES] = { "DMR", "FM", "P25", "NXDN" };
 	const xband_req_t *q = xband_req();
-	*label = r <= R_B ? labels[r] : tr(labels[r]);
+	*label = FREQ_ROW(r) ? labels[r] : tr(labels[r]);
 	switch (r) {
 	case R_A:
 	case R_B:
 		if (f && ndigits != 0)
 			sb_str(b, digits);
-		else if (q->hz[r] != 0)
-			sb_freq(b, q->hz[r]);
+		else if (q->hz[SIDE(r)] != 0)
+			sb_freq(b, q->hz[SIDE(r)]);
 		else
 			sb_str(b, "---");
 		break;
-	case R_MODE: sb_str(b, modes[q->mode < XB_MODES ? q->mode : 0]); break;
+	case R_AM:
+	case R_BM: sb_str(b, modes[q->mode[SIDE(r)] < XB_MODES ? q->mode[SIDE(r)] : 0]); break;
 	case R_CC: sb_u32(b, q->cc, 1); break;
 	case R_TS: sb_u32(b, q->ts, 1); break;
 	case R_POWER: sb_str(b, q->power <= 1u ? TR("Low") : q->power == 2u ? TR("Mid") : TR("High")); break;
@@ -190,8 +197,9 @@ static void step(uint8_t r, int dir)
 	xband_req_t *q = xband_req();
 	switch (r) {
 	case R_A:
-	case R_B: q->hz[r] = (uint32_t)((int32_t)q->hz[r] + dir * 12500); break;
-	case R_MODE: q->mode = (uint8_t)((q->mode + XB_MODES + (unsigned)dir) % XB_MODES); break;
+	case R_B: q->hz[SIDE(r)] = (uint32_t)((int32_t)q->hz[SIDE(r)] + dir * 12500); break;
+	case R_AM:
+	case R_BM: q->mode[SIDE(r)] = (uint8_t)((q->mode[SIDE(r)] + XB_MODES + (unsigned)dir) % XB_MODES); break;
 	case R_CC: q->cc = (uint8_t)((q->cc + 16 + dir) % 16); break;
 	case R_TS: q->ts = (uint8_t)(3 - q->ts); break;
 	case R_POWER: q->power = (uint8_t)((q->power + 2u + (unsigned)dir) % 3u + 1u); break;
@@ -199,14 +207,22 @@ static void step(uint8_t r, int dir)
 	}
 }
 
-/* 145500 / 4335125: kHz, or kHz and a digit of 100 Hz */
+/* A typed frequency in MHz, its first three digits the MHz (every band the relay may use has three): 433 is 433.000,
+ * 4335 and 43350 433.500, 145500 145.500, 4335125 433.5125. Fewer than three digits: told, the frequency kept. (Before
+ * 2026-11-25 only six or seven digits counted and any other entry was dropped without a word, so the row went back to
+ * an older frequency, maybe one refused, while the user believed the typed one was set) */
 static void typed(uint8_t r)
 {
 	uint32_t n = 0;
 	for (uint8_t i = 0; i < ndigits; i++)
 		n = n * 10u + (uint32_t)(digits[i] - '0');
-	if (r <= R_B && (ndigits == 6 || ndigits == 7))
-		xband_req()->hz[r] = n * (ndigits == 6 ? 1000u : 100u);
+	if (FREQ_ROW(r) && ndigits >= 3u) {
+		for (uint8_t i = ndigits; i < 9u; i++)
+			n *= 10u;	/* (7 digits at most: below 10^9) */
+		xband_req()->hz[SIDE(r)] = n;
+	} else if (FREQ_ROW(r) && ndigits != 0) {
+		ui_toast(TR("Type the MHz: 433500"));
+	}
 	ndigits = 0;
 }
 
@@ -233,7 +249,7 @@ static bool xband_key(const input_event_t *ev)
 			focus++;
 	} else if ((press && (act == ACT_NAV_LEFT || act == ACT_NAV_RIGHT)) || (act == ACT_ENC_STEP && ev->value != 0)) {
 		step(focus, act == ACT_ENC_STEP ? (ev->value > 0 ? 1 : -1) : act == ACT_NAV_RIGHT ? 1 : -1);
-	} else if (ev->gesture == GESTURE_PRESS && act >= ACT_DIGIT_0 && act <= ACT_DIGIT_9 && focus <= R_B) {
+	} else if (ev->gesture == GESTURE_PRESS && act >= ACT_DIGIT_0 && act <= ACT_DIGIT_9 && FREQ_ROW(focus)) {
 		if (ndigits < 7u)
 			digits[ndigits++] = (char)('0' + act - ACT_DIGIT_0);
 		digits[ndigits] = '\0';
@@ -247,8 +263,8 @@ static bool xband_key(const input_event_t *ev)
 		return false;
 	} else if (ndigits) {
 		typed(focus);
-	} else if (focus <= R_B) {
-		ui_push(SCR_XBAND_PICK, focus);
+	} else if (FREQ_ROW(focus)) {
+		ui_push(SCR_XBAND_PICK, SIDE(focus));
 	} else if (focus == R_GO) {
 		if (checks())
 			page = 1;	/* the question */
@@ -318,8 +334,17 @@ static void pick_select(uint16_t i, bool hold)
 		ui_toast(why_text(XB_R_OFFSET));
 		return;
 	}
+	/* the channel's mode comes with it; one the relay has no use for (YSF, dPMR, ...) is refused */
+	uint8_t mode = ch->mode == RADIO_MODE_DMR ? XB_MODE_DMR : ch->mode == RADIO_MODE_FM ? XB_MODE_FM :
+		       codeplug_mode_p25(ch->mode) && !codeplug_mode_ysf(ch->mode) ? XB_MODE_P25 :
+		       codeplug_mode_nxdn(ch->mode) ? XB_MODE_NXDN : XB_MODES;
+	if (mode == XB_MODES) {
+		ui_toast(why_text(XB_R_MODE));
+		return;
+	}
 	xband_req_t *q = xband_req();
 	q->hz[side] = ch->rx_hz;
+	q->mode[side] = mode;
 	if (ch->mode == RADIO_MODE_DMR) {
 		q->cc = (uint8_t)(ch->color_code & 15u);	/* a DMR channel brings its colour code and slot */
 		q->ts = ch->timeslot == 2 ? 2 : 1;

@@ -645,6 +645,21 @@ def main():
         trunk_objects.append(obj)
     run(['clang++','-fsanitize=address,undefined',*trunk_objects,codec,'-o',OUT/'test_trunk_worker'],cwd=ROOT)
     run([OUT/'test_trunk_worker'],cwd=ROOT)
+    # DDM32 Plus cross-band P25 -> P25 through the actual channel worker: the lend, the ring's frames sent bit for bit
+    # in LDUs, the same blocks heard back into the ring, no microphone, no audio, the lent memory untouched
+    xbw_flags=[f for f in ysf_flags if f not in ('-DCONFIG_YSF=1','-DCONFIG_DMR=1','-DCONFIG_P25_CALLER=1','-DCONFIG_CALL_LOG=1')]
+    xbw_flags+=['-DCONFIG_XBAND=1','-DCONFIG_CALL_REPLAY=1']
+    xbw_out=OUT/'xband-worker'
+    xbw_out.mkdir(exist_ok=True)
+    xbw_objects=[]
+    for source in [*(ROOT/'src/p25'/f'{n}.c' for n in ('p25','p25_lcx','voice','phy_stream','selftest','audio_fifo')),*CAI,
+                   ROOT/'integration/radiofoundry/cpu_profile.c',APP/'core/debuglink/dl_fmt.c',APP/'core/radio/beep.c',
+                   ROOT/'tests/plus/test_xband_worker.c']:
+        obj=xbw_out/obj_name(source)
+        run(['clang',*xbw_flags,'-c',source,'-o',obj],cwd=ROOT)
+        xbw_objects.append(obj)
+    run(['clang++','-fsanitize=address,undefined',*xbw_objects,codec,'-o',OUT/'test_xband_worker'],cwd=ROOT)
+    run([OUT/'test_xband_worker'],cwd=ROOT)
     p25_extras_tests(flags,ysf_flags,codec)
     p25nac.codeplug(flags)	# DM32 Plus separate RX / TX NAC: the record, CH_MODE 2, the transmitted NID
     p25nac.worker(ysf_flags,codec)
@@ -840,9 +855,14 @@ def main():
     run([OUT/'test_radio_dota'],cwd=host)
     # DDM32 Plus cross-band store and forward in the radio core: the same suites with it built in, then a DMR call on A
     # recorded and sent on B through the real call stack, the CW ID, the lock on requests and PTT, the channel back,
-    # a refused transmission, the P25 worker's memory not lent (tests/plus/test_xband_radio.inc)
+    # a refused transmission, the P25 worker's memory not lent; DMR -> FM through the voice bridge and a fake tone path;
+    # P25 -> P25 through the real native receiver / transmitter and a fake worker (tests/plus/test_xband_radio.inc)
     xbrad=OUT/'radioCoreXband.c'
-    xbrad.write_text('#include "native_modem/native_lab.h"\nextern const nt_ops classic_ops;\n'+fixture+
+    xbrad.write_text('#include "native_modem/native_lab.h"\nextern const nt_ops classic_ops;\n'+
+                     # (the fake board gains a fake tone path: an FM over plays through it)
+                     fixture.replace('const board_t board = {\n\t.native_modem=&classic_ops,',
+                                     'extern const hal_afsk_t xb_afsk;\nconst board_t board = {\n'
+                                     '\t.native_modem=&classic_ops,\n\t.afsk=&xb_afsk,')+
                      '\n#define main classic_radio_main\n#include "'+str(ROOT/'tests/classic/test_radio.inc')+'"\n#undef main\n'
                      '#include "'+str(ROOT/'tests/plus/test_xband_radio.inc')+'"\n')
     argv_xb=list(argv_cw)
@@ -1008,6 +1028,9 @@ def main():
     # DDM32 Plus round 14 xband: last calls of every mode and letter (tools/test_xband.py)
     import test_xband
     test_xband.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus Tools menu icons: every entry its own or a deliberate family's, in the real UI (tools/test_toolicons.py)
+    import test_toolicons
+    test_toolicons.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus SSTV send: the picture's audio decoded again, the page (tools/test_sstvtx.py)
     test_sstvtx.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus DMR receive audio diagnostics: the PCM driver's counters and prefill, the page (tools/test_dmraudio.py)

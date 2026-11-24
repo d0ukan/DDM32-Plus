@@ -37,6 +37,10 @@ enum {
 	ART_ICON_CHANNELS,
 	ART_ICON_RECENT,
 	ART_ICON_LAST_CALLER,
+	ART_ICON_DOTA,
+	ART_ICON_XBAND,
+	ART_ICON_CW,
+	ART_ICON_SOS,
 	ART_ICON_COUNT
 };
 
@@ -60,6 +64,6 @@ extern const uint8_t art_mark_fg[3];	// 1: the theme's foreground on color panel
 #define ART_WORD_SPLIT	48
 extern const uint8_t art_word_bits[ART_WORD_H * ART_WORD_STRIDE];
 
-#define ART_DATA_BYTES	1597	// flash taken by the tables above
+#define ART_DATA_BYTES	1725	// flash taken by the tables above
 
 #endif

@@ -43,9 +43,31 @@ uint8_t xband_check_hz(uint32_t hz)
 #endif
 
 #if CONFIG_XBAND
+/* The pairs built (xband.h): frames as heard, or the stock codec's decode into FM */
+bool xband_pair_ok(uint8_t from, uint8_t to)
+{
+	switch (from) {
+	case XB_MODE_DMR:
+	case XB_MODE_NXDN: return to == XB_MODE_DMR || to == XB_MODE_FM;
+	case XB_MODE_P25: return to == XB_MODE_P25;
+	default: return false;	/* FM is never heard (no FM receive path to keep) */
+	}
+}
+
+uint8_t xband_listens(const xband_req_t *r)
+{
+	return (uint8_t)((xband_pair_ok(r->mode[0], r->mode[1]) ? 1u : 0u) |
+			 (xband_pair_ok(r->mode[1], r->mode[0]) ? 2u : 0u));
+}
+
+uint8_t xband_frame_bytes(const xband_req_t *r)
+{
+	return r->mode[0] == XB_MODE_P25 ? XB_P25_FRAME_BYTES : XB_FRAME_BYTES;	/* P25 pairs only with P25 */
+}
+
 uint8_t xband_check(const xband_req_t *r)
 {
-	if (r->mode != XB_MODE_DMR)
+	if (r->mode[0] >= XB_MODES || r->mode[1] >= XB_MODES || xband_listens(r) == 0)
 		return XB_R_MODE;
 	for (unsigned s = 0; s < 2; s++) {
 		uint8_t why = xband_check_hz(r->hz[s]);
@@ -67,16 +89,19 @@ uint8_t xband_power_level(uint8_t cls, uint8_t power_count)
 	return cls <= 1u ? 0 : cls >= 3u ? (uint8_t)(power_count - 1u) : (uint8_t)(power_count / 2u);
 }
 
+static uint8_t fb = XB_FRAME_BYTES;	/* the session's frame size */
+
 uint16_t xband_frames_for(size_t bytes)
 {
-	size_t n = bytes / XB_FRAME_BYTES;
+	size_t n = bytes / fb;
 	return (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n);
 }
 
 /* --- The UI's side --- */
 
-static xband_req_t req = { .mode = XB_MODE_DMR, .cc = 1, .ts = 1, .power = 1 };
+static xband_req_t req = { .mode = { XB_MODE_DMR, XB_MODE_DMR }, .cc = 1, .ts = 1, .power = 1 };
 static volatile bool want_start, want_stop;
+bool xband_native_key, xband_held;
 static bool active;			/* the radio core runs the session */
 static xband_view_t view;
 
@@ -129,7 +154,7 @@ static uint8_t *frame_at(uint16_t i)
 {
 	for (uint8_t k = 0; k < segs; k++) {
 		if (i < seg_frames[k])
-			return seg_at[k] + (size_t)i * XB_FRAME_BYTES;
+			return seg_at[k] + (size_t)i * fb;
 		i = (uint16_t)(i - seg_frames[k]);
 	}
 	return NULL;
@@ -142,14 +167,14 @@ static struct {
 	uint32_t now;			/* the last poll */
 	uint32_t last_heard;		/* recording: a frame or the call, last */
 	uint32_t dst : 24;		/* the over's talkgroup or unit */
-	uint32_t phase : 3, side : 1, group : 1, id_pending : 2, id_side : 2;
+	uint32_t phase : 3, side : 1, group : 1, id_pending : 2, id_side : 2, listens : 2;
 	uint32_t id_last;		/* the last CW ID */
 	uint16_t rec;			/* frames recorded */
 	uint16_t rec_frames;		/* recording: frames heard in the over (cut ones too; stops counting there) */
 	uint16_t pos;			/* sending: frames out */
 	bool rx_open : 1, rx_ended : 1, cut : 1, cut_told : 1;	/* recording */
 	bool keyed : 1, drained : 1, unkeyed : 1, on_air : 1;	/* sending */
-	bool id_ever : 1, id_keyed : 1;				/* the CW ID */
+	bool id_ever : 1, id_keyed : 1, id_aired : 1;		/* the CW ID */
 } s;
 
 bool xband_begin(uint32_t now)
@@ -164,10 +189,12 @@ bool xband_begin(uint32_t now)
 	}
 	memset(&s, 0, sizeof s);
 	s.now = now;
+	s.listens = xband_listens(&req) & 3u;
+	fb = xband_frame_bytes(&req);
 	active = true;
 	want_stop = false;
 	view.phase = XB_P_LISTEN;
-	view.side = 0;
+	view.side = s.listens & 1u ? 0 : 1;
 	view.ended = XB_E_NONE;
 	view.cut = false;
 	view.frames = 0;
@@ -204,6 +231,7 @@ void xband_release(void)
 	segs = 0;
 	capacity = 0;
 	memset(seg_at, 0, sizeof seg_at);
+	fb = XB_FRAME_BYTES;
 }
 
 bool xband_owns_radio(void)
@@ -228,6 +256,8 @@ static void phase(uint8_t p, uint8_t side)
 
 static void listen(const xband_io_t *io, uint8_t side)
 {
+	if (!(s.listens & (1u << side)))
+		side = (uint8_t)(1u - side);	/* a pair built one way: only its source side is heard */
 	s.rx_open = s.rx_ended = s.cut = s.cut_told = false;
 	s.rec = 0;
 	s.rec_frames = 0;
@@ -257,7 +287,7 @@ void xband_rx_begin(uint32_t src, uint32_t dst, bool group, bool encrypted)
 	touch();
 }
 
-void xband_rx_frame(const uint8_t frame[XB_FRAME_BYTES])
+void xband_rx_frame(const uint8_t *frame)
 {
 	if (!active || s.phase != XB_P_RECORD || !s.rx_open)
 		return;
@@ -269,7 +299,7 @@ void xband_rx_frame(const uint8_t frame[XB_FRAME_BYTES])
 		s.cut = true;		/* the poll beeps; the rest of the over is heard, not kept */
 		return;
 	}
-	memcpy(frame_at(s.rec), frame, XB_FRAME_BYTES);
+	memcpy(frame_at(s.rec), frame, fb);
 	s.rec++;
 	view.frames = s.rec;
 }
@@ -280,7 +310,7 @@ void xband_rx_end(void)
 		s.rx_ended = true;
 }
 
-bool xband_tx_next(uint8_t frame[XB_FRAME_BYTES])
+bool xband_tx_next(uint8_t *frame)
 {
 	if (!active || s.phase != XB_P_SEND || !s.keyed || s.drained)
 		return false;
@@ -288,7 +318,7 @@ bool xband_tx_next(uint8_t frame[XB_FRAME_BYTES])
 		s.drained = true;	/* the poll lets go */
 		return false;
 	}
-	memcpy(frame, frame_at(s.pos), XB_FRAME_BYTES);
+	memcpy(frame, frame_at(s.pos), fb);
 	s.pos++;
 	view.frames = (uint16_t)(s.rec - s.pos);
 	return true;
@@ -307,6 +337,7 @@ static bool id_next(const xband_io_t *io)
 		if (!(s.id_pending & (1u << k)))
 			continue;
 		phase(XB_P_ID, k);
+		s.id_aired = false;
 		s.id_keyed = io->cw(k);
 		if (s.id_keyed)
 			return true;
@@ -352,7 +383,7 @@ void xband_poll(const xband_io_t *io, const xband_in_t *in, uint32_t now)
 		end(in->battery_critical ? XB_E_BATTERY : XB_E_STOPPED);
 		return;
 	}
-	if (s.phase == XB_P_OFF) {		/* the first poll: on A */
+	if (s.phase == XB_P_OFF) {		/* the first poll: on A (on B when only B is heard) */
 		listen(io, 0);
 		return;
 	}
@@ -364,8 +395,8 @@ void xband_poll(const xband_io_t *io, const xband_in_t *in, uint32_t now)
 		}
 		if (in->rx || in->activity)
 			s.since = now;		/* hold this frequency while something is heard */
-		else if (now - s.since >= XB_DWELL_MS)
-			listen(io, (uint8_t)(1u - s.side));
+		else if (now - s.since >= XB_DWELL_MS && s.listens == 3u)
+			listen(io, (uint8_t)(1u - s.side));	/* (one side heard: it stays there) */
 		break;
 	case XB_P_RECORD:
 		if (s.cut && !s.cut_told) {
@@ -424,12 +455,18 @@ void xband_poll(const xband_io_t *io, const xband_in_t *in, uint32_t now)
 		break;
 	}
 	case XB_P_ID:
-		if (s.id_keyed && in->tx)
+		if (s.id_keyed && (in->tx || in->id_wait)) {
+			s.id_aired = s.id_aired || in->tx;
 			break;
+		}
 		if (s.id_keyed) {
 			s.id_keyed = false;
-			view.ids++;
-			touch();
+			if (s.id_aired) {
+				view.ids++;
+				touch();
+			} else {
+				io->beep(XB_BEEP_ERROR);	/* it never went on the air (refused after a wait) */
+			}
 		}
 		if (!id_next(io))
 			after_tx(io, s.side);
