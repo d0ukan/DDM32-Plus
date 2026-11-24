@@ -829,6 +829,15 @@ without the switch) with a toast ("Search: fast" / "Search: classic (beta.8)", T
 (beta.8)"); a running search restarts with it, a search keeps the algorithm it started with. Kept in RAM while the radio
 is on (not stored). A short 0 still opens the range editor typing a digit.
 
+**P25 soft probe (`CONFIG_SEARCH_SOFTP25`, branch `swprobe`, host-tested only).** On Tools > P25 search, held 0 cycles
+fast -> **fast + soft probe** -> classic (toast "Search: fast + soft probe", Turkish "Arama: hızlı + yazılım sonda"; off
+at power on). With it, a hit is first read in software on the flat FM discriminator (the 8 kHz FM RX RAM ring NXDN
+uses) for up to 450 ms: a P25 frame sync and a NID decoded with at most 6 bits corrected list the frequency and NAC at
+once and the native receiver then takes it as before; nothing P25-like on a carrier 25 dB or more over the floor is
+"not P25" without the native receiver's 1.2 s window; anything else goes to the native receiver as before. Off, nothing
+changes. Design, budget, host results and risks: `docs/p25-soft-probe-design.md`; code `spectrum/p25soft.*`,
+`radio_p25soft.*`, `tools/plus_softp25.py`; tests `tests/plus/test_p25soft.c`, `test_p25soft_radio.c`.
+
 **3. What fast changes** (everything else is classic: the run following, the skirt, the channel grid, never 6.25 kHz
 off for DMR, the found list, All digital's P25 > DMR > YSF > NXDN order and its TDMA rule, receive only, PTT stops the
 search, the emergency ends it, no search over a watch, the search log counting):

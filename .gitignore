@@ -739,3 +739,18 @@ __pycache__/
 !/tests/plus/test_fbsafe_gallery.c
 !/tests/plus/test_fbsafe_st7789.c
 !/tests/plus/test_zonescan_radio.inc
+# branch swprobe: P25 soft probe (tools/plus_softp25.py, docs/p25-soft-probe-design.md)
+!/tools/plus_softp25.py
+!/docs/p25-soft-probe-design.md
+!/integration/radiofoundry/spectrum/p25soft.c
+!/integration/radiofoundry/spectrum/p25soft.h
+!/integration/radiofoundry/spectrum/radio_p25soft.c
+!/integration/radiofoundry/spectrum/radio_p25soft.h
+!/tests/plus/test_p25soft.c
+!/tests/plus/test_p25soft_radio.c
+!/tests/plus/p25soft_model.inc
+!/tests/plus/p25soft_stubs/
+!/tests/plus/p25soft_stubs/board.h
+!/tests/plus/p25soft_stubs/FreeRTOS.h
+!/tests/plus/p25soft_stubs/aprs/
+!/tests/plus/p25soft_stubs/aprs/aprs.h

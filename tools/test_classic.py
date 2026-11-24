@@ -348,6 +348,17 @@ def main():
     run([OUT/'test_sigq'],cwd=ROOT)
     run(['clang',*flags,'-DCONFIG_P25_SEARCH=1',ROOT/'tests/plus/test_p25search.c',APP/'core/radio/p25search.c','-o',OUT/'test_p25search'],cwd=ROOT)
     run([OUT/'test_p25search'],cwd=ROOT)
+    # DDM32 Plus P25 soft probe (docs/p25-soft-probe-design.md): the software NID reader on synthesized signals, then the
+    # radio task's side with the engine (SEARCH_FAST, SURE, HYBRID, SOFTP25) on a fake ring, flat path and heap
+    run(['clang',*flags,'-DCONFIG_SEARCH_SOFTP25=1','-I'+str(ROOT/'tests/plus'),ROOT/'tests/plus/test_p25soft.c',
+         APP/'core/radio/p25soft.c',*CAI,'-lm','-o',OUT/'test_p25soft'],cwd=ROOT)
+    run([OUT/'test_p25soft'],cwd=ROOT)
+    run(['clang','-I'+str(ROOT/'tests/plus/p25soft_stubs'),*flags,'-DCONFIG_P25_SEARCH=1','-DCONFIG_SEARCH_FAST=1',
+         '-DCONFIG_SEARCH_SURE=1','-DCONFIG_SEARCH_HYBRID=1','-DCONFIG_SEARCH_SOFTP25=1','-DCONFIG_NXDN=1',
+         '-I'+str(ROOT/'tests/plus'),ROOT/'tests/plus/test_p25soft_radio.c',APP/'core/radio/p25soft.c',
+         APP/'core/radio/radio_p25soft.c',APP/'core/radio/p25search.c',APP/'core/radio/searchhy.c',*CAI,'-lm',
+         '-o',OUT/'test_p25soft_radio'],cwd=ROOT)
+    run([OUT/'test_p25soft_radio'],cwd=ROOT)
     # DM32 Plus P25 trunk following: TSBK decoder, framer TSDU mode, channel plan, grants, the follower
     run(['clang',*flags,'-DCONFIG_P25_TRUNK=1','-I'+str(APP/'core/p25'),'-I'+str(ROOT/'src/p25'),'-I'+str(ROOT/'tests/plus'),
          ROOT/'tests/plus/test_p25trunk.c',APP/'core/p25/p25_tsbk.c',APP/'core/radio/p25trunk.c',*P25SRC,

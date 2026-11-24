@@ -729,6 +729,7 @@ def main():
         "CONFIG_MWATCH_FAST="+("y" if args.plus else "n"),	# DDM32 Plus faster multi-watch ring (round 15 item 3, tools/plus_scan.py)
         "CONFIG_SEARCH_SURE="+("y" if args.plus else "n"),	# DDM32 Plus surer searches (searchfix, tools/plus_scan.py)
         "CONFIG_SEARCH_HYBRID="+("y" if args.plus else "n"),	# DDM32 Plus faster searches, counters (fastsrch, tools/plus_scan.py)
+        "CONFIG_SEARCH_SOFTP25="+("y" if args.plus else "n"),	# DDM32 Plus P25 soft probe (swprobe, tools/plus_softp25.py)
         "CONFIG_SCAN_FAST="+("y" if args.plus else "n"),	# DDM32 Plus faster channel scan (fastscan, tools/plus_fastscan.py)
         "CONFIG_VFO_STEPKEY="+("y" if args.plus else "n"),	# DDM32 Plus VFO step key (vfostep, tools/plus_vfostep.py)
         "CONFIG_AIR_PROV="+("y" if args.plus else "n"),	# DDM32 Plus airfields by province (round 16, tools/plus_airprov.py)
