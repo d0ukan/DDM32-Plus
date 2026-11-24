@@ -243,7 +243,11 @@ static const char *mw_hint(const radio_view_t *v, const ui_state_t *s)
 		return deny_action(v);
 	if (s->locked)
 		return TR(TEXT_ALT_OPEN "Keys locked: hold * to unlock" TEXT_ALT_NEXT "Locked: hold * to unlock" TEXT_ALT_CLOSE);
+#if CONFIG_SATELLITES
+	return TR(TEXT_ALT_OPEN "# options  4 ISS  Back stop" TEXT_ALT_NEXT "# more  4 ISS  Back stop" TEXT_ALT_CLOSE);
+#else
 	return TR("# options  Back stop");
+#endif
 }
 
 // Home with the ring: the rows A..F and the line under them (ui_draw_home_dual adds the banner and the hint, from

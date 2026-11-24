@@ -271,8 +271,8 @@ def prepare_iss_tool(transform):
          '\tSCR_ISS,\t\t\t// DDM32 Plus: Tools > ISS (CONFIG_SATELLITES)\n'),
     ])
     # Home's hold-4 key (a channel; every other digit hold there was the dead "Speed dial N is empty" toast, and in the
-    # VFO a hold types the digit): the ISS's held track, else Tools > ISS (ui_sat.c ui_sat_home_iss). The hint's last
-    # group "Hold 4 ISS" is the first the hint row drops when it is too wide (ui_draw_hint)
+    # VFO a hold types the digit): the ISS's held track, else Tools > ISS (ui_sat.c ui_sat_home_iss). The hint group
+    # "4 ISS" sits before the caller, so a row too wide drops the caller (ui_draw_hint), never the ISS group
     transform('core/ui/ui_app.c', [
         ('bool ui_home_key(const input_event_t *ev)\n{\n',
          '#if CONFIG_SATELLITES\nvoid ui_sat_home_iss(void);\t// ui_sat.c (DDM32 Plus)\n#endif\n'
@@ -285,13 +285,31 @@ def prepare_iss_tool(transform):
          '\t}\n'
          '#endif\n'
          '\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo) {\n\t\tstatic char msg[48];\n'),
-        ('\tuint32_t serial = radio_view_serial();\n\tif (serial != serial_seen) {\n',
+        ('\tif (has_context_key && recent_n && caller_target(&t)) {\n\t\tsb_str(&b, "  # ");\n',
          '#if CONFIG_SATELLITES\n'
-         '\tsb_str(&b, "  ");\n'
-         '\tsb_str(&b, TR("Hold 4 ISS"));\n'
+         '\tsb_str(&b, "  4 ISS");\t// DDM32 Plus: before the caller, so a row too wide drops the caller, never this\n'
          '#endif\n'
-         '\tuint32_t serial = radio_view_serial();\n\tif (serial != serial_seen) {\n'),
-        ('static char home_hint[32];', 'static char home_hint[44];\t// DDM32 Plus: room for "  Hold 4 ISS" after the caller'),
+         '\tif (has_context_key && recent_n && caller_target(&t)) {\n\t\tsb_str(&b, "  # ");\n'),
+        ('static char home_hint[32];', 'static char home_hint[40];\t// DDM32 Plus: room for "  4 ISS" before the caller'),
+    ])
+    # The same hint in dual watch (Home's own hint there), and the idle row of a radio without the quick key: the ISS group
+    # must fit the 220 px row, so the second form of each is shorter (ui_draw_hint picks the longest that fits)
+    transform('core/ui/ui_screens.c', [
+        ('\treturn TR("# options  Back stop");\n}',
+         '#if CONFIG_SATELLITES\n'
+         '\treturn TR(TEXT_ALT_OPEN "# options  4 ISS  Back stop" TEXT_ALT_NEXT "# more  4 ISS  Back stop" TEXT_ALT_CLOSE);\n'
+         '#else\n'
+         '\treturn TR("# options  Back stop");\n'
+         '#endif\n}'),
+    ])
+    transform('core/ui/ui_app.c', [
+        ('\treturn has_quick_key ? TR("OK Menu  * Quick") : TR("OK Menu  Hold OK Quick");\n',
+         '#if CONFIG_SATELLITES\n'
+         '\t// DDM32 Plus: without the quick key the row names Hold OK Quick alone, so "4 ISS" fits the 220 px row\n'
+         '\treturn has_quick_key ? TR("OK Menu  * Quick") : TR("Hold OK Quick");\n'
+         '#else\n'
+         '\treturn has_quick_key ? TR("OK Menu  * Quick") : TR("OK Menu  Hold OK Quick");\n'
+         '#endif\n'),
     ])
     transform('core/ui/ui_menus.c', [
         ('extern const ui_scr_def_t ui_sat_screen;\t// ui_sat.c (DM32 Plus)\n',

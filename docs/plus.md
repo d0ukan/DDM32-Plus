@@ -5044,9 +5044,16 @@ pass until Tools > ISS (or Satellites, or the pass alarm) has been open once sin
 starts the track in one press. A running auto track ends on any key as before (`ui_sat_auto_key` runs first, so
 the hold ends it).
 
-**Hint.** Home's idle hint grows a last group: "OK Menu  * Quick  # Joe  Hold 4 ISS" (Turkish "OK Menü  * Hızlı  # Joe
-4 tut ISS"). `ui_draw_hint` drops the last groups whole when the row is too wide, so on a long caller name the ISS
-group goes first and the other keys are never cut. Built with `CONFIG_SATELLITES` only. Cost: `home_hint` 32 -> 44 B
-RAM; the rest flash. Host tests (`tests/plus/test_ui_sat.c`, `classic-test`): the hint in English and Turkish with
-layout check, the key tracking on 145.800 / 145.825, the service's word, too early and a hand track opening Tools >
-ISS, a short 4 still Find, a VFO hold still typing. Host-tested only (docs/plus-radio-test.md IK-1, IK-2).
+**Hint.** The key is "Hold 4" and the row names it "4 ISS", always where the idle hint shows: Home on a channel
+("OK Menu  * Quick  4 ISS"; Turkish "OK Menü  * Hızlı  4 ISS", both 207 of the 220 px row), a radio without the quick
+key ("Hold OK Quick  4 ISS": "OK Menu" goes from that row to make room), and dual watch / the ring ("# options  4
+ISS  Back stop", second form "# more  4 ISS  Back stop"; Turkish "# seç  4 ISS  Geri dur"). The group sits before the
+caller, so a long "# name" is dropped (`ui_draw_hint` drops the last groups whole) and never the keys or "4 ISS"; at
+220 px the caller group does not fit next to "4 ISS", so the caller hint shows on wider rows only. Not shown: the VFO
+(a held 4 types a digit there) and the state hints that replace the idle row (scanning, reply, temporary,
+locked, digital monitor, key entry): the key still works in them but those rows name their own keys. Built with
+`CONFIG_SATELLITES` only. Cost: `home_hint` 32 -> 40 B RAM; the rest flash. Host tests (`tests/plus/test_ui_sat.c`,
+`classic-test`): the hint in English and Turkish with layout check, with a caller, in dual watch (and the key
+tracking there), the widths of the row without the quick key, the key tracking on 145.800 / 145.825, the service's word,
+too early and a hand track opening Tools > ISS, a short 4 still Find, a VFO hold still typing with no "4 ISS" in its
+hint. Host-tested only (docs/plus-radio-test.md IK-1, IK-2).

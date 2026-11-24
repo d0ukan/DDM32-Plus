@@ -555,8 +555,22 @@ static int iss_checks(void)
 	ISS_CHECK(starts == 0, n);
 	/* Home's hold-4 key (ui_sat_home_iss): the hint names it; with a pass due within 10 min it asks for the held
 	 * track (145.800), else Tools > ISS opens; a short 4 is still Find; in the VFO a hold of 4 types the digit */
-	bad += iss_flow("Home hint names hold 4", "", NULL, "wait:300",
-			T("screen=home shows=OK_Menu shows=Hold_4_ISS", "screen=home shows=4_tut_ISS"), true);
+	bad += iss_flow("Home hint names 4 ISS", "", NULL, "wait:300",
+			T("screen=home shows=OK_Menu shows=*_Quick shows=4_ISS", "screen=home shows=OK_Men shows=4_ISS"), true);
+	bad += iss_flow("Home hint names 4 ISS: a long caller", CALLER, NULL, "wait:300",
+			T("screen=home shows=OK_Menu shows=*_Quick shows=4_ISS", "screen=home shows=OK_Men shows=4_ISS"), true);
+	bad += iss_flow("Home hint names 4 ISS: dual watch", "quick 7 ctx 3 5 ok", NULL, "wait:300",
+			"dual=1 shows=4_ISS", true);
+	bad += iss_flow(n = "Dual watch hold 4 tracks the ISS", "quick 7 ctx 3 5 ok", NULL, "long:4", "dual=1", false);
+	ISS_CHECK(starts == 1 && start_sat == iss, n);
+	bad += iss_flow("VFO hint has no 4 ISS (a held 4 types a digit there)", "ok 4 up ok ", NULL, "wait:300", "hides=4_ISS", false);
+	{	/* the rows that cannot be flowed (a radio without the quick key): the widest form with 4 ISS fits the row */
+		char row[64];
+		snprintf(row, sizeof row, "%s  4 ISS", TR("Hold OK Quick"));
+		ISS_CHECK(gfx_text_width(ui_layout.small, row) <= gfx_width(), "no quick key: Hold OK Quick leaves room for 4 ISS");
+		snprintf(row, sizeof row, "%s  4 ISS", TR("OK Menu  * Quick"));
+		ISS_CHECK(gfx_text_width(ui_layout.small, row) <= gfx_width(), "OK Menu  * Quick leaves room for 4 ISS");
+	}
 	bad += iss_flow(n = "Home hold 4 tracks the ISS", "", NULL, "long:4", "screen=home banner=none", false);
 	ISS_CHECK(starts == 1 && start_sat == iss && start_mode == SAT_AUTO_DOWN, n);
 	bad += iss_flow(n = "Home hold 4: the service's word", "", NULL, "long:4 wait:1500", TRACKING, false);
