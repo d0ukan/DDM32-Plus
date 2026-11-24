@@ -11,7 +11,7 @@ Licence: GPL-3.0-or-later (dependencies: [THIRD_PARTY.md](THIRD_PARTY.md)).
 
 ```
 rust/
-  Cargo.toml                 workspace (version 3.0.0)
+  Cargo.toml                 workspace (version 3.1.0)
   crates/ddm32-core/         everything that is not the window
     src/crypto/ed25519.rs        Ed25519 verify (a port of the RFC 8032 reference code, as the C# and Python ones)
     src/releases/                signed manifest checks, version order and labels, release list, downloads, local folder
@@ -98,7 +98,7 @@ controls under the shade take no focus or click and read as disabled (`widgets.s
 
 ## Versions and the update question
 
-The window's title and Home's bottom bar say "Program 3.0.0 · Radio firmware 1.0.1 (from your last install)"
+The window's title and Home's bottom bar say "Program 3.1.0 · Radio firmware 1.0.1 (from your last install)"
 ("Telsiz firmware" in Turkish); About lists both numbers separately. What the radio runs is what the program knows:
 
 - After every **verified** radio write the program records what the radio now runs in `settings.json`: the C#
