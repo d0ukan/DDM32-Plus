@@ -396,6 +396,7 @@ __pycache__/
 !/tests/plus/test_ysftx_radio.inc
 !/tools/test_ysf_tx_ref.sh
 !/docs/ysf-nxdn-tx.md
+!/docs/xband-multiproto-study.md
 # DM32 Plus round 3 misc job: airfields, marine VHF, QSO log, battery graph, PC live panel (docs/plus.md)
 !/integration/radiofoundry/air/*
 !/integration/radiofoundry/marine/*
