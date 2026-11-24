@@ -348,6 +348,17 @@ def main():
     run([OUT/'test_sigq'],cwd=ROOT)
     run(['clang',*flags,'-DCONFIG_P25_SEARCH=1',ROOT/'tests/plus/test_p25search.c',APP/'core/radio/p25search.c','-o',OUT/'test_p25search'],cwd=ROOT)
     run([OUT/'test_p25search'],cwd=ROOT)
+    # DDM32 Plus P25 soft probe (docs/p25-soft-probe-design.md): the software NID reader on synthesized signals, then the
+    # radio task's side with the engine (SEARCH_FAST, SURE, HYBRID, SOFTP25) on a fake ring, flat path and heap
+    run(['clang',*flags,'-DCONFIG_SEARCH_SOFTP25=1','-I'+str(ROOT/'tests/plus'),ROOT/'tests/plus/test_p25soft.c',
+         APP/'core/radio/p25soft.c',*CAI,'-lm','-o',OUT/'test_p25soft'],cwd=ROOT)
+    run([OUT/'test_p25soft'],cwd=ROOT)
+    run(['clang','-I'+str(ROOT/'tests/plus/p25soft_stubs'),*flags,'-DCONFIG_P25_SEARCH=1','-DCONFIG_SEARCH_FAST=1',
+         '-DCONFIG_SEARCH_SURE=1','-DCONFIG_SEARCH_HYBRID=1','-DCONFIG_SEARCH_SOFTP25=1','-DCONFIG_NXDN=1',
+         '-I'+str(ROOT/'tests/plus'),ROOT/'tests/plus/test_p25soft_radio.c',APP/'core/radio/p25soft.c',
+         APP/'core/radio/radio_p25soft.c',APP/'core/radio/p25search.c',APP/'core/radio/searchhy.c',*CAI,'-lm',
+         '-o',OUT/'test_p25soft_radio'],cwd=ROOT)
+    run([OUT/'test_p25soft_radio'],cwd=ROOT)
     # DM32 Plus P25 trunk following: TSBK decoder, framer TSDU mode, channel plan, grants, the follower
     run(['clang',*flags,'-DCONFIG_P25_TRUNK=1','-I'+str(APP/'core/p25'),'-I'+str(ROOT/'src/p25'),'-I'+str(ROOT/'tests/plus'),
          ROOT/'tests/plus/test_p25trunk.c',APP/'core/p25/p25_tsbk.c',APP/'core/radio/p25trunk.c',*P25SRC,
@@ -986,6 +997,9 @@ def main():
     # DDM32 Plus r15 channels: zone size, DMR rows, digital monitor, Delete channel, NAC in decimal (tools/test_chux.py)
     import test_chux
     test_chux.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus P25 RX group list: the channel's list in the codeplug, the loader and filter rule (tools/test_p25rxgl.py)
+    import test_p25rxgl
+    test_p25rxgl.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus round 15 scan: search ranges and speed, the multi-watch ring (tools/test_scan.py)
     import test_scan
     test_scan.main(ROOT,APP,OUT,flags,host)

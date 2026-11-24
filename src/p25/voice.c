@@ -18,6 +18,17 @@ static void admission_reset(p25_voice *v)
     dm32_imbe_init(&v->codec);
 }
 
+/* The group call's talkgroup is the filter's, All Call, or (DDM32 Plus) one of the RX group list's */
+static int group_wanted(const p25_voice *v)
+{
+    if (v->active_group == v->group_filter || v->active_group == 0xffff) return 1;
+#if defined(CONFIG_P25_RXGL) && CONFIG_P25_RXGL
+    for (unsigned i = 0; i < v->rx_group_count; i++)
+        if (v->rx_groups[i] == v->active_group) return 1;
+#endif
+    return 0;
+}
+
 void p25_voice_rx_reset(p25_voice *v)
 {
     /* Stale receive records must not reset the shared active TX codec. */
@@ -152,10 +163,10 @@ void p25_voice_rx_dibit(p25_voice *v, uint8_t dibit)
     int admitted = v->crypto_clear && v->have_group &&
         (!v->group_filter ||
          (v->private_call ? v->own_unit && v->active_target == v->own_unit
-                          : v->active_group == v->group_filter || v->active_group == 0xffff));
+                          : group_wanted(v)));
 #else
     int admitted = v->crypto_clear && v->have_group &&
-        (!v->group_filter || v->active_group == v->group_filter || v->active_group == 0xffff);
+        (!v->group_filter || group_wanted(v));
 #endif
     for (unsigned i = 0; i < 9; i++) {
         int16_t pcm[160] = {0};

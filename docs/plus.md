@@ -829,6 +829,15 @@ without the switch) with a toast ("Search: fast" / "Search: classic (beta.8)", T
 (beta.8)"); a running search restarts with it, a search keeps the algorithm it started with. Kept in RAM while the radio
 is on (not stored). A short 0 still opens the range editor typing a digit.
 
+**P25 soft probe (`CONFIG_SEARCH_SOFTP25`, branch `swprobe`, host-tested only).** On Tools > P25 search, held 0 cycles
+fast -> **fast + soft probe** -> classic (toast "Search: fast + soft probe", Turkish "Arama: hızlı + yazılım sonda"; off
+at power on). With it, a hit is first read in software on the flat FM discriminator (the 8 kHz FM RX RAM ring NXDN
+uses) for up to 450 ms: a P25 frame sync and a NID decoded with at most 6 bits corrected list the frequency and NAC at
+once and the native receiver then takes it as before; nothing P25-like on a carrier 25 dB or more over the floor is
+"not P25" without the native receiver's 1.2 s window; anything else goes to the native receiver as before. Off, nothing
+changes. Design, budget, host results and risks: `docs/p25-soft-probe-design.md`; code `spectrum/p25soft.*`,
+`radio_p25soft.*`, `tools/plus_softp25.py`; tests `tests/plus/test_p25soft.c`, `test_p25soft_radio.c`.
+
 **3. What fast changes** (everything else is classic: the run following, the skirt, the channel grid, never 6.25 kHz
 off for DMR, the found list, All digital's P25 > DMR > YSF > NXDN order and its TDMA rule, receive only, PTT stops the
 search, the emergency ends it, no search over a watch, the search log counting):
@@ -5059,3 +5068,29 @@ caller by id and with a long caller name (the row asserted to fit), in dual watc
 few-key board, the key tracking on 145.800 / 145.825, the service's word, too early and a hand track opening Tools >
 ISS, a short 4 still Find, a VFO hold still typing with no "4 ISS" in its hint. Host-tested only
 (docs/plus-radio-test.md IK-1, IK-2).
+
+## P25 RX group list (`CONFIG_P25_RXGL`, branch `rxgl`)
+
+A P25 channel can name one of the codeplug's 76 RX group lists, as a DMR channel does: the channel editor shows the
+"RX list" row on P25 channels too (the existing picker: None, "Any: all TGs", the lists by name). With a list the
+channel's own talkgroup and every P25 talkgroup of the list play (the list's group contacts with IDs 1-65535; private
+contacts, All Call and DMR talkgroups above 65535 are skipped; All Call always plays); with Any every group plays (as
+the Normal squelch); with None the channel's squelch decides as before. A channel talkgroup of Any (0) still hears
+every group. The VFO has no lists. Picking None / Any on a P25 channel says "None: the channel's squelch" / "Any: every
+TG" (Turkish in `tr.po`).
+
+Stored in the channel record's own RX group byte (Any: the colour code byte's 0x20 bit, as on DMR), written by the
+channel editor's existing save; the RFKV P25 block keeps the talkgroup explicit and no longer clears the list (Classic
+r13 and the upstream CPS read the explicit talkgroup and ignore the list, as before). The lists and contacts are only
+read (edit them in the CPS or a DOTA pack); an on-radio editor for the lists themselves needs the owner's decision
+(docs/rx-group-list-budget.md section 4). At a P25 channel take the radio task reads the list and up to 32 contacts
+(`integration/radiofoundry/p25rxgl/p25_rxgl.c`) and hands the talkgroups to the P25 worker (`p25_lab_set_groups`,
+cleared by every `p25_lab_set_channel`: search, trunk following and YSF never see a channel's list); the admission in
+`src/p25/voice.c` (`group_wanted`) takes the filter's talkgroup, All Call or a listed one. Build hooks in
+`tools/plus_p25rxgl.py`.
+
+Host tests: `tests/test_voice.c` with `CONFIG_P25_RXGL=1` (`tools/test_voice.py`: a listed talkgroup plays on a
+channel filtering another, an unlisted one stays muted, the count bounds the list, no filter hears all);
+`tests/plus/test_p25rxgl.c` (`tools/test_p25rxgl.py` in `classic-test`: the real codeplug over a simulated flash, list
+/ Any / None and the talkgroup over a save and a reboot, the record byte, the filter rule, the talkgroups taken, the
+worker hand-over faked). Host-tested only; not run on the radio. Budget and design: `docs/rx-group-list-budget.md`.

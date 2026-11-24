@@ -70,6 +70,29 @@ static void short_call(void)
     reset(0x293, 43);
     feed(air, sizeof air);
     assert(blocks == 9 && loud == 0 && v.rx_muted == 9); /* wrong group */
+#if defined(CONFIG_P25_RXGL) && CONFIG_P25_RXGL
+    {
+        /* DDM32 Plus RX group list: a listed talkgroup plays on a channel filtering another one */
+        static const uint16_t list[] = {7, 42, 900}, other[] = {7, 900, 65535u - 1u};
+        reset(0x293, 43);
+        assert(v.rx_groups == NULL && v.rx_group_count == 0); /* init clears it */
+        v.rx_groups = list; v.rx_group_count = 3;
+        feed(air, sizeof air);
+        assert(blocks == 9 && loud && !v.rx_muted); /* 42 is listed */
+        reset(0x293, 43);
+        v.rx_groups = other; v.rx_group_count = 3;
+        feed(air, sizeof air);
+        assert(blocks == 9 && loud == 0 && v.rx_muted == 9); /* not listed */
+        reset(0x293, 43);
+        v.rx_groups = list; v.rx_group_count = 1; /* only the first entry counts */
+        feed(air, sizeof air);
+        assert(blocks == 9 && loud == 0 && v.rx_muted == 9);
+        reset(0x293, 0);
+        v.rx_groups = other; v.rx_group_count = 3;
+        feed(air, sizeof air);
+        assert(blocks == 9 && loud && !v.rx_muted); /* no filter: every group, the list adds nothing */
+    }
+#endif
     reset(0x293, 42);
     feed(air + 99, 216);
     assert(blocks == 9 && loud == 0); /* late entry waits for ESYNC */

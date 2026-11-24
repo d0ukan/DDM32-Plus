@@ -22,7 +22,12 @@ void codeplug_p25_params_encode(const channel_t *ch, uint8_t v[CLASSIC_P25_PARAM
         .tx_inherit=!ch->p25_tx_nac_override};
     p25_conv_encode(&conv,v);
     /* A saved contact remains the target owner until the user edits the TG. */
+#if CONFIG_P25_RXGL
+    /* DDM32 Plus: an RX group list (the record's own byte) leaves the talkgroup explicit; it only adds groups heard */
+    if(!ch->contact) {v[5]=1u;put16(v+6,ch->p25_tg);}
+#else
     if(!ch->contact && !ch->listen_list) {v[5]=1u;put16(v+6,ch->p25_tg);}
+#endif
 }
 
 bool codeplug_p25_params_decode(const uint8_t *v,uint16_t len,channel_t *ch)
@@ -34,7 +39,11 @@ bool codeplug_p25_params_decode(const uint8_t *v,uint16_t len,channel_t *ch)
     ch->p25_tx_nac_override=conv.tx_inherit?0u:(uint16_t)(conv.tx_nac+1u);
     ch->p25_id=codeplug_p25_unit_id(ch->dmr_id);
     ch->p25_tg=1u;
+#if CONFIG_P25_RXGL
+    if(len>=8 && (v[5]&1u)) {ch->p25_tg=le16(v+6);ch->contact=0;}	/* the RX group list stays (p25_rxgl.h) */
+#else
     if(len>=8 && (v[5]&1u)) {ch->p25_tg=le16(v+6);ch->contact=ch->listen_list=0;}
+#endif
     else {
         uint16_t idx=ch->contact;
 #if CONFIG_DMR

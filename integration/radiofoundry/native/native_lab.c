@@ -99,6 +99,9 @@ enum { SCAN_P25_PROBE_MS=1200, SCAN_P25_GONE_MS=600, SCAN_P25_RETRY_MS=2000, SCA
 #include "radio/radio_mwatch.h"
 _Static_assert(RADIO_MW_P25_HOLD_MS==SCAN_P25_NO_VOICE_MS, "radio_mwatch.h: the P25 hold is native_lab.c's");
 #endif
+#if CONFIG_P25_RXGL
+#include "p25/p25_rxgl.h"	/* DDM32 Plus: a P25 channel's RX group list */
+#endif
 static bool scan_owned, scan_release, scan_quiet, scan_carrier;
 /* DDM32 Plus TX target fix: the take transmitted (PTT released since): no voice after it is the reply's wait, not a
  * foreign carrier, so it is given back after SCAN_P25_NO_VOICE_MS without a cooldown (before: 8 s deaf after our over) */
@@ -538,6 +541,9 @@ static void channel_service(radio_sm_t *sm)
     if(p25s_on()) {
         /* While searching, only the search's probe may take the receiver */
         if(p25s_phase()==P25S_PROBE && !channel_selected && !channel_handoff && !voice_owner && !test.owned &&
+#if CONFIG_SEARCH_SOFTP25
+           !p25s_soft_pending() &&  /* DDM32 Plus: the soft probe reads the hit first (radio/radio_p25soft.h) */
+#endif
            !p25_lab_busy() && !sm->power_off_req && !sm->view.power_off)
             search_take(sm);
         return;
@@ -601,7 +607,13 @@ static void channel_service(radio_sm_t *sm)
 #if CONFIG_YSF
         if(!p25_lab_set_ysf(codeplug_mode_ysf(ch->mode),(uint8_t)ch->p25_tg))return;
 #endif
+#if CONFIG_P25_RXGL
+        /* DDM32 Plus: a list filters (its talkgroups play too), Any hears every group */
+        if(!p25_lab_set_channel(ch->p25_nac,codeplug_p25_tx_nac(ch),ch->p25_tg,ch->p25_id,p25_rxgl_selective(ch)) ||
+           !p25_rxgl_apply(ch))return;
+#else
         if(!p25_lab_set_channel(ch->p25_nac,codeplug_p25_tx_nac(ch),ch->p25_tg,ch->p25_id,ch->p25_squelch==1))return;
+#endif
         channel_selected=live_enabled=live_rx_pending=true;
         /* DDM32 Plus: PTT already held (pressed before the take, e.g. on a letter of the ring): it keys now */
         live_tx_pending=native_ptt && !channel_denial;
