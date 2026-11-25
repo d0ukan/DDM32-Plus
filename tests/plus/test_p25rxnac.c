@@ -64,21 +64,27 @@ static void any_case(uint16_t nac,uint16_t tg,uint32_t src)
     CHECK(p25_lab_p25_caller_line(pane,sizeof pane,true)!=0);
     int ber=p25_lab_ber_permille();
     CHECK(ber>=0);
-    char a1[64],a2[64],a3[64],tail[200];
-    snprintf(a1,sizeof a1,"TG%u ID%u NAC$%03X/%u BER%d.%d%%",tg,(unsigned)src,nac,nac,ber/10,ber%10);
-    snprintf(a2,sizeof a2,"TG%u ID%u $%03X BER%d.%d%%",tg,(unsigned)src,nac,ber/10,ber%10);
-    snprintf(a3,sizeof a3,"TG%u ID%u $%03X",tg,(unsigned)src,nac);
-    snprintf(tail,sizeof tail,"%s\x1f%s\x1f%s\x1e",a1,a2,a3);
+    char a2[64],a3[64],a4[64],tail[240];
+    /* the forms: "TG ID NAC$x/d BER" (wide, may be left out) | "TG ID $x/d BER" | "TG ID $x/d" | "ID $x/d" */
+    snprintf(a2,sizeof a2,"TG%u ID%u $%03X/%u BER%d.%d%%",tg,(unsigned)src,nac,nac,ber/10,ber%10);
+    snprintf(a3,sizeof a3,"TG%u ID%u $%03X/%u",tg,(unsigned)src,nac,nac);
+    snprintf(a4,sizeof a4,"ID%u $%03X/%u",(unsigned)src,nac,nac);
+    snprintf(tail,sizeof tail,"%s\x1f%s\x1f%s\x1e",a2,a3,a4);
     /* the widest form (with "P25 ") may be left out when the 112 bytes do not hold the whole; the rest are there */
     size_t tl=strlen(tail);
     CHECK(strlen(home)>tl && !strcmp(home+strlen(home)-tl,tail) && (home[strlen(home)-tl-1]=='\x1d' || home[strlen(home)-tl-1]=='\x1f'));
     if(failures!=before)show("got",home),show("want-tail",tail);
     CHECK(strlen(home)<sizeof home-1u);
     /* the pane form (no BER, NAC on the channel's own word only): as before */
-    char want_pane[64],no_short[64];
+    /* the pane form (48 bytes): the NAC as "$x/d" in its first form, the plain TG/ID form last; the widest forms
+     * are left out when they do not fit (the "ID.. $x/d" form goes first, then the "NAC" one) */
+    char want_pane[64],nac_s[24],id_nac[48];
     snprintf(want_pane,sizeof want_pane,"TG%u ID%u" "\x1e",tg,(unsigned)src);
-    snprintf(no_short,sizeof no_short,"ID%u $",(unsigned)src);
-    CHECK(strlen(pane)>strlen(want_pane) && !strcmp(pane+strlen(pane)-strlen(want_pane),want_pane) && !strstr(pane,no_short));
+    snprintf(nac_s,sizeof nac_s,"$%03X/%u",nac,nac);
+    snprintf(id_nac,sizeof id_nac,"ID%u %s",(unsigned)src,nac_s);
+    CHECK(strlen(pane)>strlen(want_pane) && !strcmp(pane+strlen(pane)-strlen(want_pane),want_pane) && strstr(pane,nac_s) &&
+          strlen(pane)<48u);
+    CHECK(strstr(pane,"NAC ")!=NULL || strstr(pane,id_nac)!=NULL);	/* the worst case: the caller and the NAC */
     char shown[96],hex[8];
     snprintf(hex,sizeof hex,"$%03X",nac);
     static const int cells[2]={8,9};
@@ -144,17 +150,24 @@ int main(void)
         char shown[96],want[160];
         any_call(0x1C8,65535,16777214u,0x80);
         CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0);
-        snprintf(want,sizeof want,"\x1d%s TG65535 ID16777214 $1C8\x1f" "EMG TG65535 ID16777214 $1C8\x1f" "EMG ID16777214 $1C8\x1e",
+        snprintf(want,sizeof want,"\x1d%s TG65535 ID16777214 $1C8/456\x1f" "EMG TG65535 ID16777214 $1C8/456\x1f" "EMG ID16777214 $1C8/456\x1e",
                  tr_on?"AC\xC4\xB0L DURUM":"EMERGENCY");
         CHECK(!strcmp(home,want));
         pick(home,9,shown);
-        CHECK(!strcmp(shown,"EMG ID16777214 $1C8") && (int)strlen(shown)*9<=SAFE_W);
+        CHECK(!strcmp(shown,"EMG ID16777214 $1C8/456") && (int)strlen(shown)*9<=SAFE_W);
         pick(home,8,shown);
-        CHECK(!strcmp(shown,"EMG TG65535 ID16777214 $1C8") && (int)strlen(shown)*8<=SAFE_W);
+        CHECK(!strcmp(shown,"EMG ID16777214 $1C8/456") && (int)strlen(shown)*8<=SAFE_W);
+        /* the widest decimal: "$FFF/4095", the whole line still within 112 bytes and the last form 216 px at 9 px */
+        any_call(0xFFF,65535,16777214u,0x80);
+        CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0 && strlen(home)<sizeof home-1u);
+        pick(home,9,shown);
+        CHECK(!strcmp(shown,"EMG ID16777214 $FFF/4095") && (int)strlen(shown)*9<=SAFE_W);
         any_call(0x659,101,77285,0x80);
         CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0);
         pick(home,9,shown);
-        CHECK(!strcmp(shown,"EMG TG101 ID77285 $659") && (int)strlen(shown)*9<=SAFE_W);
+        CHECK(!strcmp(shown,"EMG ID77285 $659/1625") && (int)strlen(shown)*9<=SAFE_W);
+        pick(home,8,shown);
+        CHECK(!strcmp(shown,"EMG TG101 ID77285 $659/1625") && (int)strlen(shown)*8<=SAFE_W);
         printf("%s %s emergency on Any keeps the NAC\n",failures==before?"ok  ":"FAIL",tr_on?"TR":"EN");
     }
     tr_turkish=0;
@@ -167,7 +180,7 @@ int main(void)
     CHECK(p25_lab_channel_rx(433500000u));
     if(!setjmp(finished))worker_fn(NULL);
     CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0);
-    CHECK(!strcmp(home,"\x1d" "EMERGENCY Private 77285>1234 $1C8\x1f" "EMG Private 77285>1234 $1C8\x1f" "EMG ID77285 $1C8\x1e"));
+    CHECK(!strcmp(home,"\x1d" "EMERGENCY Private 77285>1234 $1C8/456\x1f" "EMG Private 77285>1234 $1C8/456\x1f" "EMG ID77285 $1C8/456\x1e"));
     printf("%s emergency unit-to-unit on Any keeps the NAC\n",failures==before?"ok  ":"FAIL");
     printf("P25 RX NAC: %u failures\n",failures);
     return failures?1:0;

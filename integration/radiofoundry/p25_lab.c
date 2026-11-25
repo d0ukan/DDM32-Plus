@@ -320,6 +320,17 @@ static void line_hex3(line_t *l,uint16_t v)
     }
     *l->p='\0';
 }
+/* The NAC as the firmware writes it elsewhere: "$1C8/456" (CONFIG_NAC_DEC: hex, then decimal), else "1C8" */
+static void line_nac(line_t *l,uint16_t v)
+{
+#if CONFIG_NAC_DEC
+    line_str(l,"$");
+    line_hex3(l,v);
+    line_str(l,"/");line_u32(l,v);
+#else
+    line_hex3(l,v);
+#endif
+}
 #if CONFIG_P25_EXTRAS
 /* DM32 Plus: an emergency call on a channel that does not say its NAC (Any, or another NAC): Home's forms keep the NAC.
  * "EMERGENCY TG65535 ID16777214 $1C8" (wide) | "EMG TG65535 ID16777214 $1C8" (27 characters: the 8 px font) |
@@ -342,10 +353,7 @@ static size_t emergency_nac_line(char *out,size_t cap,uint16_t tg,uint32_t src,u
             if(src){line_str(&l," ID");line_u32(&l,src);}
         }
         line_str(&l," ");
-#if CONFIG_NAC_DEC
-        line_str(&l,"$");
-#endif
-        line_hex3(&l,heard);
+        line_nac(&l,heard);
     }
     line_str(&l,"\x1e");
     return (size_t)(l.p-out);
@@ -386,29 +394,52 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
 #if CONFIG_P25_EXTRAS
     if(short_nac && (kind&P25_LAB_EMERGENCY))return emergency_nac_line(out,cap,tg,src,target,unit,heard_nac);
 #endif
+    /* The forms to offer, widest first: 0 "P25 " wide, 1 tight with the NAC word, 2 TG/ID (the short NAC form: with
+     * the NAC and BER), 3 TG/ID/NAC without BER, 4 the caller and the NAC ("ID16777214 $FFF/4095": 20 characters) */
+    uint8_t ids[5];
+    unsigned nforms=0;
+    if(!pane)ids[nforms++]=0;
+    ids[nforms++]=1;
+    if(short_nac) {
+        ids[nforms++]=2;
 #if CONFIG_SIGNAL_QUALITY
-    unsigned alts=short_nac?4u:3u;   /* the last one: TG, ID and NAC without BER (24 characters of a 9 px font) */
-#else
-    unsigned alts=3u;
+        ids[nforms++]=3;
 #endif
+    }
+    if(src && heard_nac!=P25_NAC_ANY && (short_nac || pane))ids[nforms++]=4;
+    if(!short_nac)ids[nforms++]=2;
     line_t l={out,cap,false};
     /* Home: "P25 TG 101 ID 77285 NAC 659" | "TG101 ID77285 NAC659" | "TG101 ID77285";
      * a dual watch pane: "TG 101 ID 77285 NAC 659" | "TG101 ID77285".
-     * DM32 Plus (CONFIG_NAC_DEC): the NAC as "$293/659" in each form that has one.
+     * DM32 Plus (CONFIG_NAC_DEC): the NAC as "$293/659" in each form that has one. On a channel that does not say
+     * its NAC (short_nac) Home's forms, widest first: "P25 TG 101 ID 77285 NAC $293/659 BER 1.2%" | "TG101 ID77285
+     * NAC$293/659 BER1.2%" | "TG101 ID77285 $293/659 BER1.2%" | "TG101 ID77285 $293/659" | "ID77285 $293/659".
+     * The row takes the first that fits; the NAC "$hex/dec" is never cut: BER goes first, then the TG, then the
+     * words "NAC"/"P25"/spaces. An emergency: "EMERGENCY TG ID $x/d" | "EMG TG ID $x/d" | "EMG ID $x/d"
      * DM32 Plus P25 extras: "EMERGENCY " leads every form (instead of "P25 "); a unit-to-unit call shows
      * "Private 77285 > 1234" | "Private 77285>1234" instead of the talkgroup and ID. When the whole does not fit cap
      * the longest forms are left out (they are the ones too wide for the screen anyway) */
-    for(unsigned first=pane?1u:0u;first<3u;first++) {
+    /* Home leaves out the widest forms one by one; a pane (48 bytes) first its "ID.. $NAC" form, then the widest,
+     * then everything but the plain TG/ID form */
+    for(unsigned att=0;att<(pane?4u:3u);att++) {
+    unsigned first=pane?(att<2u?0u:att==2u?1u:nforms-1u):att;
+    bool skip4=pane && att==1u;
     l=(line_t){out,cap,false};
     line_str(&l,"\x1d");
-    for(unsigned alt=first;alt<alts;alt++) {
+    unsigned shown=0;
+    for(unsigned fi=first;fi<nforms;fi++) {
+        unsigned alt=ids[fi];
+        if(skip4 && alt==4u)continue;
         bool tight=alt>=(pane?2u:1u);
-        if(alt>first)line_str(&l,"\x1f");
+        if(shown++)line_str(&l,"\x1f");
 #if CONFIG_P25_EXTRAS
         if(kind&P25_LAB_EMERGENCY){line_str(&l,TR("EMERGENCY"));line_str(&l," ");}
         else
 #endif
         if(alt==0)line_str(&l,"P25 ");
+        if(alt==4u) {
+            line_str(&l,"ID");line_u32(&l,src);
+        } else
 #if CONFIG_P25_EXTRAS
         if(unit) {
             line_str(&l,TR("Private"));line_str(&l," ");
@@ -419,25 +450,17 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
             line_str(&l,tight?"TG":"TG ");line_u32(&l,tg);
             if(src){line_str(&l,tight?" ID":" ID ");line_u32(&l,src);}
         }
-        if(short_nac && alt>=2u) {
+        if(alt==4u || (short_nac && alt>=2u)) {
             line_str(&l," ");
-#if CONFIG_NAC_DEC
-            line_str(&l,"$");
-#endif
-            line_hex3(&l,heard_nac);
+            line_nac(&l,heard_nac);
         } else if(heard_nac!=P25_NAC_ANY && alt<2u){
             line_str(&l,tight?" NAC":" NAC ");
-#if CONFIG_NAC_DEC
             /* DM32 Plus: "$125" marks hex, then the decimal some factory radios use, in every form ("$125/293") */
-            line_str(&l,"$");line_hex3(&l,heard_nac);
-            line_str(&l,"/");line_u32(&l,heard_nac);
-#else
-            line_hex3(&l,heard_nac);
-#endif
+            line_nac(&l,heard_nac);
         }
 #if CONFIG_SIGNAL_QUALITY
         /* DM32 Plus signal quality on Home, every form: "... BER 1.2%" | "... BER1.2%" */
-        if(ber>=0 && !(short_nac && alt==3u)) {
+        if(ber>=0 && !(short_nac && alt>=3u)) {
             line_str(&l,tight?" BER":" BER ");line_u32(&l,(uint32_t)ber/10u);
             line_str(&l,".");line_u32(&l,(uint32_t)ber%10u);line_str(&l,"%");
         }
