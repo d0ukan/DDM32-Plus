@@ -24,6 +24,13 @@ Firmware. Host-tested only; not yet run on the radio.
   Satellites", a "+" when more are set) and still never cuts the keys. Stored in one appended settings field
   (`hold_tool[12]`, the record 392 -> 404 B, no field moves; an older record reads the defaults). Cost: FLASH +1,376 B,
   RAM +336 B. docs/plus.md "Hold keys: any digit, any tool"; radio rows IK-3 .. IK-8.
+- P25 call NAC (owner's radio result on 1.0.3: Home showed the received NAC only as "$193"): now "$hex/dec" like
+  everywhere else ("$1C8/456"), in every form, within the 220 px safe area (English and Turkish, normal and Large
+  text, worst case TG 65535, ID 16777214, NAC $FFF). When the line is too wide it gives up, in this order: the "P25 "
+  lead and spaces, the "NAC" word, BER, the talk group (last form "ID16777214 $FFF/4095"); the NAC "$hex/dec" is kept.
+  An emergency: "EMERGENCY TG ID $x/d" | "EMG TG ID $x/d" | "EMG ID $x/d".
+- Dual and multi watch panes: the heard NAC ("$x/d") and the caller (TG, ID) are on a pane's second line while a P25
+  call comes in; a new narrow form "ID16777214 $FFF/4095" keeps the NAC in a pane when the wide form does not fit.
 
 ## v1.0.3 (test build, not published)
 

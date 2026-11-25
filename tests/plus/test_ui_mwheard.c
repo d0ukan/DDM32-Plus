@@ -78,6 +78,7 @@ unsigned p25_lab_p25_kind(uint32_t *target)
 		*target = stub_target;
 	return stub_private ? (unsigned)P25_LAB_PRIVATE : 0u;
 }
+static unsigned stub_nac = 0x293;
 size_t p25_lab_p25_caller_line(char *out, size_t cap, bool pane)
 {
 	(void)pane;
@@ -85,9 +86,28 @@ size_t p25_lab_p25_caller_line(char *out, size_t cap, bool pane)
 		out[0] = '\0';
 		return 0;
 	}
-	/* the worker's pane form: "TG 101 ID 77285 NAC $293/659" | "TG101 ID77285" */
-	return (size_t)snprintf(out, cap, "\x1d" "TG %u ID %u NAC $293/659\x1f" "TG%u ID%u\x1e", stub_tg, stub_src, stub_tg,
-				stub_src);
+	/* the worker's pane forms: "TG 101 ID 77285 NAC $293/659" | "ID77285 $293/659" | "TG101 ID77285", the widest left
+	 * out until the whole fits cap (48 bytes in dual watch): the "ID.. $.." form first, then the widest, then all but
+	 * the plain one (tests/plus/test_p25rxnac.c checks the real worker) */
+	char f[3][64];
+	snprintf(f[0], sizeof f[0], "TG %u ID %u NAC $%03X/%u", stub_tg, stub_src, stub_nac, stub_nac);
+	snprintf(f[1], sizeof f[1], "ID%u $%03X/%u", stub_src, stub_nac, stub_nac);
+	snprintf(f[2], sizeof f[2], "TG%u ID%u", stub_tg, stub_src);
+	static const unsigned sets[4][3] = { { 0, 1, 2 }, { 0, 2, 9 }, { 1, 2, 9 }, { 2, 9, 9 } };
+	for (unsigned t = 0; t < 4u; t++) {
+		char tmp[200] = "\x1d";
+		for (unsigned i = 0; i < 3u && sets[t][i] < 3u; i++) {
+			if (i)
+				strcat(tmp, "\x1f");
+			strcat(tmp, f[sets[t][i]]);
+		}
+		strcat(tmp, "\x1e");
+		if (strlen(tmp) < cap || t == 3u) {
+			snprintf(out, cap, "%s", tmp);
+			return strlen(out);
+		}
+	}
+	return 0;
 }
 
 static int fails;
@@ -195,6 +215,21 @@ static void p25_letter(void)
 	if (!large)
 		run("expect:shows=77285");
 	layout();
+	/* the worst case: TG 65535, ID 16777214, NAC $FFF/4095: the NAC stays in the row, within its width */
+	stub_tg = 65535;
+	stub_src = 16777214u;
+	stub_nac = 0xFFF;
+	run("wait:400");
+	if (!large)
+		run("expect:shows=$FFF/4095");
+	layout();
+	stub_nac = 0x1C8;
+	run("wait:400");
+	if (!large)
+		run("expect:shows=$1C8/456");
+	layout();
+	stub_tg = 101;
+	stub_src = 77285;
 	stub_private = true;
 	stub_target = 1234;
 	run("wait:300");

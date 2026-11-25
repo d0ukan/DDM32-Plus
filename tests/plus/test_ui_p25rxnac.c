@@ -78,8 +78,8 @@ unsigned p25_lab_p25_kind(uint32_t *target)
 	return stub_emergency ? (unsigned)P25_LAB_EMERGENCY : 0u;
 }
 /* The worker's Home forms on NAC Any (what test_p25rxnac.c checks): "P25 TG 101 ID 77285 NAC $1C8/456 BER 1.2%" |
- * "TG101 ID77285 NAC$1C8/456 BER1.2%" | "TG101 ID77285 $1C8 BER1.2%" | "TG101 ID77285 $1C8"; an emergency leads
- * every form with "EMERGENCY " (TR: "ACIL DURUM ") instead of "P25 " */
+ * "TG101 ID77285 NAC$1C8/456 BER1.2%" | "TG101 ID77285 $1C8/456 BER1.2%" | "TG101 ID77285 $1C8/456" | "ID77285
+ * $1C8/456"; an emergency leads every form with "EMERGENCY " (TR: "ACIL DURUM ") instead of "P25 " */
 size_t p25_lab_p25_caller_line(char *out, size_t cap, bool pane)
 {
 	if (stub_tg == 0 || pane) {
@@ -89,19 +89,20 @@ size_t p25_lab_p25_caller_line(char *out, size_t cap, bool pane)
 	unsigned n = stub_nac;
 	if (stub_emergency)
 		return (size_t)snprintf(out, cap,
-					"\x1d%s TG%u ID%u $%03X\x1f" "EMG TG%u ID%u $%03X\x1f" "EMG ID%u $%03X\x1e", TR("EMERGENCY"),
-					stub_tg, stub_src, n, stub_tg, stub_src, n, stub_src, n);
-	/* the four forms, the leading ones left out until the whole fits cap (as the worker does) */
-	char f[4][64];
+					"\x1d%s TG%u ID%u $%03X/%u\x1f" "EMG TG%u ID%u $%03X/%u\x1f" "EMG ID%u $%03X/%u\x1e",
+					TR("EMERGENCY"), stub_tg, stub_src, n, n, stub_tg, stub_src, n, n, stub_src, n, n);
+	/* the five forms, the leading ones left out until the whole fits cap (as the worker does) */
+	char f[5][64];
 	snprintf(f[0], sizeof f[0], "P25 TG %u ID %u NAC $%03X/%u BER 1.2%%", stub_tg, stub_src, n, n);
 	snprintf(f[1], sizeof f[1], "TG%u ID%u NAC$%03X/%u BER1.2%%", stub_tg, stub_src, n, n);
-	snprintf(f[2], sizeof f[2], "TG%u ID%u $%03X BER1.2%%", stub_tg, stub_src, n);
-	snprintf(f[3], sizeof f[3], "TG%u ID%u $%03X", stub_tg, stub_src, n);
+	snprintf(f[2], sizeof f[2], "TG%u ID%u $%03X/%u BER1.2%%", stub_tg, stub_src, n, n);
+	snprintf(f[3], sizeof f[3], "TG%u ID%u $%03X/%u", stub_tg, stub_src, n, n);
+	snprintf(f[4], sizeof f[4], "ID%u $%03X/%u", stub_src, n, n);
 	for (unsigned first = 0; first < 3u; first++) {
 		size_t len = 0;
 		char tmp[200];
 		tmp[len++] = '\x1d';
-		for (unsigned i = first; i < 4u; i++)
+		for (unsigned i = first; i < 5u; i++)
 			len += (size_t)snprintf(tmp + len, sizeof tmp - len, "%s%s", i > first ? "\x1f" : "", f[i]);
 		tmp[len++] = '\x1e';
 		tmp[len] = '\0';
@@ -163,6 +164,8 @@ static const call_t calls[] = {
 	{ "worst case, NAC $659", 65535, 16777214u, 0x659, false },
 	{ "worst case, NAC $F7E", 65535, 16777214u, 0xF7E, false },
 	{ "worst case, NAC $000", 65535, 16777214u, 0x000, false },
+	{ "worst case, NAC $FFF", 65535, 16777214u, 0xFFF, false },
+	{ "emergency, worst case, NAC $FFF", 65535, 16777214u, 0xFFF, true },
 	{ "TG 101 ID 77285", 101, 77285, 0x1C8, false },
 	{ "TG 1 ID 1", 1, 1, 0x1C8, false },
 	{ "TG 65535 ID 1234567", 65535, 1234567u, 0x1C8, false },
@@ -205,7 +208,7 @@ static void one(unsigned i, unsigned lang)
 	stub_emergency = c->emergency;
 	run("rx:3101234,91,g wait:600");
 	int w = home_form(shown, sizeof shown);
-	snprintf(hex, sizeof hex, "$%03X", c->nac);
+	snprintf(hex, sizeof hex, "$%03X/%u", c->nac, c->nac);
 	printf("  %s (%s, %s) %d px of %d: \"%s\"\n", c->what, large ? "large" : "normal", lang ? "TR" : "EN", w,
 	       gfx_width(), shown);
 	if (w < 0 || w > gfx_width() || strstr(shown, hex) == NULL) {
