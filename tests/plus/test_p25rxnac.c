@@ -180,7 +180,7 @@ int main(void)
     CHECK(p25_lab_channel_rx(433500000u));
     if(!setjmp(finished))worker_fn(NULL);
     CHECK(p25_lab_p25_caller_line(home,sizeof home,false)!=0);
-    CHECK(!strcmp(home,"\x1d" "EMERGENCY Private 77285>1234 $1C8/456\x1f" "EMG Private 77285>1234 $1C8/456\x1f" "EMG ID77285 $1C8/456\x1e"));
+    CHECK(!strcmp(home,"\x1d" "EMERGENCY Private 77285>1234 $1C8/456\x1f" "EMG Private 77285>1234 $1C8/456\x1f" "EMG P:77285 $1C8/456\x1e"));
     printf("%s emergency unit-to-unit on Any keeps the NAC\n",failures==before?"ok  ":"FAIL");
     printf("P25 RX NAC: %u failures\n",failures);
     return failures?1:0;

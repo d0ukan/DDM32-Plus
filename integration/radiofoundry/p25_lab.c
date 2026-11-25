@@ -335,7 +335,7 @@ static void line_nac(line_t *l,uint16_t v)
 /* DM32 Plus: an emergency call on a channel that does not say its NAC (Any, or another NAC): Home's forms keep the NAC.
  * "EMERGENCY TG65535 ID16777214 $1C8" (wide) | "EMG TG65535 ID16777214 $1C8" (27 characters: the 8 px font) |
  * "EMG ID16777214 $1C8" (the caller and the NAC: 19 characters, any font). No BER here, the room is the NAC's. A
- * unit-to-unit emergency says "Private 77285>1234" in the first two */
+ * unit-to-unit emergency says "Private 77285>1234" in the first two and "P:77285" in the last */
 static size_t emergency_nac_line(char *out,size_t cap,uint16_t tg,uint32_t src,uint32_t target,bool unit,uint16_t heard)
 {
     line_t l={out,cap,false};
@@ -344,7 +344,7 @@ static size_t emergency_nac_line(char *out,size_t cap,uint16_t tg,uint32_t src,u
         line_str(&l,form?"EMG":TR("EMERGENCY"));
         line_str(&l," ");
         if(form==2u && src) {
-            line_str(&l,"ID");line_u32(&l,src);
+            line_str(&l,unit?"P:":"ID");line_u32(&l,src);	/* "P:" marks a unit-to-unit call, as on Home's other forms */
         } else if(unit) {
             line_str(&l,TR("Private"));line_str(&l," ");
             line_u32(&l,src);line_str(&l,">");line_u32(&l,target);
@@ -438,7 +438,13 @@ size_t p25_lab_p25_caller_line(char *out,size_t cap,bool pane)
 #endif
         if(alt==0)line_str(&l,"P25 ");
         if(alt==4u) {
-            line_str(&l,"ID");line_u32(&l,src);
+            /* the caller and the NAC; a unit-to-unit call keeps its mark: "P:77285 $293/659" (same width as "ID") */
+#if CONFIG_P25_EXTRAS
+            line_str(&l,unit?"P:":"ID");
+#else
+            line_str(&l,"ID");
+#endif
+            line_u32(&l,src);
         } else
 #if CONFIG_P25_EXTRAS
         if(unit) {

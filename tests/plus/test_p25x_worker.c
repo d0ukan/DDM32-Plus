@@ -230,9 +230,9 @@ int main(void)
     CHECK(same(home,"\x1d" "P25 Private 77285 > 1234 NAC $293/659" "\x1f" "Private 77285>1234 NAC$293/659"
                     "\x1f" "Private 77285>1234" "\x1e"));
     /* 54 bytes with the wide form: the caller and the NAC, then the short one */
-    CHECK(same(pane,"\x1d" "ID77285 $293/659" "\x1f" "Private 77285>1234" "\x1e"));
+    CHECK(same(pane,"\x1d" "P:77285 $293/659" "\x1f" "Private 77285>1234" "\x1e"));
     char small[40];	/* the length returned is the text's */
-    CHECK(p25_lab_p25_caller_line(small,sizeof small,true)==37u && same(small,"\x1d" "ID77285 $293/659" "\x1f" "Private 77285>1234" "\x1e"));
+    CHECK(p25_lab_p25_caller_line(small,sizeof small,true)==37u && same(small,"\x1d" "P:77285 $293/659" "\x1f" "Private 77285>1234" "\x1e"));
     char tiny[24];	/* only the plain form */
     CHECK(p25_lab_p25_caller_line(tiny,sizeof tiny,true)==20u && same(tiny,"\x1d" "Private 77285>1234" "\x1e"));
     CHECK(p25_lab_call(&c)==n0+2u && c.priv && c.target==1234 && c.tg==0 && c.src==77285 && !c.emergency);
@@ -246,7 +246,7 @@ int main(void)
     CHECK(played_frames==0 && muted_frames==36u);
     CHECK(p25_lab_p25_kind(&target)==P25_LAB_PRIVATE && target==5555);
     lines();
-    CHECK(same(pane,"\x1d" "ID77285 $293/659" "\x1f" "Private 77285>5555" "\x1e"));
+    CHECK(same(pane,"\x1d" "P:77285 $293/659" "\x1f" "Private 77285>5555" "\x1e"));
     /* a buffer the wide pane form fits: both forms */
     char wide[64];
     CHECK(p25_lab_p25_caller_line(wide,sizeof wide,true)!=0 &&
