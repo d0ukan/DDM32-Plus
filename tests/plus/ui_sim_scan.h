@@ -20,5 +20,10 @@ extern sc_sim_t sc_sim;
 void sc_sim_clear(void);
 uint32_t sc_sim_freq(void);		/* the view's RX frequency */
 void sc_sim_changed(void);		/* the view changed: the screen on top draws again */
+/* searchlist: the drawn text that contains want (false: none), its top and bottom, and whether it sits on the picked
+ * row's highlight (the focus colour at its first pixel or at the row's right end) */
+bool sc_sim_text(const char *want, int *y0, int *y1, bool *focus);
+bool sc_sim_text_is(const char *want);	/* a drawn text that is exactly want */
+int sc_sim_hint_y(void);		/* the hint line's top: the list ends above it */
 
 #endif

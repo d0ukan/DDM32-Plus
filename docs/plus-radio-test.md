@@ -797,7 +797,7 @@ keyed in any row. The other radio sends on 433.500 (or a free authorised frequen
 | FL-2 | The same frequency and NAC, the other radio on another talkgroup (e.g. TG 102), then back on TG 101 | two entries for the frequency (TG 101, TG 102), each with its own calls on the PC; the one heard last on top |
 | FL-3 | The same frequency, another NAC (e.g. $293) | its own entry; FL-1's entries unchanged |
 | FL-4 | DMR search: calls on TG 91 and TG 9 (TS1 / TS2 or one after the other) on one frequency; then All digital search with FL-1..FL-3 | DMR: one entry per talkgroup with its calls; all digital: the same per mode, a mixed P25 / DMR frequency one entry per mode and group |
-| FL-5 | More than 8 keys found | the oldest (least recently heard) entry drops, the new one on top |
+| FL-5 | More than 16 keys found (8 up to v1.0.5; branch `searchlist` rows SL-1..SL-4 below) | the oldest (least recently heard) entry drops, the new one on top |
 
 ## Search reliability (branch `searchfix`, docs/plus.md "Search reliability")
 
@@ -1010,3 +1010,15 @@ after choosing "fast + soft probe" with held 0 on the P25 search screen; off by 
 | RN-1 | A P25 channel on NAC Any; the other radio on NAC 659, TG 101 | Home's caller line ends " $659" after TG and ID (with BER when it fits); on a channel with its own NAC 659 the line is as 1.0.2 | **Observed on 1.0.3 (2026-11-25, owner):** the NAC showed only as "$193" (hex only). Format changes in 1.0.4 to "$193/403" (hex/decimal, as elsewhere); re-test then.
 | RN-2 | Same, the other radio sends an emergency call (if it can) | "EMERGENCY TG101 ID... $659/1625" or a shorter form; never cut at the edge | 1.0.4: the NAC is "$hex/dec" in every form.
 | UI-1 | Tools menu; Tools > Sun & Moon (English and Turkish); Tools > P25 search and DMR search with a few finds | own icons for DOTA Transfer, Cross-band, CW decoder, SOS key; no label over the time columns; every search line inside the screen (no clipped edge) | **Observed on 1.0.3 (2026-11-25, owner):** search screen clipping fixed (confirmed on the radio). Sun & Moon labels look fixed; the full check waits for a GPS fix.
+
+## Found lists: 16 finds, scrolling (branch `searchlist`, docs/plus.md "Found lists: 16 finds, scrolling")
+
+Receive only; nothing keyed. Host-tested only so far. A busy band helps (430-440 MHz, or a wide manual range); the
+other radio on several frequencies / NACs / talkgroups also makes finds.
+
+| Row | Do | Expect |
+|---|---|---|
+| SL-1 | P25 search until more than 8 finds are listed (Down to the bottom to count them) | up to 16 finds; at 17 the oldest one goes and the new one is on top |
+| SL-2 | With more finds than the screen shows: Down from the top through every find to the last, then Up back past the first | the highlighted find is always on screen with both its lines (the "ID" line too); the list scrolls; a "v" at the right of the Pass line while finds are below the part shown, "^" while some are above; Up past the first: nothing highlighted, the newest find on top again |
+| SL-3 | Same on DMR search and All digital search (English and Turkish menus) | as SL-2; OK on a find far down the list still tunes that find |
+| SL-4 | Pick a find far down the list while the search runs and new finds come in | the picked find stays highlighted and on screen (it moves down a row per new find, the list follows); # (P25 / DMR) still saves all finds, "Saving N of 16" at most |

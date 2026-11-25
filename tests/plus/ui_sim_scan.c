@@ -79,6 +79,34 @@ void sc_sim_changed(void)
 	changed();	/* the radio's view changed: the screen on top draws again (as the search's own updates do) */
 }
 
+bool sc_sim_text(const char *want, int *y0, int *y1, bool *focus)
+{
+	for (int i = 0; i < live_n; i++) {
+		if (strstr(live[i].s, want) == NULL)
+			continue;
+		*y0 = live[i].y0;
+		*y1 = live[i].y1;
+		/* the cell's first pixel or the row's last (either may be a glyph's) */
+		*focus = gfx_get_pixel(live[i].x0, live[i].y0) == ui_col.focus ||
+			 gfx_get_pixel(gfx_width() - 1, live[i].y0) == ui_col.focus;
+		return true;
+	}
+	return false;
+}
+
+bool sc_sim_text_is(const char *want)
+{
+	for (int i = 0; i < live_n; i++)
+		if (strcmp(live[i].s, want) == 0)
+			return true;
+	return false;
+}
+
+int sc_sim_hint_y(void)
+{
+	return ui_layout.hint_y;
+}
+
 #if CONFIG_ALL_SEARCH
 /* The all digital search (srchfix): its view is the DMR view's, its requests recorded as "alls:" */
 bool dmrs_snapshot_all(dmrs_view_t *out)

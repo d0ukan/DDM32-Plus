@@ -3,6 +3,22 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased
+
+Firmware. Host-tested only; not yet run on the radio.
+
+- Search found lists (Tools > P25 search, DMR search, All digital search) keep 16 finds instead of 8, newest first;
+  the 17th new find drops the oldest. The list now scrolls: Up / Down keep the picked find whole on screen (both its
+  lines) and new finds arriving on top no longer push it off the screen; with nothing picked the list shows from the
+  newest, as before. A small "^" / "v" at the right of the Pass line says finds are above / below the part shown.
+  Owner report 2026-11-25: the list stopped at 8 and Down moved the highlight off the screen.
+- The PC search log is unchanged: the debug link sections still carry the newest 8 finds (a reply has no room for 16
+  all digital lines); an entry that hears a call moves to the top, so the log misses nothing it caught before.
+- The revisits are unchanged (one find in the range read again every 16 sweep steps, round robin): with more than 8
+  finds in the range, each of them is read again less often (16 finds: every 256 steps instead of every 128).
+- Cost: 504 B RAM (the two found lists 352 B, the screens' shared copy 144 B, the scroll state 2 B) and 652 B program
+  flash. `p25s_start` no longer copies the found list on the radio task's stack.
+
 ## v1.0.5 (2026-11-25, with programmer 3.1.0)
 
 Firmware. Host-tested only; not yet run on the radio. Only removals, to free program flash; nothing new. The programmer

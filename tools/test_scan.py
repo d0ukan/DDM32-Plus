@@ -3,7 +3,8 @@
 tools/test_classic.py after its own (the build tree prepared, ASan / UBSan flags given):
 
 - item 1, the search range editor through upstream's UI simulator, English and Turkish (tests/plus/test_ui_scan.c,
-  tests/plus/ui_sim_scan.c): presets, typing, steps, moving, refusals, the request's step, the range kept;
+  tests/plus/ui_sim_scan.c): presets, typing, steps, moving, refusals, the request's step, the range kept; with it
+  the searchlist cases (16 finds: the list scrolls with the picked find on P25, DMR and all digital search);
 - item 2, the faster searches: the P25 and DMR search engines in a receiver model (tests/plus/test_search_model.c),
   built as they were (CONFIG_SEARCH_FAST=0) and faster (=1): a pass's time, hits on the signal's own frequency and
   elsewhere for readings up to 15 ms slow, the probes of a busy channel that isn't P25 / DMR; the table printed for

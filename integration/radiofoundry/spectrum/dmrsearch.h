@@ -69,7 +69,7 @@
 					 * takes the call's LC from the second superframe at worst), then on */
 #define DMRS_HANG_MS		2000u	/* a call ended: held this long for a reply, then on */
 #define DMRS_SKIP_MS		10000u	/* a carrier that wasn't DMR is not probed again for this long */
-#define DMRS_FOUND_MAX		8u
+#define DMRS_FOUND_MAX		16u	/* DDM32 Plus searchlist: 16 (was 8; the screen scrolls) */
 #define DMRS_SKIP_MAX		8u
 #define DMRS_REVISIT_STEPS	16u	/* a found frequency in the range is read again after this many steps */
 #define DMRS_IDLE_MS		5000u	/* the screen didn't read the search this long (it was left): it stops */

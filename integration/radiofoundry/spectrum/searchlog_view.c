@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* DDM32 Plus search log (tools/plus_searchlog.py, docs/plus.md "Search log on the PC"): the debug link sections
  * "p25s" and "dmrs" carry the P25 and DMR searches' state and found lists, so the PC programmer can keep every call a
- * search finds all night (the radio keeps 8); "alls" the all digital search's. Read only and not counted as a look
+ * search finds all night; "alls" the all digital search's. Read only and not counted as a look
  * (p25s_peek, dmrs_peek, dmrs_peek_all): a search
  * still stops 5 s after its screen was left. Keys (new keys may be added; the meaning of these stays):
  *   X.on=0|1 X.phase=N X.at=HZ X.lo=HZ X.hi=HZ X.n=N X.seq=N
- *   p25s.fI=HZ,NAC,TG,SRC,CALLS,AGE_S,ID          (I = 0 newest .. n-1)
+ *   p25s.fI=HZ,NAC,TG,SRC,CALLS,AGE_S,ID          (I = 0 newest .. min(n, SEARCHLOG_ROWS) - 1)
  *   dmrs.fI=HZ,CC,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,ID   (CC 255 = not named yet)
  *   alls.mode=P25|DMR|YSF|NXDN   (the mode probed or played now)
  *   alls.fI=HZ,MODE,CODE,TSMASK,SYNCMASK,GROUP,ENC,DST,SRC,CALLS,AGE_S,ID,CALL
@@ -42,6 +42,13 @@
 #include "radio/searchhy.h"
 #endif
 
+/* DDM32 Plus searchlist: the radio keeps 16 finds a search (P25S_FOUND_MAX, DMRS_FOUND_MAX) but a section still
+ * carries the newest 8, as before. A reply holds 1002 bytes of text (dl_frame.h DL_REPLY_MAX less GET_VIEW's header
+ * and truncation mark): 16 "alls" lines would not fit with the header and the counters' line. The PC programmers
+ * read f0..f7 and miss nothing: an entry that hears a call moves to the top of the list (X.n stays the radio's own
+ * count, up to 16) */
+#define SEARCHLOG_ROWS		8u
+
 static unsigned age_s(uint32_t now, uint32_t heard)
 {
 	return (unsigned)((now - heard) / 1000u);
@@ -73,7 +80,7 @@ void searchlog_view_p25(dl_text_t *t)
 	dl_text(t, "p25s.on=%u\np25s.phase=%u\np25s.at=%lu\np25s.lo=%lu\np25s.hi=%lu\np25s.n=%u\np25s.seq=%u\n",
 		p.phase != P25S_OFF ? 1u : 0u, (unsigned)p.phase, (unsigned long)p.at_hz, (unsigned long)p.lo_hz,
 		(unsigned long)p.hi_hz, (unsigned)p.found_n, (unsigned)p.seq);
-	for (unsigned i = 0; i < P25S_FOUND_MAX; i++) {
+	for (unsigned i = 0; i < SEARCHLOG_ROWS && i < P25S_FOUND_MAX; i++) {
 		if (!p25s_peek(i, &p))
 			break;
 		dl_text(t, "p25s.f%u=%lu,%u,%u,%lu,%u,%u,%u\n", i, (unsigned long)p.f.hz, (unsigned)p.f.nac,
@@ -98,7 +105,7 @@ void searchlog_view_dmr(dl_text_t *t)
 	dl_text(t, "dmrs.on=%u\ndmrs.phase=%u\ndmrs.at=%lu\ndmrs.lo=%lu\ndmrs.hi=%lu\ndmrs.n=%u\ndmrs.seq=%u\n",
 		p.phase != DMRS_OFF ? 1u : 0u, (unsigned)p.phase, (unsigned long)p.at_hz, (unsigned long)p.lo_hz,
 		(unsigned long)p.hi_hz, (unsigned)p.found_n, (unsigned)p.seq);
-	for (unsigned i = 0; i < DMRS_FOUND_MAX; i++) {
+	for (unsigned i = 0; i < SEARCHLOG_ROWS && i < DMRS_FOUND_MAX; i++) {
 		if (!dmrs_peek(i, &p))
 			break;
 		dl_text(t, "dmrs.f%u=%lu,%u,%u,%u,%u,%u,%lu,%lu,%u,%u,%u\n", i, (unsigned long)p.f.hz,
@@ -124,7 +131,7 @@ void searchlog_view_all(dl_text_t *t)
 	dl_text(t, "alls.on=%u\nalls.phase=%u\nalls.mode=%s\nalls.at=%lu\nalls.lo=%lu\nalls.hi=%lu\nalls.n=%u\nalls.seq=%u\n",
 		p.phase != DMRS_OFF ? 1u : 0u, (unsigned)p.phase, dmrs_mode_name(p.mode), (unsigned long)p.at_hz,
 		(unsigned long)p.lo_hz, (unsigned long)p.hi_hz, (unsigned)p.found_n, (unsigned)p.seq);
-	for (unsigned i = 0; i < DMRS_FOUND_MAX; i++) {
+	for (unsigned i = 0; i < SEARCHLOG_ROWS && i < DMRS_FOUND_MAX; i++) {
 		if (!dmrs_peek_all(i, &p))
 			break;
 		char call[11] = "";

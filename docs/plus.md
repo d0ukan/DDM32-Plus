@@ -358,7 +358,7 @@ Tools > P25 search: finds P25 anywhere in a range whatever its NAC and talkgroup
 | Sweep | the channel receiver steps the range, 30 ms a step (+-1 MHz: 161 steps, about 5 s a pass; 430-440 MHz: 801 steps, about 24 s), speaker muted |
 | Hit | a step 10 dB over the noise floor (slow average of the quiet steps) and -115 dBm or stronger |
 | Probe | the native P25 receiver takes that frequency with NAC F7E (any) and no talkgroup filter; valid P25 frames within 0.7 s (encrypted ones count too) = P25 |
-| P25 | the call plays; the found list (8, newest first) gets the frequency, NAC, talkgroup and source; given back 1.5 s after the last frame and the sweep goes on from the next step |
+| P25 | the call plays; the found list (16, newest first; 8 up to v1.0.5) gets the frequency, NAC, talkgroup and source; given back 1.5 s after the last frame and the sweep goes on from the next step |
 | Not P25 | given back at once; that frequency is not probed again for 10 s |
 
 PTT never transmits here: it is consumed and stops the search. Any other user request ends it and tunes the
@@ -413,7 +413,7 @@ framing.
 The plus build (`CONFIG_SEARCH_SURE`) changes the hit, probe and skip rules of this table and of the all digital
 search: "Search reliability" below.
 
-Found list: 8 entries, newest first ("433.5000 CC1 TS2 RPT 3m", then "TG 2620 from 2620123"), kept across range
+Found list: 16 entries (8 up to v1.0.5; it scrolls: "Found lists: 16 finds, scrolling" below), newest first ("433.5000 CC1 TS2 RPT 3m", then "TG 2620 from 2620123"), kept across range
 changes; every 16 steps one find in the range is read again (round robin), so a new call there is caught in about two
 seconds. Up / Down pick a find; OK on it stops the search and puts the VFO there in DMR with its color code and its
 slot (when one slot was seen). A repeater find puts the VFO on its output frequency, simplex: set the TX offset
@@ -545,7 +545,7 @@ them is found within its own window after the earlier modes ran out (DMR after a
 about 2.1 s). A frequency already in the found list is probed in its own mode first (the rest in order after it), so
 revisits of a DMR, YSF or NXDN find don't wait for P25. A mixed mode frequency gets an entry for each mode.
 
-Found list: 8 entries, newest first, with the mode as a field:
+Found list: 16 entries (8 up to v1.0.5), newest first, with the mode as a field:
 
 | Mode | First line | Second line |
 |---|---|---|
@@ -596,6 +596,39 @@ search's readings in DMR mode; the FM / DMR board mode switch inside a probe (th
 bursts within 600 ms); the native receiver's lock within 700 ms for P25 and YSF; the NXDN modem's acquisition within
 900 ms (NXDN receive itself is still unverified on the radio, docs/nxdn.md).
 
+### Found lists: 16 finds, scrolling (branch `searchlist`, after v1.0.5)
+
+Owner report 2026-11-25: on P25 search, DMR search and All digital search the found list stopped at 8, and Down moved
+the highlight past the screen's last row (the screens always drew from the newest find until the screen was full,
+while Up / Down picked rows below that). Now:
+
+- `P25S_FOUND_MAX` and `DMRS_FOUND_MAX` are 16 (newest first; a new key on top, the oldest drops at 17). The DMR
+  engine's list is shared by DMR and All digital search as before. `p25s_start` keeps the list in place (it clears
+  what lies before `found_n` and after `found[]`) instead of copying it on the radio task's stack.
+- The screens (`ui_p25search.c`, `ui_dmrsearch.c`) keep `top`, the first find drawn (one byte each, reset when the
+  screen opens). Each draw brings it to the picked find so that find is drawn whole, both lines (the P25 "ID" line
+  when it has a source; the DMR / all digital talkgroup / source / encrypted line): a picked find above `top` becomes
+  the first row, one below the screen's end moves `top` down until it fits. New finds arriving on top move the picked
+  find down a row (it is followed by frequency + key as before) and `top` follows. Nothing picked: `top` 0, the list
+  shows from the newest. A find at the bottom whose second line has no room is drawn with its first line only, as
+  before; it is never the picked one.
+- "^" (finds above the part shown) and / or "v" (finds below it) are drawn at the right end of the Pass line, which is
+  fitted into the width left; the save line ("Saving 3 of 16") has the row to itself.
+- The debug link sections (`searchlog_view.c`, `SEARCHLOG_ROWS` 8) still carry the newest 8 finds: GET_VIEW has 1002
+  bytes of text, and 16 `alls` lines (up to about 90 bytes each) with the header and the counters' line would not
+  fit (the counters' line would be the first to go). An entry that hears a call moves to the top, so the PC programmers
+  (they read `f0`..`f7`) still see every change; `X.n` is the radio's count, up to 16.
+- The find save (`#` saves all: `ui_findsave_start` with up to 16, `uint8_t` counts) writes up to 16 channels into the
+  new zone; a full zone ends it with the count so far, as before.
+- Revisits are unchanged (one found frequency in the range every 16 steps, round robin), so with more than 8 found
+  frequencies in the range each is read again less often.
+- Cost (plus public build): RAM 205,352 -> 205,856 B (+504: the P25 list +160, the DMR list +192, the screens' shared
+  copy `ui_scratch` +144, `top` 2 B), flash 893,900 -> 894,552 B (+652).
+- Tests: the engines keep 16 and drop the oldest (`tests/plus/test_p25search.c`, `test_dmrsearch.c`); the screens in
+  upstream's simulator, English and Turkish (`tests/plus/test_ui_scan.c`, `sl_*` cases): Down through all 16 with the
+  picked find drawn whole and the only one highlighted, Up back to none showing the newest, the marker, four new finds
+  arriving while the 12th is picked, a short list unchanged, the layout check on every step. Host-tested only.
+
 ### Search log on the PC (`p25s` / `dmrs` / `alls`; branch `slog2`, beta.7 hole hunt A2, B5, B9-B12)
 
 The PC programmers' Search log page (C# `SearchLogBook` / `DebugReaders.SearchLog`, Rust `searchlog.rs` /
@@ -637,7 +670,7 @@ with calls is on it; a later call brings it back with its first-heard time. A li
 first call (not when its entry was first seen without one); "Clear the log" forgets it, so a line made again after
 the clear is first heard at its next call. The radio's uptime going back (not
 its 49.7 day wrap) or a `seq` going back is a restart: the entries start anew, nothing counted is lost or counted
-twice. `seq` growing more than the entries' calls is calls on entries the PC never saw (more than 8 new between two
+twice. `seq` growing more than the entries' calls is calls on entries the PC never saw (more than the 8 sent changed between two
 polls): shown as "N calls may be missed"; the balance never goes below 0 (so it never hides a later miss), a call the
 entries showed before `seq` had it (counted between the radio printing the two) is owed for one poll only. Not seen as
 missed: calls of a radio restart's first minutes made on entries gone before the PC's first poll after it (while it

@@ -197,7 +197,7 @@ int main(void)
 	/* The found list: newest first, at most P25S_FOUND_MAX, survives a restart */
 	p25s_start(430000000u, 440000000u, 12500u, now);
 	CHECK(p25s_snapshot(&v) && v.found_n == 1);
-	for (unsigned k = 0; k < 10u; k++) {
+	for (unsigned k = 0; k < 20u; k++) {	/* searchlist: 1 + 20 finds, the 16 newest kept */
 		uint32_t hz = 430000000u + 25000u * k;
 		while (p25s_at_hz() != hz) {
 			p25s_snapshot(&v);
@@ -210,7 +210,11 @@ int main(void)
 		p25s_probe_found((uint16_t)(0x100 + k), (uint16_t)k, k, now);
 		p25s_probe_done(true, now);
 	}
-	CHECK(p25s_snapshot(&v) && v.found_n == P25S_FOUND_MAX && v.found[0].nac == 0x109 && v.found[7].nac == 0x102);
+	CHECK(P25S_FOUND_MAX == 16u);
+	CHECK(p25s_snapshot(&v) && v.found_n == P25S_FOUND_MAX && v.found[0].nac == 0x113 && v.found[8].nac == 0x10B &&
+	      v.found[15].nac == 0x104);
+	for (unsigned i = 0; i < v.found_n; i++)	/* the five oldest dropped (the earlier find and 0x100..0x103) */
+		CHECK(v.found[i].nac >= 0x104 && v.found[i].nac <= 0x113);
 	/* Revisits: a found frequency in the range is read again every P25S_REVISIT_STEPS steps, the sweep goes on
 	 * where it was, and a new call there is caught within about that many steps (not a whole sweep) */
 	p25s_start(432500000u, 434500000u, 12500u, now);	/* 161 steps; 430.xxx found entries are out of range */

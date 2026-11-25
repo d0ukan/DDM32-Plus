@@ -10,7 +10,10 @@
  *   - the request: the range and its step as the radio core decodes them; a running search starts again on an
  *     applied range, a stopped one waits for OK;
  *   - the range and step kept when the screen is left and opened again, the manual range then among the presets;
- *   - the layout of the screen and the editor. */
+ *   - the layout of the screen and the editor.
+ * Also srchfix (the lines fit the safe area) and searchlist (16 finds, P25 / DMR / all digital): Down through all 16
+ * keeps the picked find whole on screen and the only one highlighted, Up back to none shows the newest again, the "^" /
+ * "v" marker, new finds arriving on top while one far down is picked, a short list unchanged. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -455,10 +458,218 @@ static void sf_p25_redraw(void) { sf_redraw(SCR_P25SEARCH); }
 static void sf_dmr_redraw(void) { sf_redraw(SCR_DMRSEARCH); }
 static void sf_all_redraw(void) { sf_redraw(SCR_ALLSEARCH); }
 
+/* --- searchlist: 16 finds, the list scrolls with the picked one --- */
+
+/* Find i (0 the newest) at 430 + i / 10 MHz: its line shows "430.i000" / "431.0000" ...; P25: every third has a source
+ * (a second line "ID 5000i"), DMR / all digital: every second has a talkgroup and source (a second line "TG 7000i") */
+static uint32_t sl_hz(unsigned i)
+{
+	return 430000000u + 100000u * i;
+}
+
+static void sl_mhz(unsigned i, char *out, size_t cap)
+{
+	uint32_t hz = sl_hz(i);
+	snprintf(out, cap, "%lu.%04lu", (unsigned long)(hz / 1000000u), (unsigned long)(hz / 100u % 10000u));
+}
+
+static bool sl_two(ui_scr_t scr, unsigned i)
+{
+	return scr == SCR_P25SEARCH ? i % 3u == 0 : i % 2u == 0;
+}
+
+static void sl_second(ui_scr_t scr, unsigned i, char *out, size_t cap)
+{
+	snprintf(out, cap, scr == SCR_P25SEARCH ? "ID %u" : "TG %u", (scr == SCR_P25SEARCH ? 50000u : 70000u) + i);
+}
+
+/* Find i of the list as the test sets it (the key it is followed by: frequency, NAC / colour code, talkgroup) */
+static void sl_entry(ui_scr_t scr, unsigned slot, unsigned i)
+{
+	if (scr == SCR_P25SEARCH) {
+		p25s_found_t *f = &sc_sim.p25.found[slot];
+		memset(f, 0, sizeof *f);
+		f->hz = sl_hz(i);
+		f->nac = 0x1C8;
+		f->tg = 0;
+		f->src = sl_two(scr, i) ? 50000u + i : 0;
+		f->heard_ms = ago(60000u);
+	} else {
+		dmrs_found_t *f = &sc_sim.dmr.found[slot];
+		memset(f, 0, sizeof *f);
+		f->hz = sl_hz(i);
+		f->cc = 1;
+		f->ts_mask = 1;
+		f->sync_mask = DMRS_SYNC_BS;
+		f->mode = DMRS_MODE_DMR;
+		f->group = true;
+		f->dst = sl_two(scr, i) ? 70000u + i : 0;
+		f->src = sl_two(scr, i) ? 9u : 0;
+		f->heard_ms = ago(60000u);
+	}
+}
+
+static void sl_fill(ui_scr_t scr, unsigned n)
+{
+	memset(&sc_sim.p25, 0, sizeof sc_sim.p25);
+	memset(&sc_sim.dmr, 0, sizeof sc_sim.dmr);
+	sc_sim.p25.phase = P25S_SWEEP;
+	sc_sim.dmr.phase = DMRS_SWEEP;
+	sc_sim.p25.at_hz = sc_sim.dmr.at_hz = 433500000u;
+	sc_sim.dmr.kind = scr == SCR_ALLSEARCH ? DMRS_KIND_ALL : DMRS_KIND_DMR;
+	for (unsigned i = 0; i < n; i++)
+		sl_entry(scr, i, i);
+	sc_sim.p25.found_n = sc_sim.dmr.found_n = (uint8_t)n;
+	sc_sim_changed();
+	run("wait:300");
+}
+
+/* Find i drawn whole (both its lines above the hint line), on the highlight when picked and only then */
+static void sl_drawn(ui_scr_t scr, unsigned i, bool picked)
+{
+	char t[24], what[96];
+	int y0, y1;
+	bool focus;
+	sl_mhz(i, t, sizeof t);
+	snprintf(what, sizeof what, "find %u (%s) drawn%s", i, t, picked ? ", picked" : "");
+	check(sc_sim_text(t, &y0, &y1, &focus) && y1 <= sc_sim_hint_y() && focus == picked, what);
+	if (picked && sl_two(scr, i)) {
+		sl_second(scr, i, t, sizeof t);
+		snprintf(what, sizeof what, "find %u's second line (%s) drawn and picked", i, t);
+		check(sc_sim_text(t, &y0, &y1, &focus) && y1 <= sc_sim_hint_y() && focus, what);
+	}
+}
+
+static void sl_hidden(unsigned i)
+{
+	char t[24], what[64];
+	int y0, y1;
+	bool focus;
+	sl_mhz(i, t, sizeof t);
+	snprintf(what, sizeof what, "find %u (%s) not drawn", i, t);
+	check(!sc_sim_text(t, &y0, &y1, &focus), what);
+}
+
+/* No find but i on the highlight (-1: none) */
+static void sl_only(int picked, unsigned n)
+{
+	for (unsigned i = 0; i < n; i++) {
+		char t[24], what[96];
+		int y0, y1;
+		bool focus;
+		sl_mhz(i, t, sizeof t);
+		if (sc_sim_text(t, &y0, &y1, &focus) && focus != ((int)i == picked)) {
+			snprintf(what, sizeof what, "find %u (%s) %s", i, t, focus ? "highlighted, not picked" : "picked, not highlighted");
+			check(false, what);
+		}
+	}
+}
+
+static void sl_marker(const char *want)
+{
+	char what[48];
+	snprintf(what, sizeof what, "the list marker \"%s\"", want);
+	if (*want)
+		check(sc_sim_text_is(want), what);
+	else
+		check(!sc_sim_text_is("^") && !sc_sim_text_is("v") && !sc_sim_text_is("^v"), "no list marker");
+}
+
+static void sl_scroll(ui_scr_t scr)
+{
+	start("searchlist scroll", scr);
+	sl_fill(scr, 16);
+	layout();
+	/* Nothing picked: the newest on top, the oldest not on screen, "v" */
+	sl_drawn(scr, 0, false);
+	sl_hidden(15);
+	sl_only(-1, 16);
+	sl_marker("v");
+	/* Down through all 16: the picked one always whole on screen and the only one highlighted */
+	for (unsigned k = 0; k < 16u; k++) {
+		run("down");
+		sl_drawn(scr, k, true);
+		sl_only((int)k, 16);
+		layout();
+	}
+	sl_hidden(0);
+	sl_marker("^");
+	char shot[32];
+	snprintf(shot, sizeof shot, "shot:sl-bottom-%d", (int)scr);	/* SCAN_SHOTS: the screens as PNGs */
+	run(shot);
+	run("down");	/* the oldest stays picked */
+	sl_drawn(scr, 15, true);
+	/* ... and Up back: each on screen, then none: the top again */
+	for (int k = 14; k >= 0; k--) {
+		run("up");
+		sl_drawn(scr, (unsigned)k, true);
+		sl_only(k, 16);
+	}
+	sl_marker("v");
+	run("up");
+	sl_drawn(scr, 0, false);
+	sl_only(-1, 16);
+	sl_hidden(15);
+	sl_marker("v");
+	layout();
+}
+
+/* A new find on top while one far down is picked: the list drops its oldest, the picked one moves down a row and stays
+ * whole on screen and picked */
+static void sl_arrivals(ui_scr_t scr)
+{
+	start("searchlist arrivals", scr);
+	sl_fill(scr, 16);
+	for (unsigned k = 0; k < 12u; k++)
+		run("down");
+	sl_drawn(scr, 11, true);
+	for (unsigned n = 0; n < 4u; n++) {
+		/* a new find (16 + n, a new frequency) on top; the oldest drops */
+		if (scr == SCR_P25SEARCH)
+			memmove(&sc_sim.p25.found[1], &sc_sim.p25.found[0], sizeof sc_sim.p25.found[0] * 15u);
+		else
+			memmove(&sc_sim.dmr.found[1], &sc_sim.dmr.found[0], sizeof sc_sim.dmr.found[0] * 15u);
+		sl_entry(scr, 0, 16u + n);
+		sc_sim_changed();
+		run("wait:300");
+		sl_drawn(scr, 11, true);	/* the same find (its frequency, key), now row 12 + n */
+		sl_only(11, 20);
+		layout();
+	}
+	run("up");	/* Up from it: the find above it, still on screen */
+	sl_drawn(scr, 10, true);
+}
+
+/* Fewer finds than the screen holds: everything drawn, no marker, Down picks as before */
+static void sl_few(ui_scr_t scr)
+{
+	start("searchlist few", scr);
+	sl_fill(scr, 3);
+	for (unsigned i = 0; i < 3u; i++)
+		sl_drawn(scr, i, false);
+	sl_marker("");
+	run("down down");
+	sl_drawn(scr, 1, true);
+	sl_marker("");
+	layout();
+}
+
+static void sl_p25_scroll(void) { sl_scroll(SCR_P25SEARCH); }
+static void sl_dmr_scroll(void) { sl_scroll(SCR_DMRSEARCH); }
+static void sl_all_scroll(void) { sl_scroll(SCR_ALLSEARCH); }
+static void sl_p25_arrivals(void) { sl_arrivals(SCR_P25SEARCH); }
+static void sl_dmr_arrivals(void) { sl_arrivals(SCR_DMRSEARCH); }
+static void sl_all_arrivals(void) { sl_arrivals(SCR_ALLSEARCH); }
+static void sl_p25_few(void) { sl_few(SCR_P25SEARCH); }
+static void sl_dmr_few(void) { sl_few(SCR_DMRSEARCH); }
+static void sl_all_few(void) { sl_few(SCR_ALLSEARCH); }
+
 typedef void (*case_fn)(void);
 static const case_fn all[] = {
 	p25_presets, p25_type, p25_back, p25_step, p25_move, p25_refuse, p25_running_kept, dmr_range,
 	sf_p25_layout, sf_dmr_layout, sf_all_layout, sf_p25_redraw, sf_dmr_redraw, sf_all_redraw,
+	sl_p25_scroll, sl_dmr_scroll, sl_all_scroll, sl_p25_arrivals, sl_dmr_arrivals, sl_all_arrivals,
+	sl_p25_few, sl_dmr_few, sl_all_few,
 };
 
 int main(void)

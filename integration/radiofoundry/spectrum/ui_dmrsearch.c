@@ -10,7 +10,9 @@
  * CONFIG_ALL_SEARCH (DDM32 Plus): the same screen is Tools > All digital search (ui_allsearch_screen, the flag `all`):
  * the same ranges and keys; the probe and the call show their mode; a find shows its mode and that mode's fields (P25
  * NAC, talkgroup and source; DMR as here; YSF DG-ID and source callsign; NXDN RAN, group and source). OK on a find puts
- * the VFO there in that mode (every mode in the VFO: NAC / DG-ID / RAN Any). No find save there (P25 / DMR only). */
+ * the VFO there in that mode (every mode in the VFO: NAC / DG-ID / RAN Any). No find save there (P25 / DMR only).
+ * DDM32 Plus searchlist: up to 16 finds (DMRS_FOUND_MAX); the list scrolls to keep the picked one on screen, "^" / "v"
+ * at the right of the Pass line say finds are above / below the part shown. */
 #include "config.h"
 #if CONFIG_DMR_SEARCH
 #include <string.h>
@@ -139,6 +141,41 @@ static int sel_row(void)
 			first = i;
 	}
 	return first;
+}
+
+/* DDM32 Plus searchlist: 16 finds do not fit the screen, so the list scrolls. top is the first find drawn, kept while
+ * the screen is open; it follows the picked find so that find is always drawn whole (both its lines), also when new
+ * finds push it down the list. Nothing picked: the list shows from the newest, as before */
+static uint8_t top;
+
+/* A find's lines: a second (talkgroup, source, encrypted) when there is any */
+static int find_lines(uint8_t i)
+{
+	const dmrs_found_t *f = &sv.found[i];
+	return f->dst != 0 || f->src != 0 || f->enc ? 2 : 1;
+}
+
+/* top brought to the picked find (sel, -1 = none) for a list drawn from y0 in lines lh high; returns one past the last
+ * find drawn (a find's second line is left out when only its first fits above the hint line, as before) */
+static uint8_t list_span(int y0, int sel, int lh)
+{
+	int n = sv.found_n, lim = ui_layout.hint_y;
+	if (sel < 0 || top >= n)
+		top = 0;
+	if (sel >= 0 && sel < top)
+		top = (uint8_t)sel;
+	while (sel > top) {
+		int y = y0;
+		for (int i = top; i <= sel; i++)
+			y += find_lines((uint8_t)i) * lh;
+		if (y <= lim)
+			break;
+		top++;
+	}
+	int i = top;
+	for (int y = y0; i < n && y + lh <= lim; i++)
+		y += (find_lines((uint8_t)i) == 2 && y + 2 * lh <= lim ? 2 : 1) * lh;
+	return (uint8_t)i;
 }
 
 /* The search's request: this screen's kind */
@@ -411,26 +448,38 @@ static void dmrs_draw(void)
 	gfx_text(m, 0, y, buf, c);
 	y += m->h + 2;
 	gfx_fill(0, y, gfx_width(), s->h + 3, ui_col.bg);	/* ... and the line below it (Pass, the save line) */
+	/* The list's part on screen (searchlist): "^" finds above it, "v" finds below it, at the right of the Pass line */
+	int sel = have ? sel_row() : -1;
+	uint8_t end = have ? list_span(y + s->h + 7, sel, s->h + 1) : 0;
+	char mk[3];
+	int mn = 0;
+	if (have && top > 0)
+		mk[mn++] = '^';
+	if (have && end < sv.found_n)
+		mk[mn++] = 'v';
+	mk[mn] = '\0';
+	int mw = mn ? gfx_text_width(s, mk) : 0;
 #if CONFIG_FIND_SAVE
 	if (!all && ui_findsave_line(buf, sizeof buf)) {
 		gfx_text(s, 0, y, buf, ui_col.warn);
+		mw = 0;		/* the save line has the row to itself */
 	} else
 #endif
 	if (have && sv.phase != DMRS_OFF) {
-		fit_line(s, gfx_width(), buf, sizeof buf, pass_line, &sv, 4);
+		fit_line(s, gfx_width() - (mw ? mw + 4 : 0), buf, sizeof buf, pass_line, &sv, 4);
 		gfx_text(s, 0, y, buf, ui_col.dim);
 	}
+	if (mw)
+		gfx_text(s, gfx_width() - mw, y, mk, ui_col.dim);
 	y += s->h + 4;
 	gfx_hline(0, y, gfx_width(), ui_col.line);
 	y += 3;
 	if (!have || sv.found_n == 0)
 		gfx_text(s, 0, y, all ? TR("No digital found yet") : TR("No DMR found yet"), ui_col.dim);
-	int sel = have ? sel_row() : -1;
-	for (uint8_t i = 0; have && i < sv.found_n && y + s->h < ui_layout.hint_y; i++) {
+	for (uint8_t i = top; i < end; i++) {
 		const dmrs_found_t *f = &sv.found[i];
 		bool picked = (int)i == sel;
-		bool more = f->dst != 0 || f->src != 0 || f->enc;
-		int rows = more && y + 2 * (s->h + 1) <= ui_layout.hint_y ? 2 : 1;
+		int rows = find_lines(i) == 2 && y + 2 * (s->h + 1) <= ui_layout.hint_y ? 2 : 1;
 		if (picked)
 			gfx_fill(0, y - 1, gfx_width(), rows * (s->h + 1) + 1, ui_col.focus);
 		fit_line(s, gfx_width(), buf, sizeof buf, found_line, f, 4);
@@ -624,6 +673,7 @@ static void dmrs_enter(void)
 	all = false;
 #endif
 	sel_hz = 0;
+	top = 0;
 	ui_dirty();
 }
 

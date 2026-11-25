@@ -302,7 +302,7 @@ int main(void)
 	/* The found list: newest first, at most DMRS_FOUND_MAX, survives a restart */
 	dmrs_start(430000000u, 440000000u, 12500u, now);
 	CHECK(dmrs_snapshot(&v) && v.found_n == 3);	/* 433.500's three keys; 433.025 never was DMR */
-	for (unsigned k = 0; k < 10u; k++) {
+	for (unsigned k = 0; k < 20u; k++) {	/* searchlist: 3 + 20 finds, the 16 newest kept */
 		uint32_t hz = 430000000u + 25000u * k;
 		while (dmrs_at_hz() != hz) {
 			dmrs_snapshot(&v);
@@ -314,10 +314,14 @@ int main(void)
 		CHECK(hit);
 		memset(&h, 0, sizeof h);
 		h.bursts = 3;
-		h.cc = (uint8_t)k;
+		h.cc = (uint8_t)(k % 16u);
 		hold(&h, 5000u);
 	}
-	CHECK(dmrs_snapshot(&v) && v.found_n == DMRS_FOUND_MAX && v.found[0].cc == 9 && v.found[7].cc == 2);
+	CHECK(DMRS_FOUND_MAX == 16u);
+	CHECK(dmrs_snapshot(&v) && v.found_n == DMRS_FOUND_MAX && v.found[0].hz == 430475000u && v.found[0].cc == 3 &&
+	      v.found[8].hz == 430275000u && v.found[15].hz == 430100000u && v.found[15].cc == 4);
+	for (unsigned i = 0; i < v.found_n; i++)	/* the seven oldest dropped (433.500's three keys, 430.000-430.075) */
+		CHECK(v.found[i].hz >= 430100000u && v.found[i].hz <= 430475000u);
 
 	/* Revisits: a found frequency in the range is read again every DMRS_REVISIT_STEPS steps, the sweep goes on
 	 * where it was, and a new call there is caught within about that many steps (not a whole pass) */

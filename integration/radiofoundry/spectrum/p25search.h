@@ -27,7 +27,7 @@
 #define P25S_HIT_DB		10	/* a hit: this far above the floor ... */
 #define P25S_HIT_MIN_DBM	(-115)	/* ... and at least this strong */
 #define P25S_SKIP_MS		10000u	/* a carrier that wasn't P25 is not probed again for this long */
-#define P25S_FOUND_MAX		8u
+#define P25S_FOUND_MAX		16u	/* DDM32 Plus searchlist: 16 (was 8; the screen scrolls) */
 #define P25S_SKIP_MAX		8u
 #define P25S_REVISIT_STEPS	16u	/* a found frequency in the range is read again after this many steps */
 #define P25S_IDLE_MS		5000u	/* the screen didn't read the search this long (it was left): it stops */

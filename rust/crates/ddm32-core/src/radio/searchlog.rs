@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The search log (SearchLog.cs; firmware tools/plus_searchlog.py, docs/plus.md "Search log on the PC"): the radio's
-//! P25, DMR and all digital searches keep 8 finds each; read every second over the debug link (GET_VIEW sections p25s =
-//! 28, dmrs = 29, alls = 30, read only, not counted as a look). ONE line per mode + frequency + code + group with a
+//! P25, DMR and all digital searches keep 16 finds each (8 up to firmware 1.0.5) and send the newest 8 (f0..f7); read
+//! every second over the debug link (GET_VIEW sections p25s = 28, dmrs = 29, alls = 30, read only, not counted as a
+//! look). ONE line per mode + frequency + code + group with a
 //! call counter, counted by the radio's own entries (searchlog_view.c): each entry has a serial (ID) and a call
 //! counter; the log follows an entry by engine (the P25 search, or the DMR search's engine that the all digital search
 //! shares) + ID + frequency + mode and adds the change of its counter to the entry's line. A call the radio moves to
@@ -490,7 +491,7 @@ impl SearchLogBook {
         self.groups.values().map(SearchGroup::calls).sum()
     }
 
-    /// Calls the radio counted that no entry showed (it found more than 8 between two polls).
+    /// Calls the radio counted that no entry showed (more than the 8 sent changed between two polls).
     pub fn missed(&self) -> i64 {
         self.balance.values().filter(|b| **b > 0).sum()
     }

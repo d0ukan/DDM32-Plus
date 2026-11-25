@@ -105,7 +105,8 @@ public sealed record SearchCsvResult(string Path, bool Locked);
 
 /// <summary>
 /// The search log (firmware tools/plus_searchlog.py, docs/plus.md "Search log on the PC"): the radio's P25, DMR and all
-/// digital searches keep 8 finds each; read every second over the debug link (GET_VIEW sections p25s = 28, dmrs = 29,
+/// digital searches keep 16 finds each (8 up to firmware 1.0.5) and send the newest 8 (f0..f7); read every second
+/// over the debug link (GET_VIEW sections p25s = 28, dmrs = 29,
 /// alls = 30, read only, not counted as a look). The log keeps ONE line per mode + frequency + code + group with a call
 /// counter. Calls are counted by the radio's own entries (searchlog_view.c): every entry has a serial (ID) and a call
 /// counter; the log follows each entry by engine (the P25 search, or the DMR search's engine that the all digital
@@ -113,7 +114,7 @@ public sealed record SearchCsvResult(string Path, bool Locked);
 /// moves to its right talkgroup (one entry down, another up) is one call; an entry whose code / group the radio fills
 /// in later moves its calls to the right line (the half known line goes); the same call in two lists is never two.
 /// X.seq (the engine's calls since power on) going back, or the radio's uptime going back, is a restart: the entries
-/// start anew, nothing counted is lost. Calls the radio counted on entries the log never saw (more than its 8 between
+/// start anew, nothing counted is lost. Calls the radio counted on entries the log never saw (more than 8 between
 /// two polls) are told in <see cref="Missed"/>.
 /// </summary>
 public sealed class SearchLogBook
@@ -183,7 +184,7 @@ public sealed class SearchLogBook
     /// <summary>Radio restarts seen (uptime or a search's call sequence went back).</summary>
     public int Restarts { get; private set; }
 
-    /// <summary>Calls the radio counted that no entry showed (it found more than 8 between two polls).</summary>
+    /// <summary>Calls the radio counted that no entry showed (more than 8 changed between two polls).</summary>
     public int Missed => balance.Values.Where(b => b > 0).Sum();
 
     /// <summary>Distinct frequencies with a call.</summary>

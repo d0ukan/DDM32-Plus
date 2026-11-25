@@ -2,6 +2,7 @@
 /* DM32 Plus P25 search engine (p25search.h). No RTOS, no hardware. */
 #include "config.h"
 #if CONFIG_P25_SEARCH
+#include <stddef.h>
 #include <string.h>
 #include "radio/p25search.h"
 #if CONFIG_SEARCH_SURE
@@ -224,12 +225,15 @@ uint32_t p25s_start(uint32_t lo_hz, uint32_t hi_hz, uint32_t step_hz, uint32_t n
 	}
 #endif
 	begin_write();
-	uint8_t keep_n = s.found_n;
-	p25s_found_t keep[P25S_FOUND_MAX];
-	memcpy(keep, s.found, sizeof keep);
-	memset(&s, 0, sizeof s);
-	memcpy(s.found, keep, sizeof keep);	/* the found list outlives a restart (a new range) */
-	s.found_n = keep_n;
+	/* The found list outlives a restart (a new range): what comes before found_n and after found[] is cleared in
+	 * place (DDM32 Plus searchlist: no copy of the 16 entries on the radio task's stack) */
+	_Static_assert(offsetof(p25s_view_t, found_n) < offsetof(p25s_view_t, found),
+		       "p25s_start clears what lies before found_n");
+	{
+		const size_t tail = offsetof(p25s_view_t, found) + sizeof s.found;
+		memset(&s, 0, offsetof(p25s_view_t, found_n));
+		memset((char *)&s + tail, 0, sizeof s - tail);
+	}
 	s.lo_hz = lo_hz;
 	s.hi_hz = hi_hz;
 	s.step_hz = step_hz ? step_hz : 12500u;

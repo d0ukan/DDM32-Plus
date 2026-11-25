@@ -6,7 +6,8 @@ on overnight with a search running and keep every call it finds).
 Two debug link view sections, read with GET_VIEW (0x09) like the live panel's: "p25s" and "dmrs", the P25 and DMR
 searches' state and found lists (integration/radiofoundry/spectrum/searchlog_view.c). Read only, and not counted as
 a look: a search still stops 5 s after its screen was left (p25s_peek / dmrs_peek beside the snapshots). The PC
-programmers poll them every second and keep the log; the radio keeps its own 8 entries as before.
+programmers poll them every second and keep the log; the radio keeps its own 16 entries a search (8 up to
+1.0.5) and a section carries the newest 8 (searchlog_view.c SEARCHLOG_ROWS).
 
 Called from plus_features.prepare(); a module of its own so the shared prepare list gains one line. Upstream files
 change only through the hunks below; the new sections go last, so every earlier section keeps its number."""
