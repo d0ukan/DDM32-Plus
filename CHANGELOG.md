@@ -11,16 +11,21 @@ Firmware. Host-tested only; not yet run on the radio.
   section 6). 1.0.3 needed two no-frame takes (about 1.9 s each) per P25 channel before its false strength was masked,
   forgot it after two minutes and at every scan start. Now one take is enough when the strength is still there, as
   high, right after the P25 receiver gives the channel back and the noise reading says quiet (a call's tail has gone by
-  then; otherwise two takes as before); a steady reading keeps the level alive; the levels are kept when the same zone
-  is scanned again (not after a codeplug change). A reading more than 6 dB under a learned level drops it (a level
-  learned on a foreign carrier or a call's tail must not outlive it). A signal 10 dB stronger, the noise reading, a
+  then; otherwise two takes as before); a steady reading (within 6 dB of the level) keeps the level alive; the levels
+  are kept when the same zone is scanned again (not after a codeplug change). A reading more than 10 dB under a learned
+  level drops it (a level learned on a foreign carrier or a call's tail must not outlive it; the release hole hunt
+  moved this from 6 to 10 dB: the level is a stop's strongest reading, and with 2-3 dB of reading jitter the 6 dB rule
+  dropped it at most visits, slower than 1.0.3 in the model). A signal 10 dB stronger, the noise reading, a
   reading with no strength and a take with frames work as before. Model, 5 P25 channels: slow start 19 s -> 9 s, first
   10 s 2000 -> 455 ms a stop (fast), no re-learning every 2 minutes (20 slow stops in 4 minutes -> 0), a restart has no
   slow stops; real P25 overs noticed 13 -> 16 of 18; calls after a learned foreign carrier 5 -> 16 of 16; DMR and FM
   unchanged. FLASH +224 B, RAM +8.
 - Hold keys on Home: every digit 0-9 held on a channel (in the VFO a held digit still types it) opens a tool you pick in
   Settings > Keys, rows "0 hold" .. "9 hold" (None or any tool of the Tools list). Default as before: 4 = ISS tracking,
-  the others None (the old "Speed dial N is empty" toast). Home's hint row names the first digit set ("4 ISS", "7
+  the others None (the old toast, now "Speed dial N is empty: Settings > Keys" instead of "set it in qdmr"). A held 0
+  during a scan stays the fast / classic switch. The list offers every Tools name, also SOS key (never a Tools row) and
+  Battery on a radio without a voltmeter: those give the toast. A downgrade to 1.0.3 or older keeps every other setting
+  and forgets the hold keys (back to 4 = ISS on the next 1.0.4). Home's hint row names the first digit set ("4 ISS", "7
   Satellites", a "+" when more are set) and still never cuts the keys. Stored in one appended settings field
   (`hold_tool[12]`, the record 392 -> 404 B, no field moves; an older record reads the defaults). Cost: FLASH +1,376 B,
   RAM +336 B. docs/plus.md "Hold keys: any digit, any tool"; radio rows IK-3 .. IK-8.
@@ -28,9 +33,14 @@ Firmware. Host-tested only; not yet run on the radio.
   everywhere else ("$1C8/456"), in every form, within the 220 px safe area (English and Turkish, normal and Large
   text, worst case TG 65535, ID 16777214, NAC $FFF). When the line is too wide it gives up, in this order: the "P25 "
   lead and spaces, the "NAC" word, BER, the talk group (last form "ID16777214 $FFF/4095"); the NAC "$hex/dec" is kept.
-  An emergency: "EMERGENCY TG ID $x/d" | "EMG TG ID $x/d" | "EMG ID $x/d".
+  An emergency: "EMERGENCY TG ID $x/d" | "EMG TG ID $x/d" | "EMG ID $x/d". In practice, on a channel with NAC Any
+  Home's caller line usually shows **no BER** with a NAC (a 5-digit ID: "TG101 ID77285 $293/659 BER1.2%" is 30
+  characters, the row holds about 24; the "$hex/dec" is kept, BER goes first); a channel with its own NAC is unchanged.
 - Dual and multi watch panes: the heard NAC ("$x/d") and the caller (TG, ID) are on a pane's second line while a P25
   call comes in; a new narrow form "ID16777214 $FFF/4095" keeps the NAC in a pane when the wide form does not fit.
+- Cost of the whole candidate (`--plus --public`, against 1.0.3 `9763158`): FLASH 897,336 -> 899,156 B of 901,120
+  (+1,820; 1,964 B left), static RAM 205,216 -> 205,560 B (+344). Stack free: start 348 -> 312 B, host 576 -> 564 B
+  (the settings record is 12 B bigger), ui 184 and radio 316 B unchanged.
 
 ## v1.0.3 (test build, not published)
 

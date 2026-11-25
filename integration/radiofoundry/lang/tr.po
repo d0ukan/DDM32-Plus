@@ -465,8 +465,8 @@ msgid "Speed dial "
 msgstr "Hızlı arama "
 
 #: core/ui/ui_app.c
-msgid " is empty: set it in qdmr"
-msgstr " boş: qdmr ile ayarla"
+msgid " is empty: Settings > Keys"
+msgstr " boş: Ayarlar > Tuşlar"
 
 #: core/ui/ui_app.c
 msgid "Reply ended"

@@ -772,3 +772,5 @@ __pycache__/
 !/tests/plus/p25soft_stubs/aprs/aprs.h
 # hole hunt of the v1.0.3 candidate (branch hh103)
 !/docs/holehunt-1.0.3.md
+# hole hunt of the v1.0.4 candidate (branch hh104)
+!/docs/holehunt-1.0.4.md

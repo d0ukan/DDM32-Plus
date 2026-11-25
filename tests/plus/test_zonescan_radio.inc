@@ -584,6 +584,23 @@ static void test_zonescan_p25_seed(void)
 			}
 		}
 	}
+	/* Hole hunt 1.0.4: the same 5 x P25 zone with the false strength jittering +-3 dB a reading (the level learned is a
+	 * stop's strongest reading). The drop rule at 6 dB under the level re-learned at most visits here (classic 51 slow
+	 * stops in 60-300 s, 1.0.3 20); at FS_P25_DROP_DB 10 the level holds */
+	fx_all_p25 = true;
+	fx_mode_list = NULL;
+	zn_mode_ms = 0;
+	fx_rssi_jit = 3;
+	for (unsigned f = 0; f < 2; f++) {
+		zn_seed_t a = zn_seed_run(f != 0, 5, 300000, 0);
+		zn_seed_t b = zn_seed_run(f != 0, 5, 90000, 60000);
+		printf("P25 seed (FS_P25_SEED %d) 5 x P25, strength jitter +-3 dB, %s: %u slow stops at the start (the last ended "
+		       "%.1f s in), from 30 s %.1f ms a stop, slow stops 60-300 s %u; restart at 60 s: %u slow stops\n", FS_P25_SEED,
+		       f ? "fast" : "classic", a.slow60, a.slow_end / 1000.0, a.steady, a.slow_late, b.slow_restart);
+		if (FS_P25_SEED)
+			CHECK(a.slow60 <= 7u && a.slow_late == 0 && b.slow_restart == 0);
+	}
+	fx_rssi_jit = 0;
 	/* Real signals: overs caught, 3 seeds x 60 s each, from the scan's start (the overs begin 2-5 s in) */
 	static const struct { uint8_t zone, kind, pos; int16_t dbm; const char *name; } sig[] = {
 		{ 0, FX_P25, 2, -95, "5 x P25, P25 -95 dBm with frames on ch 3" },

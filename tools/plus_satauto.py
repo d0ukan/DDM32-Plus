@@ -462,6 +462,11 @@ def prepare_hold_keys(transform):
     Settings > Keys (ui_hold.inc; stored in settings_t.hold_tool, hold 4 = the ISS by default). The Tools list's names
     move to file scope (index 0 is "None": the settings list shows them), and its dispatch becomes tool_open."""
     n_tools = 42   # T_COUNT: the values of the settings list, 0 (None) and the tool numbers 1..41 (not the zone offer)
+    # A held digit with no tool (None, or a tool this radio lacks): the toast names where it is set now (it said qdmr,
+    # which cannot set it)
+    transform('core/ui/ui_app.c', [
+        ('\t\tsb_str(&b, TR(" is empty: set it in qdmr"));\n', '\t\tsb_str(&b, TR(" is empty: Settings > Keys"));\n'),
+    ])
     transform('core/ui/ui_menus.c', [
         # The names at file scope, "None" first: the tool with number n has tool_names[n]
         ('static void tools_item(uint16_t row, ui_item_t *it)\n{\n\tstatic const char *const names[] = { ',

@@ -34,6 +34,7 @@ static bool fx_jumped;		/* the last retune was a VHF / UHF jump */
  * reading not: -125 dBm + 53 = the -72 dBm the radio read on a quiet P25 zone) */
 static bool fx_all_p25;
 static int fx_rssi_bias;
+static int fx_rssi_jit;	/* hole hunt 1.0.4: +- this many dB on each biased (FM-path) strength reading; 0: none */
 static bool fx_frames;	/* the P25 signal's frames reach the native receiver while it has the signal's channel */
 static const uint8_t *fx_mode_list;	/* not NULL: each channel's mode (the signal's channel still gets its kind's) */
 #define FX_BASE_HZ	446006250u
@@ -140,6 +141,8 @@ static void fx_status(void)
 	hw.st.noise = (uint8_t)(noise < 8 ? 8 : noise > 120 ? 120 : noise);
 	/* the bias on the FM path only: on the radio the DMR stops read quiet strengths while the P25 ones read -62/-72 */
 	hw.st.rssi_dbm = (int16_t)(lround(r) + (hw_mode != RADIO_MODE_DMR ? fx_rssi_bias : 0));
+	if (fx_rssi_jit != 0 && fx_rssi_bias != 0 && hw_mode != RADIO_MODE_DMR)
+		hw.st.rssi_dbm = (int16_t)(hw.st.rssi_dbm + (int)fx_rand(2u * (unsigned)fx_rssi_jit + 1u) - fx_rssi_jit);
 	hw.st.tone_ok = true;
 }
 

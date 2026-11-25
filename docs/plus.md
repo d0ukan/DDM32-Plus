@@ -5237,7 +5237,10 @@ Tools list; hooks in `tools/plus_satauto.py` `prepare_hold_keys`): `ui_home_key`
 channel; it opens the tool through the Tools menu's own dispatch (`tool_open`, which `tools_select` calls too: nothing is
 duplicated). The ISS is the one exception: a hold set to ISS (4 by default, or any digit) does `ui_sat_home_iss` (the held
 track of a pass under way, else Tools > ISS), exactly as in 1.0.3. None, a tool this radio lacks, or a digit with no key
-keeps the old toast "Speed dial N is empty: set it in qdmr". A tool that acts at once (Scan, Air band, Auto repeater,
+keeps the old toast, which since the release hole hunt names where the hold is set: "Speed dial N is empty: Settings >
+Keys" (it said "set it in qdmr", which cannot set it). A held 0 while a scan runs stays the fast / classic switch
+(`ui_fscan_home_key` comes first), whatever "0 hold" says. The list offers every Tools name, also those this radio never
+lists (SOS key, Battery without a voltmeter): picking one gives the toast. A tool that acts at once (Scan, Air band, Auto repeater,
 Last call replay) runs from Home as from the list; most open a screen. The cache `hold_c[10]` holds what is usable; it
 is read in the key and tick paths and again right after a change in Settings, never in a draw (the settings read is a
 404 B frame, and Home's draw is the UI task's deepest path).
@@ -5253,7 +5256,8 @@ stop" with the group cut to 5 characters (digit, space, three of the name: "7 Sa
 
 **Cost** (`--plus --public`): FLASH 897,336 -> 898,712 B (+1,376), static RAM 205,216 -> 205,552 B (+336: the ten
 labels 80, hint buffers 28 + 96, the cache 11, `home_hint` 40 -> 56, the settings copy). Stack: the build's stack check
-passes (deepest paths unchanged: nothing reads the settings in a draw).
+passes; nothing reads the settings in a draw (ui and radio free unchanged, 184 / 316 B), but every settings_t copy on a
+stack is 12 B bigger: start 348 -> 312 B free, host 576 -> 564 B free (measured on the merged candidate 38c3826).
 Host tests: `tests/plus/test_sat_set.c` (the codes persist over power cycles through the real store, default 4 = ISS, a
 factory reset's defaults, refused values, the satellites' bits untouched); `tests/plus/test_ui_sat.c` (a digit set to a
 tool opens it, 4 set to another tool or None, the old toast for None and for 8, the VFO still types, a short digit is

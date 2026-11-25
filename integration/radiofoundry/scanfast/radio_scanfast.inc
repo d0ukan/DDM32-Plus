@@ -112,8 +112,10 @@ static bool fsc_p25_masked(const radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
 	// v1.0.4: a strength well under the level: the level is not this channel's steady false strength (a call's tail
 	// learned on a stale reading, a level of another channel at this zone position): dropped, so the next carrier there
 	// is taken. Without this the false strength itself would keep such a level alive below (the drop on no strength
-	// never comes on a channel whose false strength stays over the line)
-	if (f != NULL && dbm < f->dbm - (int16_t)FS_P25_FLOOR_SAME_DB) {
+	// never comes on a channel whose false strength stays over the line). Hole hunt 1.0.4: FS_P25_DROP_DB (10), not
+	// FS_P25_FLOOR_SAME_DB (6): the level is the stop's strongest reading, so with 2-3 dB of jitter a reading 6 dB under
+	// it is ordinary and dropped the level at most visits (the host model with jitter: slower than 1.0.3)
+	if (f != NULL && dbm < f->dbm - (int16_t)FS_P25_DROP_DB) {
 		f->until_ms = 0;
 		return false;
 	}
@@ -122,8 +124,9 @@ static bool fsc_p25_masked(const radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
 		return false;
 #if FS_P25_SEED
 	// v1.0.4: the false strength is still there, about as high: the level holds for another FS_P25_FLOOR_MS (a reading
-	// further over it, still under the mask, doesn't: a weak signal never keeps the level alive)
-	if (dbm <= f->dbm + (int16_t)FS_P25_FLOOR_SAME_DB)
+	// further over it, still under the mask, doesn't: a weak signal never keeps the level alive; nor does one more than
+	// FS_P25_FLOOR_SAME_DB under it: a level the readings sit 6-10 dB under still expires, as in 1.0.3)
+	if (dbm >= f->dbm - (int16_t)FS_P25_FLOOR_SAME_DB && dbm <= f->dbm + (int16_t)FS_P25_FLOOR_SAME_DB)
 		f->until_ms = (now_ms + FS_P25_FLOOR_MS) | 1u;
 #endif
 	return true;
