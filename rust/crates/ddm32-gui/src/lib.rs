@@ -1003,9 +1003,15 @@ fn menu_action(ui: &AppWindow, a: &str) {
         MenuAction::Disclaimer => open_disclaimer(ui),
         MenuAction::Lang(l) => app.invoke_set_lang(l.into()),
         MenuAction::LocalRelease => {
-            if let Some(f) = rfd::FileDialog::new().pick_folder() {
-                load_local_release(ui, &f);
-            }
+            // The menu's drop-down is its own popup window, still closing while this click runs: a folder dialog
+            // opened here never showed on Windows (owner, 2026-11-25). Open it once the popup is gone.
+            let w = ui.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+                let Some(ui) = w.upgrade() else { return };
+                if let Some(f) = rfd::FileDialog::new().set_title(tr("m_local_release")).pick_folder() {
+                    load_local_release(&ui, &f);
+                }
+            });
         }
         MenuAction::Exit => {
             if app.get_menu_radio_locked() {
