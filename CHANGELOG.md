@@ -3,6 +3,20 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased (v1.0.4 candidate)
+
+Firmware. Host-tested only; not yet run on the radio.
+
+- Channel scan, the owner's 1.0.3 radio run: a P25 zone "starts slow, then speeds up" (docs/scan-slow-2026-11-25.md
+  section 6). 1.0.3 needed two no-frame takes (about 1.9 s each) per P25 channel before its false strength was masked,
+  forgot it after two minutes and at every scan start. Now one take is enough when the strength is still there, as
+  high, right after the P25 receiver gives the channel back and the noise reading says quiet (a call's tail has gone by
+  then; otherwise two takes as before); a steady reading keeps the level alive; the levels are kept when the same zone
+  is scanned again. A signal 10 dB stronger, the noise reading, a reading with no strength and a take with frames work
+  as before. Model, 5 P25 channels: slow start 19 s -> 9 s, first 10 s 2000 -> 455 ms a stop (fast), no re-learning
+  every 2 minutes (20 slow stops in 4 minutes -> 0), a restart has no slow stops; real P25 overs noticed 13 -> 16 of 18;
+  DMR and FM unchanged. FLASH +180 B, RAM +0.
+
 ## v1.0.3 (test build, not published)
 
 Firmware. Host-tested only; not yet run on the radio.

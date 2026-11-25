@@ -12,7 +12,9 @@ reading every few ms from shortly after the retune, a quiet step as short as its
   - the switch: held 0 on Home while a zone or VFO scan runs (fast / classic), kept in RAM;
   - v1.0.2 (the owner's "a zone I made scans very slowly, classic and fast"): a stop reads one channel instead of three,
     the squelch guard and the fast rule's first reading count from the end of the retune (a slow read no longer makes
-    the first poll meet the noise reading's dip), and scanst says where the time goes (slow, fb, cost).
+    the first poll meet the noise reading's dip), and scanst says where the time goes (slow, fb, cost);
+  - v1.0.4 (the owner's "a P25 zone starts slow, then speeds up" on 1.0.3): the P25 give back hands the learned
+    strength the whole reading (strength and noise) of the first poll after it (radio_scanfast.inc fsc_p25_given_back).
 Dual watch and the multi-watch ring keep their own timing. Called last from plus_features.prepare(); a module of its
 own so the shared prepare list gains one line."""
 
@@ -138,7 +140,7 @@ def prepare_fastscan(transform, install):
          '\t\t\tactive = carrier = false;\n'
          '\t\t\tif (sc->phase == SCAN_PH_HOLD || sc->phase == SCAN_PH_RESUME) {\n'
          '#if CONFIG_SCAN_FAST && CONFIG_DMR\n'
-         '\t\t\t\tfsc_p25_given_back(sm, st->rssi_dbm, now_ms);\t// DDM32 Plus: a no-frame take: its strength learned\n'
+         '\t\t\t\tfsc_p25_given_back(sm, st, now_ms);\t// DDM32 Plus: a no-frame take: its strength learned\n'
          '#endif\n'
          '\t\t\t\tscan_step(sm, now_ms);\n'),
         ('\tbool opens = (listening || (sm->view.tone_ok && (sq == 0 || st.noise < open_below))) && !dual_peeking(sm);\n',

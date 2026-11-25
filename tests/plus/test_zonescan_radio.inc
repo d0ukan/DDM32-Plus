@@ -478,9 +478,159 @@ static void test_zonescan_dmr_switch(void)
 	fx_mode_list = NULL;
 }
 
+/* v1.0.4 (docs/scan-slow-2026-11-25.md section 6), the owner's radio on 1.0.3: the P25 zone "starts slow, then speeds
+ * up". The learned P25 strength cost two 1.9 s stops a P25 channel at each scan start (noted, then confirmed) and again
+ * every two minutes (the level expired 120 s after its last take). Measured here from the scan's start: ms a stop in the
+ * first 10 s, the slow stops (over 1 s: a take) and when the last one of the start ended, ms a stop from 30 s on, the
+ * slow stops after the first 60 s (re-learning) and after a restart of the scan in the same zone. Built as v1.0.3
+ * (FS_P25_SEED 0: before) and as this version (after) */
+typedef struct {
+	double ms10, steady, ms10_restart;
+	uint32_t slow_end;		/* ms from the start: the end of the start's last slow stop */
+	unsigned slow60, slow_late, slow_restart;
+} zn_seed_t;
+
+static void zn_seed_reset(bool fast)
+{
+	fx_codeplug();
+	start();
+	native_lab_init();
+	fake_power.switch_on = classic_on;
+	fake_power.battery_mv = classic_battery;
+	classic_busy = classic_stop = classic_receiving = false;
+	classic_starts = classic_restores = 0;
+	scan_voice_ms = zs_sync_ms = 0;
+	fs_set_fast(fast);
+	fx_begin_scan();
+}
+
+/* A quiet zone (the P25 strength high) for run_ms; restart (not 0): the scan stopped and started again then */
+static zn_seed_t zn_seed_run(bool fast, uint16_t n, uint32_t run_ms, uint32_t restart)
+{
+	zn_seed_t r;
+	memset(&r, 0, sizeof r);
+	fx_setup(n, false, FX_NONE, 0, 0, 0, 0);
+	fx.rand = 4242u + n;
+	zn_seed_reset(fast);
+	uint32_t t0 = now, s0 = sm.scan.steps, last = now, s_last = s0, t30 = 0, s30 = 0, rt = 0, rs = 0;
+	bool done10 = false, done_r10 = false;
+	while (now - t0 < run_ms) {
+		uint32_t e = now - t0;
+		if (restart != 0 && rt == 0 && e >= restart) {
+			r.steady = (double)(now - t30) / (sm.scan.steps - s30);
+			req(RREQ_SCAN, RSCAN_STOP);
+			fx_ms();
+			fx_begin_scan();
+			rt = now;
+			rs = s_last = sm.scan.steps;
+			last = now;
+		}
+		if (t30 == 0 && e >= 30000u) {
+			t30 = now;
+			s30 = sm.scan.steps;
+		}
+		fx_ms();
+		if (sm.scan.steps != s_last) {
+			if (now - last > 1000u) {
+				if (rt != 0)
+					r.slow_restart++;
+				else if (now - t0 <= 60000u) {
+					r.slow60++;
+					r.slow_end = now - t0;
+				} else
+					r.slow_late++;
+			}
+			s_last = sm.scan.steps;
+			last = now;
+		}
+		if (!done10 && now - t0 >= 10000u) {
+			done10 = true;
+			r.ms10 = (double)(now - t0) / (sm.scan.steps - s0);
+		}
+		if (rt != 0 && !done_r10 && now - rt >= 10000u) {
+			done_r10 = true;
+			r.ms10_restart = (double)(now - rt) / (sm.scan.steps - rs);
+		}
+	}
+	if (restart == 0)
+		r.steady = (double)(now - t30) / (sm.scan.steps - s30);
+	CHECK(sm.scan.kind == SCAN_ZONE);
+	req(RREQ_SCAN, RSCAN_STOP);
+	fs_set_fast(true);
+	return r;
+}
+
+static void test_zonescan_p25_seed(void)
+{
+	static const uint8_t mixed[3] = { RADIO_MODE_DMR, RADIO_MODE_P25, RADIO_MODE_FM };
+	fx_rssi_bias = 53;
+	for (unsigned z = 0; z < 2; z++) {
+		/* the owner's two zones: five P25 channels; DMR / P25 / FM with the 168 ms mode switch */
+		uint16_t n = z == 0 ? 5 : 3;
+		unsigned p25 = z == 0 ? 5u : 1u;
+		fx_all_p25 = z == 0;
+		fx_mode_list = z == 0 ? NULL : mixed;
+		zn_mode_ms = z == 0 ? 0 : 168;
+		for (unsigned f = 0; f < 2; f++) {
+			zn_seed_t a = zn_seed_run(f != 0, n, 300000, 0);
+			zn_seed_t b = zn_seed_run(f != 0, n, 90000, 60000);
+			printf("P25 seed (FS_P25_SEED %d) %s %s: first 10 s %.0f ms a stop, %u slow stops at the start (the last "
+			       "ended %.1f s in), from 30 s %.1f ms a stop, slow stops 60-300 s %u; restart at 60 s: first 10 s %.0f "
+			       "ms a stop, %u slow stops\n", FS_P25_SEED, z == 0 ? "5 x P25" : "DMR/P25/FM", f ? "fast" : "classic",
+			       a.ms10, a.slow60, a.slow_end / 1000.0, a.steady, a.slow_late, b.ms10_restart, b.slow_restart);
+			if (FS_P25_SEED) {
+				CHECK(a.slow60 <= p25 + 1u && a.slow_late == 0 && b.slow_restart == 0);
+				CHECK(b.ms10_restart < (f ? 200.0 : 400.0));
+			}
+		}
+	}
+	/* Real signals: overs caught, 3 seeds x 60 s each, from the scan's start (the overs begin 2-5 s in) */
+	static const struct { uint8_t zone, kind, pos; int16_t dbm; const char *name; } sig[] = {
+		{ 0, FX_P25, 2, -95, "5 x P25, P25 -95 dBm with frames on ch 3" },
+		{ 1, FX_P25, 1, -95, "DMR/P25/FM, P25 -95 dBm with frames on ch 2" },
+		{ 1, FX_DMR, 0, -60, "DMR/P25/FM, DMR -60 dBm on ch 1" },
+		{ 1, FX_FM, 2, -105, "DMR/P25/FM, FM -105 dBm on ch 3" },
+	};
+	for (unsigned i = 0; i < sizeof sig / sizeof sig[0]; i++) {
+		fx_all_p25 = sig[i].zone == 0;
+		fx_mode_list = sig[i].zone == 0 ? NULL : mixed;
+		zn_mode_ms = sig[i].zone == 0 ? 0 : 168;
+		fx_frames = sig[i].kind == FX_P25;
+		for (unsigned f = 0; f < 2; f++) {
+			unsigned overs = 0, caught = 0, early = 0, early_caught = 0;
+			for (uint32_t seed = 1; seed <= 3; seed++) {
+				fx_setup(sig[i].zone == 0 ? 5 : 3, false, sig[i].kind, sig[i].pos, sig[i].dbm, 0, 0);
+				fx_res_t r = fx_run(f != 0, seed, 60000);
+				overs += r.overs;
+				caught += r.caught;
+				for (int k = 0; k < fx.overs; k++) {
+					if (fx.t0[k] - 1000u < 20000u) {	/* the first 20 s (start() sets the time to 1000) */
+						early++;
+						early_caught += fx.caught[k];
+					}
+				}
+			}
+			printf("P25 seed (FS_P25_SEED %d) %s, %s: %u of %u overs noticed (in the first 20 s %u of %u)\n",
+			       FS_P25_SEED, sig[i].name, f ? "fast" : "classic", caught, overs, early_caught, early);
+			if (FS_P25_SEED)
+				CHECK(overs > 6u && caught * 10u >= overs * (sig[i].kind == FX_P25 ? 8u : 10u));
+		}
+	}
+	fx_frames = false;
+	fx_all_p25 = false;
+	fx_mode_list = NULL;
+	zn_mode_ms = 0;
+	fx_rssi_bias = 0;
+}
+
 int main(void)
 {
 	int before = failures;
+	if (FS_DIP_GUARD && !FS_P25_SEED) {	/* the v1.0.3 build (before): the seed rows only */
+		test_zonescan_p25_seed();
+		printf("Zone scan P25 seed rows, v1.0.3 (FS_P25_SEED 0): %d checks, %d failures\n", checks, failures - before);
+		return failures != before;
+	}
 	test_zonescan_dip();
 	test_zonescan_p25_strength();
 	test_zonescan_dmr_switch();
@@ -488,6 +638,7 @@ int main(void)
 		printf("Zone scan dip rows, v1.0.2 (FS_DIP_GUARD 0): %d checks, %d failures\n", checks, failures - before);
 		return failures != before;
 	}
+	test_zonescan_p25_seed();
 	test_zonescan_same();
 	test_zonescan_priority();
 	test_zonescan_figures();
