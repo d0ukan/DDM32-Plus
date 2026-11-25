@@ -122,6 +122,25 @@ def prepare_fastscan(transform, install):
          '#if CONFIG_SCAN_FAST\n'
          '\t\tactive = fsc_active(sm, active, now_ms);\t// DDM32 Plus: no resume delay after a retune\'s false carrier\n'
          '#endif\n\t}\n'),
+        # v1.0.3 (the owner's radio on 1.0.2: a zone of five P25 channels, nothing on the air, -72 dBm read at every stop,
+        # 1.9 s a stop): a P25 channel whose take heard no frame learns the strength it was taken on, and a strength
+        # under that level plus FS_P25_FLOOR_DB is no carrier there for a while (radio_scanfast.inc fsc_floor)
+        ('\t\tstrong = st->rssi_dbm != 0 && dmr_strength_heard(sm, st->rssi_dbm);\n#endif\n'
+         '\t\tif (native_lab_scan_stop(native_lab_scan_key(sm), (uint8_t)sc->steps, carrier || strong)) {\n'
+         '\t\t\tactive = carrier = false;\n'
+         '\t\t\tif (sc->phase == SCAN_PH_HOLD || sc->phase == SCAN_PH_RESUME) {\n'
+         '\t\t\t\tscan_step(sm, now_ms);\n',
+         '\t\tstrong = st->rssi_dbm != 0 && dmr_strength_heard(sm, st->rssi_dbm);\n'
+         '#if CONFIG_SCAN_FAST\n'
+         '\t\tstrong = fsc_p25_strong(sm, strong, st->rssi_dbm, now_ms);\t// DDM32 Plus: not under a learned level\n'
+         '#endif\n#endif\n'
+         '\t\tif (native_lab_scan_stop(native_lab_scan_key(sm), (uint8_t)sc->steps, carrier || strong)) {\n'
+         '\t\t\tactive = carrier = false;\n'
+         '\t\t\tif (sc->phase == SCAN_PH_HOLD || sc->phase == SCAN_PH_RESUME) {\n'
+         '#if CONFIG_SCAN_FAST && CONFIG_DMR\n'
+         '\t\t\t\tfsc_p25_given_back(sm, st->rssi_dbm, now_ms);\t// DDM32 Plus: a no-frame take: its strength learned\n'
+         '#endif\n'
+         '\t\t\t\tscan_step(sm, now_ms);\n'),
         ('\tbool opens = (listening || (sm->view.tone_ok && (sq == 0 || st.noise < open_below))) && !dual_peeking(sm);\n',
          '\tbool opens = (listening || (sm->view.tone_ok && (sq == 0 || st.noise < open_below))) && !dual_peeking(sm);\n'
          '#if CONFIG_SCAN_FAST\n'

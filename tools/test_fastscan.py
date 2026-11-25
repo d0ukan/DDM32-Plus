@@ -101,6 +101,9 @@ UPSTREAM_TIMING = {
     # is on the DMR channel again (classic, at 150 ms a stop, is still elsewhere)
     'sm.view.zone_pos != 5 && !sim.started',
     'sm.view.zone_pos != 5',
+    # v1.0.3: "PTT while still searching", 300 ms into the scan: fast has gone round the zone (four 50 ms stops and
+    # the DMR one, which after a switch into DMR now takes classic's 150 ms) and is on the start channel at that moment
+    'sm.view.zone_pos != 0',
 }
 
 
@@ -150,15 +153,22 @@ ZONE_READS = (
     'bool codeplug_channel(uint16_t n, channel_t *out)\n{\n',
     # the reads counted, each charged zn_cost_us on the clock (the radio task blocked while it reads)
     'static unsigned zn_reads;\nstatic uint32_t zn_cost_us, zn_us;\n'
+    # v1.0.3 (the owner's radio: steps into or out of DMR took 167-169 ms): a mode switch charged zn_mode_ms
+    'static uint32_t zn_mode_ms;\n'
+    'static void zn_mode_cost(radio_mode_t from, radio_mode_t to)\n{\n\tif (from != to)\n\t\tnow += zn_mode_ms;\n}\n'
     'bool codeplug_channel(uint16_t n, channel_t *out)\n{\n\tzn_reads++;\n'
     '\tfor (zn_us += zn_cost_us; zn_us >= 1000u; zn_us -= 1000u)\n\t\tnow++;\n')
+ZONE_MODE = (
+    'static void r_set_mode(radio_mode_t m) { hw_mode = m; hw.set_mode_calls++;',
+    'static void zn_mode_cost(radio_mode_t from, radio_mode_t to);\n'
+    'static void r_set_mode(radio_mode_t m) { zn_mode_cost(hw_mode, m); hw_mode = m; hw.set_mode_calls++;')
 
 
 def zones(ROOT, APP, OUT, host):
     """v1.0.2: a zone made on the radio against All channels (tests/plus/test_zonescan_radio.inc), on the model"""
     wrapper = OUT / 'radioCoreZonescan.c'
     fix = fixture(host)
-    for old, new in (('#define NCH 8\n', '#define NCH 96\n'), ZONE_READS):
+    for old, new in (('#define NCH 8\n', '#define NCH 96\n'), ZONE_READS, ZONE_MODE):
         assert fix.count(old) == 1, old
         fix = fix.replace(old, new)
     wrapper.write_text('#include <stdlib.h>\n' + HEAD + '#include "radio/scanprio.h"\n' + fix +

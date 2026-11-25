@@ -28,14 +28,18 @@
  *     REASON noise (the noise reading under the line: a carrier, or a reading never quiet here) | am (AM or broadcast
  *     receive: never read quiet) | open (the squelch already open) | strength (a digital stop's strength over the line,
  *     or none read) | dmr (a DMR burst or call since the tune) | - (none yet)
- *   scanst.cost=GAP_MAX,STEP_MAX,OTHER_ZONE,SWITCHES,BANDS,AM_STOPS,DIPS,DIP_HOLDS
+ *   scanst.cost=GAP_MAX,STEP_MAX,OTHER_ZONE,SWITCHES,BANDS,AM_STOPS,DIPS,DIP_HOLDS,P25_LEARNED,P25_MASKED
  *     the radio task: the longest gap between two of its 10 ms ticks while a stop listened, the longest step the tick
  *     made (reading the next channel and retuning), both ms; stops in another zone than the one scanned; stops whose
  *     tune switched the receiver between FM and DMR; stops in another band than the stop before (VHF, UHF, the air
  *     band 108-137 MHz); stops in AM receive; (v1.0.3) DIPS: stops whose first readings were not quiet while the
  *     retune was younger than FS_DIP_MS (with nothing on the air about every stop: this radio's false carrier after a
  *     retune lasts longer than 25 ms); DIP_HOLDS: holds on a squelch opened that early that heard no carrier after the
- *     settle, ended without the resume delay
+ *     settle, ended without the resume delay; P25_LEARNED: P25 channels given back with no frame heard whose
+ *     strength was learned; P25_MASKED: strength readings under such a level (no carrier by strength there)
+ *   scanst.step=MS,FROM,TO (v1.0.3)
+ *     the longest step of any kind (the tick's, the poll's, a request's), tune start to the end of the retune, in ms,
+ *     and the modes it went from and to (FM | DMR | P25 | OTHER | -)
  * Counts are modulo 65536. */
 #include "config.h"
 #include "debuglink/debuglink.h"
@@ -74,9 +78,11 @@ void scanfast_view(dl_text_t *t)
 		(unsigned)v.slow_step, v.slow_mode < FS_MODES ? cause : "-");
 	dl_text(t, "scanst.fb=%u,%s,%u,%u,%d,%s\n", (unsigned)v.fb_ch, mode[v.fb_mode < FS_MODES ? v.fb_mode : FS_MODES],
 		(unsigned)v.fb_noise, (unsigned)v.fb_line, (int)v.fb_rssi, reason[v.fb_why & 7u]);
-	dl_text(t, "scanst.cost=%u,%u,%u,%u,%u,%u,%u,%u\n", (unsigned)v.gap_max, (unsigned)v.step_max,
+	dl_text(t, "scanst.cost=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n", (unsigned)v.gap_max, (unsigned)v.step_max,
 		(unsigned)v.other_zone, (unsigned)v.switches, (unsigned)v.bands, (unsigned)v.am_stops, (unsigned)v.dips,
-		(unsigned)v.dip_holds);
+		(unsigned)v.dip_holds, (unsigned)v.p25_learned, (unsigned)v.p25_masked);
+	dl_text(t, "scanst.step=%u,%s,%s\n", (unsigned)v.step_any_ms, mode[v.step_from < FS_MODES ? v.step_from : FS_MODES],
+		mode[v.step_to < FS_MODES ? v.step_to : FS_MODES]);
 #else
 	dl_text(t, "scanst.built=0\n");
 #endif

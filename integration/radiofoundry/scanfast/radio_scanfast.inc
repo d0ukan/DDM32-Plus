@@ -37,6 +37,7 @@ static uint32_t fsc_retune_ms;
 static uint16_t fsc_zone;	// the zone scanned (a stop elsewhere is a priority channel's)
 static uint32_t fsc_tick_ms;	// the last tick while a stop listened (the radio task's gaps, fs_radio_cost)
 static bool fsc_tick_listen;
+static bool fsc_dmr_fresh;	// v1.0.3: the current stop switched the receiver into DMR (fsc_observe)
 #if FS_DIP_GUARD
 static uint32_t fsc_dip_tag;	// v1.0.3: the stop (its tuned_ms) whose readings met a young not-quiet one (fsc_tick)
 static bool fsc_dip_seen;
@@ -61,6 +62,147 @@ static bool fsc_kind(const radio_sm_t *sm)
 	return sm->scan.kind == SCAN_ZONE || sm->scan.kind == SCAN_VFO;
 }
 
+#if CONFIG_P25_SCAN && CONFIG_DMR && FS_P25_FLOOR
+// v1.0.3 (docs/scan-slow-2026-11-25.md, the owner's radio on 1.0.2): a zone of five P25 channels, nothing on the air,
+// and every stop read -72 dBm (noise 94, line 60): the strength alone made each one a carrier, the native receiver took
+// it, heard no frame for SCAN_P25_PROBE_MS and gave it back, and the next stop waited out the settle after the give back
+// (1.9 s a stop). The native receiver's cooldown keeps one channel only, so a zone of several never got it (cooled 0).
+// The strength the FD6818's formula gives has no board correction on the DM-32 (docs/plus.md, the search's floor).
+// So a P25 stop whose take heard no frame at all notes the strength it was taken on; a second such take at about the
+// same strength (FS_P25_FLOOR_SAME_DB) confirms it, and then for FS_P25_FLOOR_MS a strength less than FS_P25_FLOOR_DB
+// over it is no carrier there (the fast rule reads it quiet, the classic rules don't probe or hold on it). A reading of
+// the channel with no carrier by strength at all drops what was noted: a real carrier comes and goes (a call taken on
+// its tail, before its frames), the radio's false strength stays. The noise reading still counts as before, a stronger
+// signal still holds, and a take that hears frames (another talk group, a call) notes nothing and drops the note. Zone
+// scan only; the table is small (oldest replaced), cleared at each scan start
+typedef struct {
+	uint32_t until_ms;
+	uint16_t key;	// native_lab_scan_key: the zone position
+	int16_t dbm;
+	uint8_t takes;	// no-frame takes at about this strength (FS_P25_FLOOR_TAKES: in force)
+} fsc_floor_t;
+static fsc_floor_t fsc_floor[FS_P25_FLOORS];
+static uint32_t fsc_p25_stop = 0xFFFFFFFFu;	// the stop (scan_t.steps) whose strongest strength is fsc_p25_dbm
+static int16_t fsc_p25_dbm;
+
+static fsc_floor_t *fsc_floor_find(uint16_t key, uint32_t now_ms)
+{
+	for (unsigned i = 0; i < FS_P25_FLOORS; i++)
+		if (fsc_floor[i].until_ms != 0 && fsc_floor[i].key == key && (int32_t)(fsc_floor[i].until_ms - now_ms) > 0)
+			return &fsc_floor[i];
+	return NULL;
+}
+
+static bool fsc_p25_here(const radio_sm_t *sm)
+{
+	return sm->scan.kind == SCAN_ZONE && sm->view.zone_index == fsc_zone && codeplug_mode_p25(sm->view.ch.mode);
+}
+
+// True: this strength is under the level confirmed on this P25 stop (no carrier by strength)
+static bool fsc_p25_masked(const radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
+{
+	if (!fsc_p25_here(sm) || dbm == 0)
+		return false;
+	const fsc_floor_t *f = fsc_floor_find(native_lab_scan_key(sm), now_ms);
+	return f != NULL && f->takes >= FS_P25_FLOOR_TAKES && dbm < f->dbm + (int16_t)FS_P25_FLOOR_DB;
+}
+
+// A reading of this P25 stop with no carrier by strength: what was noted for it goes
+static void fsc_p25_no_strength(const radio_sm_t *sm, uint32_t now_ms)
+{
+	if (!fsc_p25_here(sm))
+		return;
+	fsc_floor_t *f = fsc_floor_find(native_lab_scan_key(sm), now_ms);
+	if (f != NULL)
+		f->until_ms = 0;
+}
+
+// scan_service's P25 rule (past the settle): the strength's verdict (strong), noted for learning and checked against
+// a confirmed level
+static bool fsc_p25_strong(radio_sm_t *sm, bool strong, int16_t dbm, uint32_t now_ms)
+{
+	if (sm->scan.kind != SCAN_ZONE)
+		return strong;
+	if (fsc_p25_stop != sm->scan.steps) {
+		fsc_p25_stop = sm->scan.steps;
+		fsc_p25_dbm = -200;
+	}
+	if (!strong) {
+		fsc_p25_no_strength(sm, now_ms);
+		return false;
+	}
+	if (dbm > fsc_p25_dbm)
+		fsc_p25_dbm = dbm;
+	if (fsc_p25_masked(sm, dbm, now_ms)) {
+		fs_p25_masked();
+		return false;
+	}
+	return true;
+}
+
+// scan_service's P25 rule: the native receiver has given the stop back with a cooldown and the scan moves on. A take
+// that heard no frame at all notes the strength it was taken on (a second one at about the same strength confirms it);
+// one that heard frames drops the note
+static void fsc_p25_given_back(radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
+{
+	if (!fsc_p25_here(sm))
+		return;
+	uint16_t key = native_lab_scan_key(sm);
+	fsc_floor_t *f = fsc_floor_find(key, now_ms);
+	int16_t level = fsc_p25_stop == sm->scan.steps && fsc_p25_dbm > dbm ? fsc_p25_dbm : dbm;
+	bool same = f != NULL && level >= f->dbm - (int16_t)FS_P25_FLOOR_SAME_DB &&
+		    level <= f->dbm + (int16_t)FS_P25_FLOOR_SAME_DB;
+	if (!native_lab_scan_quiet()) {
+		if (same)
+			f->until_ms = 0;	// frames at the noted strength: it was a P25 carrier, not the false strength
+		return;
+	}
+	if (level <= -200 || level == 0)
+		return;
+	if (same) {
+		if (f->takes < FS_P25_FLOOR_TAKES)
+			f->takes++;
+		if (level > f->dbm)
+			f->dbm = level;
+	} else if (f != NULL && level > f->dbm) {
+		return;		// stronger than the noted strength without a frame (a call's tail): the note stays
+	} else {
+		fsc_floor_t *old = &fsc_floor[0];
+		for (unsigned i = 0; f == NULL && i < FS_P25_FLOORS; i++) {
+			if (fsc_floor[i].until_ms == 0 || (int32_t)(fsc_floor[i].until_ms - now_ms) <= 0) {
+				f = &fsc_floor[i];
+			} else if ((int32_t)(fsc_floor[i].until_ms - old->until_ms) < 0) {
+				old = &fsc_floor[i];
+			}
+		}
+		if (f == NULL)
+			f = old;
+		f->key = key;
+		f->dbm = level;
+		f->takes = 1;
+	}
+	f->until_ms = (now_ms + FS_P25_FLOOR_MS) | 1u;	// never 0 (unused)
+	if (f->takes >= FS_P25_FLOOR_TAKES)
+		fs_p25_learned();
+}
+#elif CONFIG_P25_SCAN && CONFIG_DMR
+// FS_P25_FLOOR 0 (the host test's v1.0.2 build): the strength as it is, nothing learned
+static bool fsc_p25_strong(radio_sm_t *sm, bool strong, int16_t dbm, uint32_t now_ms)
+{
+	(void)sm;
+	(void)dbm;
+	(void)now_ms;
+	return strong;
+}
+
+static void fsc_p25_given_back(radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
+{
+	(void)sm;
+	(void)dbm;
+	(void)now_ms;
+}
+#endif
+
 // scan_step and the priority channel's stops (radio_scanprio.inc), as the stop is tuned: notes when its retune was
 // done and returns now_ms (the stop's tuned_ms, so its dwell, probe and hold are timed as in v1.0.1). The step began
 // at now_ms (the poll or the tick), then read the next channel (on the radio each read walks the codeplug's settings
@@ -69,14 +211,25 @@ static bool fsc_kind(const radio_sm_t *sm)
 // met the noise reading's dip right after the retune, the squelch opened and the scan held a quiet channel for its
 // resume delay, classic and fast). Dual watch: not noted. More than a second later: not a read (a clock that isn't
 // this one, as in some host tests): now_ms
+// v1.0.3 (the owner's radio: a zone of a DMR, a P25 and an FM channel, every step 167-169 ms, a DMR over never caught in
+// fast): after a step of FS_STEP_SLOW_MS or more the stop's tuned_ms is the end of the retune, so its dwell, probe and
+// hold count from there. Before, a
+// step that took longer than the dwell (into DMR: the stack's set-up) left its stop no listening time at all: the first
+// poll found the dwell over and moved on unless that one reading heard something. Every caller returns or ends its call
+// after the step (a later call reads a later clock), so nothing compares this tuned_ms with an older now_ms
 static uint32_t fsc_now(const radio_sm_t *sm, uint32_t now_ms)
 {
 	uint32_t t = hal_millis();
-	if (fsc_kind(sm)) {
-		fsc_retune_tag = now_ms;
-		fsc_retune_ms = t - now_ms > 1000u ? now_ms : t;
-	}
-	return now_ms;
+	if (!fsc_kind(sm))
+		return now_ms;
+	if (t - now_ms > 1000u)
+		t = now_ms;
+	fs_step_modes(fsc_mode, fsc_mode_of(sm), t - now_ms);	// scanst.step: which switch the longest step was
+	// A quick step (a channel read or two) keeps v1.0.2's timing, so the dwell's end stays on the poll it fell on
+	uint32_t tuned = FS_DIP_GUARD && t - now_ms >= FS_STEP_SLOW_MS ? t : now_ms;
+	fsc_retune_tag = tuned;
+	fsc_retune_ms = t;
+	return tuned;
 }
 
 // When the current stop's retune was done (its tuned_ms when fsc_now didn't see it: a pause's end, our transmission)
@@ -95,6 +248,10 @@ static void fsc_begin(radio_sm_t *sm, uint32_t now_ms)
 	fsc_stepped = false;
 	fsc_zone = sm->view.zone_index;
 	fsc_tick_listen = false;
+#if CONFIG_P25_SCAN && CONFIG_DMR && FS_P25_FLOOR
+	memset(fsc_floor, 0, sizeof fsc_floor);	// keyed by zone position: learned again in each scan
+	fsc_p25_stop = 0xFFFFFFFFu;
+#endif
 }
 
 // The band of the stop (scanst.cost BANDS): the air band (108-137 MHz, or AM receive), VHF, UHF
@@ -120,6 +277,8 @@ static void fsc_observe(radio_sm_t *sm)
 		fsc_holds = (uint16_t)sc->holds;
 		uint8_t m = fsc_mode_of(sm);
 		bool chan = sc->kind == SCAN_ZONE && !sm->view.vfo;
+		// Into DMR from another mode: the DMR stack has just started on this stop (set_mode); first stop of a scan too
+		fsc_dmr_fresh = m == FS_M_DMR && fsc_mode != FS_M_DMR;
 		fs_stop_about(chan ? sm->view.channel_number : 0, chan && sm->view.zone_index != fsc_zone,
 			      fsc_mode != FS_MODES && (fsc_mode == FS_M_DMR) != (m == FS_M_DMR), fsc_band(sm),
 			      sm->view.am);
@@ -139,15 +298,27 @@ static uint16_t fsc_line(const radio_sm_t *sm)
 
 // One reading: 0 when clearly nothing the scan would stop or probe for, else why not (FS_FB_*: scanst's fall-back
 // reason)
-static uint8_t fsc_not_quiet(const radio_sm_t *sm, const radio_status_t *st)
+static uint8_t fsc_not_quiet(const radio_sm_t *sm, const radio_status_t *st, uint32_t now_ms)
 {
+	(void)now_ms;
 	if ((uint16_t)st->noise < fsc_line(sm))
 		return FS_FB_NOISE;
 	if (fsc_mode == FS_M_FM)
 		return 0;
 #if CONFIG_DMR
-	if (st->rssi_dbm == 0 || dmr_strength_heard(sm, (int16_t)(st->rssi_dbm + FS_RSSI_MARGIN)))
-		return FS_FB_STRENGTH;
+	if (st->rssi_dbm == 0 || dmr_strength_heard(sm, (int16_t)(st->rssi_dbm + FS_RSSI_MARGIN))) {
+#if CONFIG_P25_SCAN && FS_P25_FLOOR
+		// v1.0.3: under the level a no-frame take learned on this P25 channel: no carrier by strength (fsc_floor)
+		if (fsc_mode != FS_M_P25 || st->rssi_dbm == 0 || !fsc_p25_masked(sm, (int16_t)(st->rssi_dbm + FS_RSSI_MARGIN), now_ms))
+#endif
+			return FS_FB_STRENGTH;
+	}
+#if CONFIG_P25_SCAN && FS_P25_FLOOR
+	// v1.0.3: no carrier by strength on this P25 channel (past the classic settle): what was noted for it goes
+	if (fsc_mode == FS_M_P25 && !dmr_strength_heard(sm, st->rssi_dbm) &&
+	    (int32_t)(now_ms - fsc_retuned(&sm->scan)) >= (int32_t)SCAN_SETTLE_MS)
+		fsc_p25_no_strength(sm, now_ms);
+#endif
 	if (fsc_mode == FS_M_DMR) {
 		uint32_t heard_ms;
 		if (sm->view.dmr.state != RDMR_IDLE ||
@@ -193,7 +364,7 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 	radio_status_t st = { 0 };
 	if (idle) {
 		board.radio->status(&st);
-		why = fsc_not_quiet(sm, &st);
+		why = fsc_not_quiet(sm, &st, now_ms);
 	}
 	bool quiet = why == 0;
 #if FS_DIP_GUARD
@@ -213,6 +384,16 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 			return;		// after a dip reading: not counted before FS_DIP_MS
 	}
 #endif
+	// v1.0.3 (the owner's radio: a DMR over in a zone of a DMR, a P25 and an FM channel was never caught in fast): a
+	// stop that switched the receiver into DMR has a modem that has only just started (390-600 ms to find a
+	// transmitter's slot timing, gotchas 17.2: no burst or call can show within the quiet span) and a strength reading
+	// fresh out of the mode switch. Not read quiet there: handed to the classic rules (their dwell, the strength, the
+	// probe); the switch into DMR costs its step time anyway. A zone of DMR channels only (no switch) keeps the fast rule.
+	// Built off (FS_DMR_FRESH 0, scanfast.h): kept for the radio test SS-6 if the strength lags there
+	if (FS_DMR_FRESH && quiet && fsc_dmr_fresh && fsc_mode == FS_M_DMR) {
+		quiet = false;
+		why = FS_FB_DMR;
+	}
 	uint32_t span = fsc_mode == FS_M_DMR ? FS_SPAN_DMR_MS : FS_SPAN_MS;
 #if FS_DIP_GUARD
 	if (fsc_dip_seen && fsc_dip_tag == sc->tuned_ms && span < FS_SPAN_DIP_MS)
@@ -252,9 +433,9 @@ static void fsc_tick(radio_sm_t *sm, uint32_t now_ms)
 // or polls off their grid. Not with a scan dwell under FS_RETUNE_GUARD_DWELL_MS: there a poll the guard held back could
 // be the last before the dwell's end, and a channel that opens the squelch at once (FM, no tone) be stepped past on
 // its first open; those dwells keep v1.0.1's squelch exactly
-// v1.0.3 (FS_DIP_GUARD): the guard lasts until the retune is FS_DIP_MS old, cut to the dwell less two polls (a signal
-// that opens the squelch at the first poll after it still holds the scan at the next one, before the dwell's end), and
-// never shorter than v1.0.2's
+// v1.0.3 (FS_DIP_GUARD): the guard lasts until the retune is FS_DIP_MS old, cut to the dwell less two polls counted
+// from the step's start (a signal that opens the squelch at the first poll after it still holds the scan at the next
+// one, before the dwell's end, however long the step took), and never shorter than v1.0.2's
 static bool fsc_guard(const radio_sm_t *sm, uint32_t now_ms)
 {
 	const scan_t *sc = &sm->scan;
@@ -269,13 +450,17 @@ static bool fsc_guard(const radio_sm_t *sm, uint32_t now_ms)
 	uint32_t dwell = sc->cfg.dwell_ms, win = dwell > 2u * RADIO_POLL_MS ? dwell - 2u * RADIO_POLL_MS : 0u;
 	if (win > FS_DIP_MS)
 		win = FS_DIP_MS;
+	// The window counts from the end of the retune but the dwell from the step's start: after a slow step (many
+	// scan-skipped channels read, P25 channels) the longer guard must still end two polls before the dwell does, or a
+	// station that opens the squelch at once (FM, no tone: no probe) is stepped past. Past that only v1.0.2's guard
+	bool ext = age < (int32_t)win && (uint32_t)(now_ms - sc->tuned_ms) + 2u * RADIO_POLL_MS < dwell;
 #else
-	uint32_t win = 0;
+	bool ext = false;
 #endif
 	if (fsc_stepped && sc->tuned_ms == fsc_stepped_ms)
-		return age < (int32_t)(win > FS_POLL_GUARD_MS ? win : FS_POLL_GUARD_MS);
+		return age < (int32_t)FS_POLL_GUARD_MS || ext;
 	return sc->tuned_ms == fsc_retune_tag && sc->cfg.dwell_ms >= FS_RETUNE_GUARD_DWELL_MS &&
-	       age < (int32_t)(win > FS_RETUNE_GUARD_MS ? win : FS_RETUNE_GUARD_MS);
+	       (age < (int32_t)FS_RETUNE_GUARD_MS || ext);
 }
 
 // radio_sm_poll's scan service, an FM-path stop (FM, AM, NXDN, dPMR, and P25 / YSF before their own rule), before

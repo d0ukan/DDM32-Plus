@@ -125,6 +125,10 @@ uint16_t native_lab_scan_key(const radio_sm_t *sm)
 {
     return scan_key(sm);
 }
+bool native_lab_scan_quiet(void)
+{
+    return scan_quiet;
+}
 /* DDM32 Plus faster ring (CONFIG_MWATCH_FAST, docs/plus.md "The multi-watch ring"): a ring of 3..6 channels gives a P25
  * channel back by the zone scan's rules (frames tell a call from a foreign carrier; a channel in its cooldown is
  * passed over); dual watch's pair keeps its own */

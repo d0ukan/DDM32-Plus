@@ -351,12 +351,139 @@ static void test_zonescan_dip(void)
 			CHECK(missed == 0 && caught * 10u >= overs * 9u);
 		}
 	}
+	/* Verifier: a slow step (a channel read of 55 ms: a zone with many scan-skipped or P25 channels read in a step) and
+	 * a scan dwell of 100 ms. The guard counts from the end of the retune, the dwell from the step's start: the
+	 * longer guard must still end before the last poll of the dwell, or an FM station without a tone (no probe) that
+	 * opens the squelch at once is stepped past. Both builds catch every over */
+	for (unsigned f = 0; f < 2; f++) {
+		unsigned overs = 0, caught = 0;
+		for (uint32_t seed = 1; seed <= 4; seed++) {
+			fx_setup(16, true, FX_FM, 8, -105, 0, 0);
+			fx.rand = seed * 7919u;
+			zn_codeplug();
+			start();
+			native_lab_init();
+			fake_power.switch_on = classic_on;
+			fake_power.battery_mv = classic_battery;
+			classic_busy = classic_stop = classic_receiving = false;
+			fs_set_fast(f != 0);
+			req(RREQ_ZONE, 1);
+			sm.set.scan_dwell_ms = 100;
+			fx.overs = 0;
+			for (uint32_t t = 1500u; fx.overs < 4; t += 6000u) {
+				fx.t0[fx.overs] = now + t + fx_rand(1000);
+				fx.len[fx.overs++] = 2000u;
+			}
+			bool got[4] = { false };
+			fx_begin_scan();
+			zn_cost_us = 55000u;
+			CHECK(sm.scan.cfg.dwell_ms == 100);
+			while ((int32_t)(now - fx.t0[3] - 2500u) < 0) {
+				fx_ms();
+				int k = fx_over_now();
+				if (k >= 0 && hw.rx_hz == fx_hz(8) &&
+				    (sm.scan.phase == SCAN_PH_HOLD || sm.scan.phase == SCAN_PH_PROBE))
+					got[k] = true;
+			}
+			zn_cost_us = 0;
+			for (int k = 0; k < 4; k++) {
+				overs++;
+				caught += got[k];
+			}
+			req(RREQ_SCAN, RSCAN_STOP);
+			fs_set_fast(true);
+		}
+		printf("Slow step 55 ms, scan dwell 100 ms, %s (FS_DIP_GUARD %d): %u of %u overs caught\n",
+		       f ? "fast" : "classic", FS_DIP_GUARD, caught, overs);
+		CHECK(caught == overs);
+	}
+}
+
+/* v1.0.3, the owner's radio on 1.0.2 (scanst read on the radio): a zone of five P25 channels, nothing on the air, the
+ * strength read -72 dBm at every stop (noise 94, the line 60), every stop a carrier by strength, the native receiver
+ * took each one, heard no frame, gave it back: 1.9 s a stop, cooled 0. The model: five P25 channels, the strength
+ * reading 53 dB high (the noise reading not). A no-frame take learns the channel's strength (fsc_floor): after the first
+ * pass the stops are quick. Then a real P25 signal (-95 dBm, read as -42) in overs on one of them, its frames reaching
+ * the native receiver: every over still noticed, and its take learns nothing */
+static void test_zonescan_p25_strength(void)
+{
+	fx_all_p25 = true;
+	fx_rssi_bias = 53;
+	for (unsigned f = 0; f < 2; f++) {
+		fx_setup(5, false, FX_NONE, 0, 0, 0, 0);
+		fx_res_t r = fx_run(f != 0, 3, 60000);
+		fs_stats_t st;
+		fs_view(now, &st);
+		printf("P25 zone, 5 channels, strength read 53 dB high, %s: %.1f ms a stop over 60 s (%u stops), learned %u, "
+		       "masked %u, held %u\n", f ? "fast" : "classic", r.ms_per_stop, r.stops, (unsigned)st.p25_learned,
+		       (unsigned)st.p25_masked, (unsigned)st.held);
+		if (FS_P25_FLOOR) {
+			CHECK(st.p25_learned >= 5u && st.p25_learned <= 7u);
+			CHECK(st.p25_masked > 50u);
+			/* the first two passes 5 x about 1.9 s (noted, then confirmed), then quick stops */
+			CHECK(r.ms_per_stop < (f ? 120.0 : 260.0));
+		} else {
+			CHECK(r.ms_per_stop > 1000.0);	/* v1.0.2: every stop taken, as on the radio */
+		}
+	}
+	fx_frames = true;
+	for (unsigned f = 0; f < 2; f++) {
+		unsigned overs = 0, caught = 0;
+		uint16_t learned = 0;
+		for (uint32_t seed = 1; seed <= 3; seed++) {
+			fx_setup(5, false, FX_P25, 2, -95, 0, 0);
+			fx_res_t r = fx_run(f != 0, seed, 60000);
+			fs_stats_t st;
+			fs_view(now, &st);
+			overs += r.overs;
+			caught += r.caught;
+			learned = (uint16_t)(learned + st.p25_learned);
+		}
+		printf("P25 zone, strength 53 dB high, P25 -95 dBm in overs with frames, %s (FS_P25_FLOOR %d): %u of %u overs "
+		       "noticed, learned %u\n", f ? "fast" : "classic", FS_P25_FLOOR, caught, overs, (unsigned)learned);
+		/* v1.0.2: 10 of 18 (every stop held 1.9 s on the false strength); with the learned level 13 of 18: the first two
+		 * passes (noted, then confirmed: about 19 s of 1.9 s stops) still miss the overs of that time */
+		CHECK(overs > 6u && (!FS_P25_FLOOR || caught * 10u >= overs * 7u));
+	}
+	fx_frames = false;
+	fx_all_p25 = false;
+	fx_rssi_bias = 0;
+}
+
+/* v1.0.3, the owner's radio on 1.0.2: a zone of three, ch 1 DMR, ch 2 P25, ch 3 FM; every step that switches the
+ * receiver between FM and DMR took 167-169 ms (scanst.cost); a DMR over from his other radio on ch 1 was never caught,
+ * fast or classic. The model: the same zone, a mode switch charged 168 ms on the radio task, the P25 strength 53 dB high,
+ * DMR direct mode -60 dBm on ch 1 in overs (no burst reaches the call stack: only the strength shows it). Before, the stop's
+ * dwell counted from the step's start and was over when the step returned; now from the end of the retune */
+static void test_zonescan_dmr_switch(void)
+{
+	static const uint8_t modes[3] = { RADIO_MODE_DMR, RADIO_MODE_P25, RADIO_MODE_FM };
+	fx_mode_list = modes;
+	fx_rssi_bias = 53;
+	zn_mode_ms = 168;
+	for (unsigned f = 0; f < 2; f++) {
+		unsigned overs = 0, caught = 0;
+		for (uint32_t seed = 1; seed <= 3; seed++) {
+			fx_setup(3, false, FX_DMR, 0, -60, 0, 0);
+			fx_res_t r = fx_run(f != 0, seed, 60000);
+			overs += r.overs;
+			caught += r.caught;
+		}
+		printf("Zone DMR / P25 / FM, mode switch 168 ms, DMR -60 dBm in overs on ch 1, %s (FS_DIP_GUARD %d): %u of %u "
+		       "overs noticed\n", f ? "fast" : "classic", FS_DIP_GUARD, caught, overs);
+		CHECK(overs > 6u && (!FS_DIP_GUARD || caught == overs));
+	}
+	zn_mode_ms = 0;
+	fx_rssi_bias = 0;
+	fx_mode_list = NULL;
 }
 
 int main(void)
 {
 	int before = failures;
 	test_zonescan_dip();
+	test_zonescan_p25_strength();
+	test_zonescan_dmr_switch();
 	if (!FS_DIP_GUARD) {	/* the "before" build: v1.0.2's rows only */
 		printf("Zone scan dip rows, v1.0.2 (FS_DIP_GUARD 0): %d checks, %d failures\n", checks, failures - before);
 		return failures != before;
