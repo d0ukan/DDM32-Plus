@@ -80,11 +80,15 @@
  *  - one no-frame take is enough when the strength is still there, as high, once the native receiver has given the
  *    channel back (the first reading on the FM path again), and the noise reading says quiet then: the false strength
  *    stays, a call's tail (the case that made v1.0.3 confirm twice) is gone by then. Else noted, confirmed as before;
- *  - a reading under the learned level and not more than FS_P25_FLOOR_SAME_DB over it keeps the level for another
+ *  - a reading within FS_P25_FLOOR_SAME_DB of the learned level (under or over it) keeps the level for another
  *    FS_P25_FLOOR_MS (no re-learning every two minutes while the false strength stays);
+ *  - a reading more than FS_P25_DROP_DB under the level drops it (not this channel's steady strength);
  *  - the learned levels are kept when a scan of the same zone starts again (the expiry and the drop rules still hold) */
 #ifndef FS_P25_SEED
 #define FS_P25_SEED	FS_P25_FLOOR
+#endif
+#ifndef FS_P25_DROP_DB
+#define FS_P25_DROP_DB	10	/* hole hunt 1.0.4: 6 dropped the level on ordinary 2-3 dB jitter (the level is a stop's max) */
 #endif
 #define FS_SPAN_DIP_MS	30u	/* the quiet span after a dip reading (FM and the native modes): four readings 50-80 ms */
 
