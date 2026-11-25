@@ -10,7 +10,7 @@
 
 [![Lisans: GPL-3.0-or-later](https://img.shields.io/badge/lisans-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Temel: Open25-DM32](https://img.shields.io/badge/temel-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Sürüm: v1.0.4](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.4-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.4)
+[![Sürüm: v1.0.5](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.5-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.5)
 
 [English README](README.md)
 
@@ -40,9 +40,10 @@
 ## Durum
 
 DDM32 Plus **v1.0.0** (2026-11-23) ile **kararlı** sürüm hattındadır. Yayımlanmış en son sürüm
-**[v1.0.4](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.4)** (2026-11-25); programlayıcı **3.1.0** ile
+**[v1.0.5](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.5)** (2026-11-25); programlayıcı **3.1.0** ile
 birlikte (Rust, Windows kurulumu; Linux ve macOS paketleri sonra; kaynak [`rust/`](rust/) içinde). C# Windows programı
-2.0.0 emekliye ayrıldı. Aşağıda "(1.0.2)", "(1.0.3)" veya "(1.0.4)" yazan özellikler o sürümle geldi; **1.0.2 - 1.0.4
+2.0.0 emekliye ayrıldı. 1.0.5 yalnızca Araçlar > Saat'i ve pil grafiğini, program flash'ında yer açmak için çıkarır.
+Aşağıda "(1.0.2)", "(1.0.3)" veya "(1.0.4)" yazan özellikler o sürümle geldi; **1.0.2 - 1.0.5
 telsizde tam denenmeden yayımlandı** (1.0.3'ten ISS basılı tuşu, arama ekranı ve Güneş & Ay telsizde çalışırken
 görüldü; gerisi yalnızca bilgisayarda test edildi).
 

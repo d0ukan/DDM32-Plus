@@ -3,7 +3,10 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased
+## v1.0.5 (2026-11-25, with programmer 3.1.0)
+
+Firmware. Host-tested only; not yet run on the radio. Only removals, to free program flash; nothing new. The programmer
+3.1.0 is unchanged.
 
 - The Tools > Battery graph and time left are left out of the Plus build to free program flash (battgraph.c and
   ui_battgraph.c: 1,154 B + 1,296 B flash, 112 B RAM in 1.0.4). The owner never used it. Tools > Battery stays and opens
