@@ -28,7 +28,7 @@ WSL copies without rust/pc/win, clean `build/radiofoundry-p25`, `build_radiofoun
 | bin SHA-256 | - | `eee37f90...bcd78cd6` (not in `PLUS_REVIEWED`; VERSION still 1.0.3, see finding 2) |
 | `test_receive_audio.py` | pass | pass |
 | `test_fastscan.py` | pass (zone checks 824, 0 failures) | pass (new jitter row: 6 slow stops at the start, 0 later, 0 after a restart; 1.0.3 build 10 / 20 / 10) |
-| `test_classic.py` | rc 0 (Turkish catalogue 1,675 texts all translated and drawable) | CLASSIC2 |
+| `test_classic.py` | rc 0 (Turkish catalogue 1,675 texts all translated and drawable) | rc 0 (same; Turkish catalogue 1,675 texts all translated and drawable, with the new toast) |
 
 ## What was checked across branches
 
