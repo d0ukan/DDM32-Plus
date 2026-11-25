@@ -86,6 +86,7 @@ static uint32_t fsc_p25_stop = 0xFFFFFFFFu;	// the stop (scan_t.steps) whose str
 static int16_t fsc_p25_dbm;
 #if FS_P25_SEED
 static uint16_t fsc_floor_zone = 0xFFFFu;	// v1.0.4: the zone fsc_floor was learned in (kept for its next scan)
+static uint32_t fsc_floor_serial;		// ... and codeplug_serial() then (an edit may move the zone's positions)
 #endif
 
 static fsc_floor_t *fsc_floor_find(uint16_t key, uint32_t now_ms)
@@ -107,6 +108,16 @@ static bool fsc_p25_masked(const radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
 	if (!fsc_p25_here(sm) || dbm == 0)
 		return false;
 	fsc_floor_t *f = fsc_floor_find(native_lab_scan_key(sm), now_ms);
+#if FS_P25_SEED
+	// v1.0.4: a strength well under the level: the level is not this channel's steady false strength (a call's tail
+	// learned on a stale reading, a level of another channel at this zone position): dropped, so the next carrier there
+	// is taken. Without this the false strength itself would keep such a level alive below (the drop on no strength
+	// never comes on a channel whose false strength stays over the line)
+	if (f != NULL && dbm < f->dbm - (int16_t)FS_P25_FLOOR_SAME_DB) {
+		f->until_ms = 0;
+		return false;
+	}
+#endif
 	if (f == NULL || f->takes < FS_P25_FLOOR_TAKES || dbm >= f->dbm + (int16_t)FS_P25_FLOOR_DB)
 		return false;
 #if FS_P25_SEED
@@ -274,11 +285,15 @@ static void fsc_begin(radio_sm_t *sm, uint32_t now_ms)
 #if FS_P25_SEED
 	// v1.0.4: keyed by zone position: kept for the next scan of the same zone (each level still expires, and a reading
 	// with no strength or a take with frames still drops it), learned again in another zone. A level due later than
-	// FS_P25_FLOOR_MS from now belongs to another clock (the host tests start theirs again): dropped too
+	// FS_P25_FLOOR_MS from now belongs to another clock (the host tests start theirs again): dropped too. A codeplug
+	// change since (a zone edited: other channels at these positions) drops them all
+	uint32_t serial = codeplug_serial();
 	for (unsigned i = 0; i < FS_P25_FLOORS; i++)
-		if (fsc_floor_zone != fsc_zone || (int32_t)(fsc_floor[i].until_ms - now_ms) > (int32_t)FS_P25_FLOOR_MS)
+		if (fsc_floor_zone != fsc_zone || fsc_floor_serial != serial ||
+		    (int32_t)(fsc_floor[i].until_ms - now_ms) > (int32_t)FS_P25_FLOOR_MS)
 			fsc_floor[i].until_ms = 0;
 	fsc_floor_zone = fsc_zone;
+	fsc_floor_serial = serial;
 #else
 	memset(fsc_floor, 0, sizeof fsc_floor);	// keyed by zone position: learned again in each scan
 #endif

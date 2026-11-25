@@ -623,11 +623,59 @@ static void test_zonescan_p25_seed(void)
 	fx_rssi_bias = 0;
 }
 
+/* v1.0.4 (verifier): a level learned on a carrier that is not the false strength must not outlive it. A carrier with no
+ * frame (a foreign one, 25 dB over the false strength) on a P25 channel from the scan's start for 30 s is learned at
+ * its strength (a level already learned under it would not be replaced: a stronger take without a frame); it goes,
+ * and P25 calls with frames at the same strength follow every 10 s. The false strength between them reads 25 dB under
+ * the level: it drops the level (without that rule a reading under the level refreshed it for good), so the calls are
+ * taken again. Checked in this version; v1.0.3 (FS_P25_SEED 0) only prints its figure (the level's 120 s) */
+static void test_zonescan_p25_seed_gone(void)
+{
+	fx_rssi_bias = 53;
+	fx_all_p25 = true;
+	fx_mode_list = NULL;
+	zn_mode_ms = 0;
+	for (unsigned f = 0; f < 2; f++) {
+		fx_setup(5, false, FX_P25, 2, -100, 0, 0);
+		fx.rand = 777u;
+		fx.overs = 0;
+		fx.t0[fx.overs] = 1000u;	/* start() sets the time to 1000: on the air as the scan starts */
+		fx.len[fx.overs++] = 30000u;
+		for (uint32_t t = 40000u; t < 200000u && fx.overs < FX_OVERS; t += 10000u) {
+			fx.t0[fx.overs] = 1000u + t;
+			fx.len[fx.overs++] = 3000u;
+		}
+		memset(fx.caught, 0, sizeof fx.caught);
+		zn_seed_reset(f != 0);
+		uint32_t t0 = now;
+		while (now - t0 < 205000u) {
+			fx_frames = now - 1000u >= 30000u;	/* the first carrier has no frame, the calls have */
+			fx_ms();
+		}
+		unsigned calls = 0, caught = 0;
+		for (int k = 1; k < fx.overs; k++) {
+			calls++;
+			caught += fx.caught[k];
+		}
+		printf("P25 seed (FS_P25_SEED %d): a no-frame carrier learned, then calls with frames at its strength, %s: "
+		       "%u of %u calls noticed\n", FS_P25_SEED, f ? "fast" : "classic", caught, calls);
+		if (FS_P25_SEED)
+			CHECK(calls >= 10 && caught == calls);
+		CHECK(sm.scan.kind == SCAN_ZONE);
+		req(RREQ_SCAN, RSCAN_STOP);
+	}
+	fs_set_fast(true);
+	fx_frames = false;
+	fx_all_p25 = false;
+	fx_rssi_bias = 0;
+}
+
 int main(void)
 {
 	int before = failures;
 	if (FS_DIP_GUARD && !FS_P25_SEED) {	/* the v1.0.3 build (before): the seed rows only */
 		test_zonescan_p25_seed();
+		test_zonescan_p25_seed_gone();
 		printf("Zone scan P25 seed rows, v1.0.3 (FS_P25_SEED 0): %d checks, %d failures\n", checks, failures - before);
 		return failures != before;
 	}
@@ -639,6 +687,7 @@ int main(void)
 		return failures != before;
 	}
 	test_zonescan_p25_seed();
+	test_zonescan_p25_seed_gone();
 	test_zonescan_same();
 	test_zonescan_priority();
 	test_zonescan_figures();
