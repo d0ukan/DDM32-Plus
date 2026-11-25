@@ -10,7 +10,7 @@ by **d0ukan · TA2DOU**
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Based on Open25-DM32](https://img.shields.io/badge/based%20on-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Release: v1.0.5](https://img.shields.io/badge/release-v1.0.5-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.5)
+[![Release: v1.0.6](https://img.shields.io/badge/release-v1.0.6-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.6)
 
 [Türkçe README](README.tr.md)
 
@@ -38,10 +38,10 @@ by **d0ukan · TA2DOU**
 ## Status
 
 DDM32 Plus has been a **stable** release line since **v1.0.0** (2026-11-23). The latest published release is
-**[v1.0.5](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.5)** (2026-11-25), with the programmer **3.1.0**
+**[v1.0.6](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.6)** (2026-11-26), with the programmer **3.1.0**
 (Rust, Windows setup; Linux and macOS packages follow; source in [`rust/`](rust/)). The C# Windows programmer 2.0.0
-is retired. 1.0.5 only leaves Tools > Clock and the battery graph out, to free program flash. Features marked
-"(1.0.2)", "(1.0.3)" or "(1.0.4)" below came with that version; **1.0.2 - 1.0.5 were published before a full radio test** (from 1.0.3 the ISS hold key, the search screen and Sun & Moon were seen working on
+is retired. 1.0.5 left Tools > Clock and the battery graph out, to free program flash. Features marked
+"(1.0.2)" - "(1.0.6)" below came with that version; **1.0.2 - 1.0.6 were published before a full radio test** (from 1.0.3 the ISS hold key, the search screen and Sun & Moon were seen working on
 the radio; the rest is host-tested only).
 
 Every feature below is built and covered by host tests (a simulator of the radio's screens, radio core and modems), but
@@ -134,7 +134,9 @@ the byline "d0ukan, TA2DOU" (the screenshots below come from the host simulator,
 
 **Tools > Cross-band** is an attended store-and-forward relay between two frequencies, **A and B, which may be on
 different bands**: what is heard on one side is recorded whole and then sent on the other. Each side has its own mode;
-the pairs are **DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM and P25 -> P25** (1.0.3). Every side has its own filters and
+the pairs are **DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM and P25 -> P25** (1.0.3) and **FM -> DMR** (1.0.6; FM is
+heard only when the DMR side has a TX TG). An FM side has **RX Tone** and **TX Tone** rows (CTCSS / DCS, 1.0.6). Every
+side has its own filters and
 TX values: DMR **RX CC / TS / TG** (default Any) and **TX CC / TS / TG**, P25 **RX NAC** (default Any) and **TX NAC**
 (default 293; a P25 relay sends with the side's TX NAC, not the one it heard). The radio asks before it starts,
 locks while it runs, shows **CROSS** on every screen and sends a CW ID. Outside the amateur bands and PMR446 it refuses;

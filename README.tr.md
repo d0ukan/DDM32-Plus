@@ -10,7 +10,7 @@
 
 [![Lisans: GPL-3.0-or-later](https://img.shields.io/badge/lisans-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Temel: Open25-DM32](https://img.shields.io/badge/temel-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Sürüm: v1.0.5](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.5-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.5)
+[![Sürüm: v1.0.6](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.6-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.6)
 
 [English README](README.md)
 
@@ -40,10 +40,10 @@
 ## Durum
 
 DDM32 Plus **v1.0.0** (2026-11-23) ile **kararlı** sürüm hattındadır. Yayımlanmış en son sürüm
-**[v1.0.5](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.5)** (2026-11-25); programlayıcı **3.1.0** ile
+**[v1.0.6](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.6)** (2026-11-26); programlayıcı **3.1.0** ile
 birlikte (Rust, Windows kurulumu; Linux ve macOS paketleri sonra; kaynak [`rust/`](rust/) içinde). C# Windows programı
-2.0.0 emekliye ayrıldı. 1.0.5 yalnızca Araçlar > Saat'i ve pil grafiğini, program flash'ında yer açmak için çıkarır.
-Aşağıda "(1.0.2)", "(1.0.3)" veya "(1.0.4)" yazan özellikler o sürümle geldi; **1.0.2 - 1.0.5
+2.0.0 emekliye ayrıldı. 1.0.5, Araçlar > Saat'i ve pil grafiğini program flash'ında yer açmak için çıkardı.
+Aşağıda "(1.0.2)" - "(1.0.6)" yazan özellikler o sürümle geldi; **1.0.2 - 1.0.6
 telsizde tam denenmeden yayımlandı** (1.0.3'ten ISS basılı tuşu, arama ekranı ve Güneş & Ay telsizde çalışırken
 görüldü; gerisi yalnızca bilgisayarda test edildi).
 
@@ -141,7 +141,9 @@ ekranın ipucu satırı ilk ayarlı tuşu söyler ("4 ISS", birden çoksa "+"). 
 
 **Araçlar > Çapraz bant**, iki frekans arasında yalnız başındayken çalışan bir kaydet-ilet rölesidir; **A ve B farklı
 bantlarda olabilir**: bir tarafta duyulan konuşma bütün olarak kaydedilir, sonra diğer tarafta gönderilir. Her tarafın
-kendi modu vardır; olan çiftler **DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM ve P25 -> P25** (1.0.3). Her tarafın kendi
+kendi modu vardır; olan çiftler **DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM ve P25 -> P25** (1.0.3) ve **FM -> DMR**
+(1.0.6; FM ancak DMR tarafında TX TG varsa dinlenir). FM tarafında **RX Tone** ve **TX Tone** satırları vardır
+(CTCSS / DCS, 1.0.6). Her tarafın kendi
 süzgeçleri ve TX değerleri var: DMR **RX CC / TS / TG** (varsayılan Tümü) ve **TX CC / TS / TG**, P25 **RX NAC**
 (varsayılan Tümü) ve **TX NAC** (varsayılan 293; P25 rölesi duyduğu NAC ile değil, tarafın TX NAC'i ile gönderir).
 Telsiz başlamadan sorar, çalışırken kilitlenir, her ekranda **CROSS** işareti gösterir ve CW ile kimlik verir. Amatör

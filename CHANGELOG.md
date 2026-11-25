@@ -3,9 +3,9 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased
+## v1.0.6 (2026-11-26, with programmer 3.1.0)
 
-Firmware. Host-tested only; not yet run on the radio.
+Firmware. Host-tested only; not yet run on the radio. The programmer 3.1.0 is unchanged.
 
 - Search found lists (Tools > P25 search, DMR search, All digital search) keep 16 finds instead of 8, newest first;
   the 17th new find drops the oldest. The list now scrolls: Up / Down keep the picked find whole on screen (both its
