@@ -122,8 +122,7 @@ not yet tried between two radios). **Last calls** of every mode and watched chan
 watch** (an airfield's frequencies at once), a **3D waterfall**, **Mic-E** beacons, an **APRS station page** with Go-To
 and the map, **data packs** (RadioID names, air band frequencies), faster P25 / DMR search with your own range and step,
 **delete channel**. Tone finder (CTCSS/DCS), DTMF / SelCall decoder, CW decoder and practice, pager (POCSAG) and ACARS,
-SSTV receive, CW beacon, lone worker (sound, DMR emergency or APRS SOS), call history with QSO marks, battery graph with
-time left, MMDVM hotspot over the programming cable, FM caller ID, signal quality. Each Tools entry has an icon of its
+SSTV receive, CW beacon, lone worker (sound, DMR emergency or APRS SOS), call history with QSO marks, MMDVM hotspot over the programming cable, FM caller ID, signal quality. Each Tools entry has an icon of its
 own (new for DOTA Transfer, Cross-band, CW decoder and SOS key in 1.0.3). Settings > About and the boot screen carry
 the byline "d0ukan, TA2DOU" (the screenshots below come from the host simulator, which shows upstream's About page).
 
@@ -154,9 +153,9 @@ shows "# segs: on"). The per-side modes and values came with 1.0.3 (before it, D
 | :---: | :---: | :---: | :---: |
 | ![Tools menu](images/ddm32/tools.png) | ![Tools menu, DOTA Transfer and Cross-band icons](images/ddm32/tools-more.png) | ![Settings > Keys, the hold keys](images/ddm32/keys-hold.png) | ![Home's hint row naming the hold keys](images/ddm32/home-holdhint.png) |
 
-| Airfields | Marine VHF | Battery |
-| :---: | :---: | :---: |
-| ![Airfields list](images/ddm32/airfields.png) | ![Marine VHF table](images/ddm32/marine.png) | ![Battery graph](images/ddm32/battery.png) |
+| Airfields | Marine VHF |
+| :---: | :---: |
+| ![Airfields list](images/ddm32/airfields.png) | ![Marine VHF table](images/ddm32/marine.png) |
 
 | Last calls | APRS station | Data packs in About | DOTA frequency |
 | :---: | :---: | :---: | :---: |

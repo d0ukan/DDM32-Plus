@@ -2976,7 +2976,7 @@ every task's deepest stack path unchanged (UI 368 B free, radio 824, host link 6
   on another frequency / not past 60 s / a DMR call we made / the user's choice kept, the export byte for byte, a full
   list in one reply, refused while a change is under way, too small a buffer), the UI flow (* on Recent, the export
   after it, * elsewhere still the quick settings). The PC app's export is another job's. Radio rows QL1-QL4.
-- [built] Battery graph and time left (`CONFIG_BATT_GRAPH`): Tools > Battery (tool 41 since Tools > ISS; it was 30 when added and stays the last tool, "Pil") on a radio with a
+- [built, **removed from the Plus build in the next version**: `CONFIG_BATT_GRAPH=n` in `build_radiofoundry.py`, to free program flash (measured: battgraph.o 1,154 B + ui_battgraph.o 1,296 B flash, 112 B RAM, see the build for the exact change); the owner never used it; the source and hooks stay, `y` brings it back. Tools > Battery stays and opens upstream's battery page (`SCR_INFO`, `INFO_BATTERY`); the status bar battery icon and percentage are untouched; no tool numbers move] Battery graph and time left (`CONFIG_BATT_GRAPH`): Tools > Battery (tool 41 since Tools > ISS; it was 30 when added and stays the last tool, "Pil") on a radio with a
   battery opens a page with the charge level and voltage ("84%  7.90 V"), "Time left: 4 h 20 min" or "Time left: --"
   with why ("Collecting: needs 30 min", "Charging", "Not steady"), and the last 3.2 hours as a line graph (scaled to its
   own range, 0.2 V at least; labels top and bottom; "-3.2 h" ... "now"); a radio that measures its supply keeps

@@ -5,6 +5,11 @@ DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See t
 
 ## Unreleased
 
+- The Tools > Battery graph and time left are left out of the Plus build to free program flash (battgraph.c and
+  ui_battgraph.c: 1,154 B + 1,296 B flash, 112 B RAM in 1.0.4). The owner never used it. Tools > Battery stays and opens
+  upstream's battery page; the status bar icon and percentage are untouched; no tool numbers move, so stored hold-key
+  codes are unaffected. The source and its guarded hooks stay (`CONFIG_BATT_GRAPH`, now `n` in
+  `tools/build_radiofoundry.py`), so it can come back.
 - Tools > Clock (stopwatch, countdown, alarm, UTC offset) is left out of the Plus build to free program flash (the
   image was 1,964 B under the limit). The owner never used it. The source and its guarded hooks stay
   (`CONFIG_CLOCK_TOOLS`, now `n` in `tools/build_radiofoundry.py`), so it can come back. The Tools list loses the row; the other

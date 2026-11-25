@@ -127,7 +127,7 @@ bant** (aşağıda), **hava bandı izleme** (bir meydanın frekansları birlikte
 haritayla **APRS istasyon sayfası**, **veri paketleri** (RadioID isimleri, hava bandı frekansları), kendi aralık ve
 adımınızla daha hızlı P25 / DMR arama, **kanal silme**. Ton bulucu (CTCSS/DCS), DTMF / SelCall çözücü, CW çözücü ve
 pratik, pager (POCSAG) ve ACARS, SSTV alma, CW beacon, lone worker (ses, DMR acil veya APRS SOS), QSO işaretli çağrı
-geçmişi, kalan süreli pil grafiği, programlama kablosu üzerinden MMDVM hotspot, FM arayan kimliği, sinyal kalitesi.
+geçmişi, programlama kablosu üzerinden MMDVM hotspot, FM arayan kimliği, sinyal kalitesi.
 Araçlar'daki her girişin kendi simgesi var (DOTA Transfer, Çapraz bant, CW çözücü ve SOS tuşu için 1.0.3'te yenilendi).
 Ayarlar > Hakkında ve açılış ekranı "d0ukan, TA2DOU" imzasını taşır (aşağıdaki ekran görüntüleri, upstream'in Hakkında
 sayfasını gösteren bilgisayar simülatöründen).
@@ -160,9 +160,9 @@ yalnız DMR) ve yalnızca bilgisayarda test edildi.
 | :---: | :---: | :---: | :---: |
 | ![Araçlar menüsü](images/ddm32/tools.png) | ![Araçlar menüsü, DOTA Transfer ve Çapraz bant simgeleri](images/ddm32/tools-more.png) | ![Ayarlar > Tuşlar, basılı tutma tuşları](images/ddm32/keys-hold.png) | ![Basılı tutma tuşlarını söyleyen ana ekran ipucu satırı](images/ddm32/home-holdhint.png) |
 
-| Havalimanları | Deniz VHF | Pil |
-| :---: | :---: | :---: |
-| ![Havalimanı listesi](images/ddm32/airfields.png) | ![Deniz VHF tablosu](images/ddm32/marine.png) | ![Pil grafiği](images/ddm32/battery.png) |
+| Havalimanları | Deniz VHF |
+| :---: | :---: |
+| ![Havalimanı listesi](images/ddm32/airfields.png) | ![Deniz VHF tablosu](images/ddm32/marine.png) |
 
 | Son çağrılar | APRS istasyonu | Hakkında: veri paketleri | DOTA frekansı |
 | :---: | :---: | :---: | :---: |

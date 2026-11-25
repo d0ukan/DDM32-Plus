@@ -700,7 +700,7 @@ def main():
         "CONFIG_AIRFIELDS="+("y" if args.plus else "n"),
         "CONFIG_MARINE="+("y" if args.plus else "n"),
         "CONFIG_QSO_LOG="+("y" if args.plus else "n"),
-        "CONFIG_BATT_GRAPH="+("y" if args.plus else "n"),
+        "CONFIG_BATT_GRAPH=n",	# DDM32 Plus, next version: the Tools > Battery graph left out of the build (flash); Battery keeps upstream's page; the source and hooks stay, "y" brings it back
         "CONFIG_PC_LIVE="+("y" if args.plus else "n"),
         "CONFIG_CW_RX="+("y" if args.plus else "n"),
         "CONFIG_RPT_PROV="+("y" if args.plus else "n"),
