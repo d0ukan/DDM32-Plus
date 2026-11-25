@@ -28,6 +28,42 @@ Firmware. Host-tested only; not yet run on the radio.
   50 ms after a retune, the fast rule tolerates early readings, and a hold on such an early squelch that heard no
   carrier moves on without the resume delay. Model: 152 ms a stop classic, 53-94 ms fast with a 25-45 ms dip (before
   600-2000 ms); unchanged with a short dip. `scanst.cost` gains DIPS and DIP_HOLDS. See docs/scan-slow-2026-11-25.md.
+  A side effect to know: while a P25 channel's false strength is learned (two minutes at a time), a real P25 signal
+  less than 10 dB over that reading is noticed only by the noise reading, not by its strength (rows SS-4 / SS-5).
+- Tools > Cross-band, a mode per side (docs/plus.md "A mode per side"; docs/xband-multiproto-study.md): DMR -> DMR,
+  NXDN -> DMR, DMR / NXDN -> FM (decoded by the stock codec) and P25 -> P25 (the IMBE frames as heard, the P25
+  transmitter's encoder skipped). Every other pair is refused; a one-way pair listens on its source side only. Every
+  earlier refusal, the question, the lock and the CW ID stay; a user's PTT during a session, and until a P25 session's
+  channel is let go at its end, gets the deny tone.
+- Cross-band, a side's filters and TX values (docs/plus.md "A side's filters and TX values"): DMR RX CC / TS / TG and
+  TX CC / TS / TG; P25 RX NAC, TX NAC, TX TG. RAM only. **P25 sends with the side's TX NAC, 293 unless set or brought
+  by a picked P25 channel; it no longer sends the NAC it heard.** A NAC is typed with 0-9 only (Left / Right step to
+  A-F, one value a press).
+- Cross-band: # on the form lifts the satellite, repeater and APRS segment refusals (docs/plus.md "Segments free"; RAM
+  only, off at every power-on, never while a session runs). Outside the amateur bands and PMR446 stay refused; DOTA's
+  band plan is unchanged.
+- Cross-band: a typed frequency is MHz from its first three digits (433, 4335, 433500); fewer than three digits are told
+  ("Type the MHz: 433500") instead of being dropped silently (the likely cause of the 1.0.2 "Satellite segment" report).
+- P25 RX group list (docs/plus.md "P25 RX group list", docs/rx-group-list-budget.md): a P25 channel picks one of the
+  codeplug's RX group lists in the channel editor ("RX list"); with a list the channel's talkgroup and the list's P25
+  talkgroups play, Any every group, None the channel's squelch as before. Stored in the record's existing byte by the
+  existing channel save; the lists and contacts are only read (edited in the CPS or a DOTA pack).
+- P25 search: an optional soft P25 probe on the FM discriminator (docs/p25-soft-probe-design.md), chosen with held 0
+  on the P25 search screen (fast -> fast + soft probe -> classic). **Off by default**; off it changes nothing.
+  Unproven on the radio (rows SP-1..SP-4).
+- P25 on a channel with NAC Any: Home's caller line keeps the NAC the call came on (decoded from the NID) in its short
+  forms, " $1C8" after TG and ID ("TG101 ID77285 $1C8 BER1.2%"); the last form is "TG65535 ID16777215 $1C8" (no BER) so
+  the worst case still fits the 220 px row. A channel with its own NAC is unchanged (it already says it). An
+  emergency call on such a channel says it too: "EMERGENCY TG101 ID77285 $1C8" | "EMG TG101 ID77285 $1C8" | "EMG
+  ID16777214 $1C8" (the form that fits the row's font is taken; no BER). Checked in the simulator with the real fonts.
+- Home on a channel: hold 4 starts ISS tracking when a pass is under way or due within 10 minutes, else opens Tools >
+  ISS; the hint row shows "4 ISS" (docs/plus.md "ISS key on Home"). In the VFO a held digit still types it (no key, no
+  hint there); on a dual / multi-watch VFO letter no hint either.
+- Screens: Sun & Moon labels no longer overlap the time columns (Twil. / Alaca for the dawn and dusk row); P25, DMR and
+  All digital search lines fit the 220 px safe area (shorter forms, never a clipped edge; Turkish probe word "Dene");
+  Tools menu icons of their own for DOTA Transfer, Cross-band, CW decoder and SOS key.
+- Size: FLASH 897,336 B of 901,120 B (3,784 B free, 99.58 %), RAM 205,216 B (6,240 B free); stacks fit (radio task
+  316 B free, p25-lab 324 B).
 
 ## v1.0.2 (2026-11-25)
 
@@ -42,11 +78,6 @@ Firmware. Host-tested only (simulator flows in English and Turkish, normal and L
 
 Firmware (host-tested only; not yet run on a radio).
 
-- P25 on a channel with NAC Any: Home's caller line keeps the NAC the call came on (decoded from the NID) in its short
-  forms, " $1C8" after TG and ID ("TG101 ID77285 $1C8 BER1.2%"); the last form is "TG65535 ID16777215 $1C8" (no BER) so
-  the worst case still fits the 220 px row. A channel with its own NAC is unchanged (it already says it). An
-  emergency call on such a channel says it too: "EMERGENCY TG101 ID77285 $1C8" | "EMG TG101 ID77285 $1C8" | "EMG
-  ID16777214 $1C8" (the form that fits the row's font is taken; no BER). Checked in the simulator with the real fonts.
 - More free RAM for the coming software P25 receive probe: 4,792 B more static RAM free (1,968 -> 6,760 B; the
   1,500 B floor kept), no feature removed and no task stack touched (branch `ramsave`, `tools/plus_ramsave.py`; two of
   the three savings of RadioFoundry 454a5b76, MIT; the third, the start-up stack in the RTOS heap, was already in):
