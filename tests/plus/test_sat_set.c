@@ -3,7 +3,9 @@
  * through the actual UI storage service and settings store on the DM32 flash map (sim_flash): off in a new radio,
  * each value kept across power cycles, stored in spare bits (settings_t.cp_flags bits 1-6, rs_flags bits 6-7) next to
  * "Use anyway" and FM caller ID (cp_flags bits 0 and 7) and the radio core's rs_flags bits, none disturbing another;
- * a factory reset's defaults read off. Built by tools/test_classic.py like test_fmid_set.c, with
+ * a factory reset's defaults read off. The hold keys' ten tool codes (UI_SET_HOLD_FIRST + digit, settings_t.hold_tool,
+ * the one field appended to the record): hold 4 = the ISS in a new radio and after a factory reset, the others none, each
+ * kept across power cycles, none disturbing the satellites' bits or another digit. Built by tools/test_classic.py like test_fmid_set.c, with
  * -DCONFIG_SATELLITES=1 -DCONFIG_FM_ID=1. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +78,11 @@ int main(void)
     settings_init();
     /* A new radio: both off */
     CHECK(ui_svc_setting_get(UI_SET_SAT_NOTE)==0 && ui_svc_setting_get(UI_SET_SAT_AUTO)==0);
+    /* Hold keys: a new radio holds 4 = the ISS (code 40), every other digit none; the record is upstream's 392 B and the
+     * 12 appended, still two pages */
+    CHECK(sizeof(settings_t)==404 && SETTINGS_PAGES==2 && SETTINGS_HOLD_ISS==UI_HOLD_ISS);
+    for (int d=0; d<10; d++)
+        CHECK(ui_svc_setting_get((uint8_t)(UI_SET_HOLD_FIRST+d))==(d==4?UI_HOLD_ISS:0));
     /* "Use anyway", FM caller ID off and the radio core's roger beep and key beep set first */
     settings_t *st=settings_begin();
     st->cp_flags|=SETTINGS_CP_ACCEPTED|SETTINGS_CP_NO_FM_ID;
@@ -112,10 +119,23 @@ int main(void)
     s=now_st();
     CHECK(s.cp_flags==SETTINGS_CP_SAT_NOTE && (s.rs_flags&~SETTINGS_RS_SAT_AUTO)==
           (SETTINGS_RS_ROGER_BEEP|SETTINGS_RS_KEY_BEEP|SETTINGS_RS_NO_TALK_PERMIT));
+    /* Hold 7 = a tool (code 21), hold 4 none, hold 0 the last tool (41): kept across power cycles, every other digit and
+     * the satellites' bits untouched; a value outside a byte is refused */
+    CHECK(ui_svc_setting_set(UI_SET_HOLD_FIRST+7,21) && ui_svc_setting_set(UI_SET_HOLD_FIRST+4,0) &&
+          ui_svc_setting_set(UI_SET_HOLD_FIRST+0,41));
+    CHECK(!ui_svc_setting_set(UI_SET_HOLD_FIRST+1,256) && !ui_svc_setting_set(UI_SET_HOLD_FIRST+1,-1));
+    CHECK(ui_svc_setting_set(UI_SET_HOLD_FIRST+9,UI_HOLD_ISS));
+    power_cycle();
+    for (int d=0; d<10; d++)
+        CHECK(ui_svc_setting_get((uint8_t)(UI_SET_HOLD_FIRST+d))==(d==7?21:d==0?41:d==9?UI_HOLD_ISS:0));
+    s=now_st();
+    CHECK(s.cp_flags==SETTINGS_CP_SAT_NOTE && (s.rs_flags&SETTINGS_RS_SAT_AUTO)==SETTINGS_RS_SAT_AUTO);
+    CHECK(s.hold_tool[7]==21 && s.hold_tool[10]==0 && s.hold_tool[11]==0);
     /* A factory reset's defaults: off */
     settings_t def;
     settings_defaults(&def);
     CHECK((def.cp_flags&SETTINGS_CP_SAT_NOTE)==0 && (def.rs_flags&SETTINGS_RS_SAT_AUTO)==0);
+    CHECK(def.hold_tool[4]==SETTINGS_HOLD_ISS && def.hold_tool[7]==0 && def.hold_tool[0]==0);
     CHECK(sim_flash_violations()==0);
     sim_flash_free();
     printf("# test_sat_set: satellites' Every pass and Auto track stored and kept across power cycles: %d failures\n",
