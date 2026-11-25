@@ -30,15 +30,20 @@ static const seg_t refused[] = {
 };
 static const seg_t amateur[] = { { MHZ(144, 0), MHZ(146, 0), 0 }, { MHZ(430, 0), MHZ(440, 0), 0 } };
 
-uint8_t xband_check_hz(uint32_t hz)
+uint8_t xband_check_hz_free(uint32_t hz, bool free)
 {
 	for (unsigned i = 0; i < sizeof refused / sizeof refused[0]; i++)
-		if (hz >= refused[i].lo && hz <= refused[i].hi)
+		if (hz >= refused[i].lo && hz <= refused[i].hi && (!free || refused[i].why == XB_R_PMR446))
 			return refused[i].why;
 	for (unsigned i = 0; i < sizeof amateur / sizeof amateur[0]; i++)
 		if (hz >= amateur[i].lo && hz <= amateur[i].hi)
 			return XB_R_OK;
 	return XB_R_BAND;
+}
+
+uint8_t xband_check_hz(uint32_t hz)
+{
+	return xband_check_hz_free(hz, false);
 }
 #endif
 
@@ -65,12 +70,29 @@ uint8_t xband_frame_bytes(const xband_req_t *r)
 	return r->mode[0] == XB_MODE_P25 ? XB_P25_FRAME_BYTES : XB_FRAME_BYTES;	/* P25 pairs only with P25 */
 }
 
+/* Tools > Cross-band's # (owner, 2026-11-25): RAM only, off at every power-on, never saved; it cannot change while a
+ * session runs, so every check of the session (the start, xband_begin) reads the value it started with */
+static bool segs_free;
+
+bool xband_segs_free(void)
+{
+	return segs_free;
+}
+
+bool xband_set_segs_free(bool on)
+{
+	if (xband_on())
+		return false;
+	segs_free = on;
+	return true;
+}
+
 uint8_t xband_check(const xband_req_t *r)
 {
 	if (r->mode[0] >= XB_MODES || r->mode[1] >= XB_MODES || xband_listens(r) == 0)
 		return XB_R_MODE;
 	for (unsigned s = 0; s < 2; s++) {
-		uint8_t why = xband_check_hz(r->hz[s]);
+		uint8_t why = xband_check_hz_free(r->hz[s], segs_free);
 		if (why != XB_R_OK)
 			return why;
 	}
@@ -99,7 +121,9 @@ uint16_t xband_frames_for(size_t bytes)
 
 /* --- The UI's side --- */
 
-static xband_req_t req = { .mode = { XB_MODE_DMR, XB_MODE_DMR }, .cc = 1, .ts = 1, .power = 1 };
+#define XB_SIDE_DEFAULT { .rx_nac = XB_NAC_ANY, .tx_nac = XB_NAC_DEFAULT, .rx_cc = XB_CC_ANY, .rx_ts = XB_TS_ANY, 			 .tx_cc = 1, .tx_ts = 1 }
+static xband_req_t req = { .mode = { XB_MODE_DMR, XB_MODE_DMR }, .side = { XB_SIDE_DEFAULT, XB_SIDE_DEFAULT },
+			   .power = 1 };
 static volatile bool want_start, want_stop;
 bool xband_native_key, xband_held;
 static bool active;			/* the radio core runs the session */
@@ -271,8 +295,10 @@ static void listen(const xband_io_t *io, uint8_t side)
 void xband_rx_begin(uint32_t src, uint32_t dst, bool group, bool encrypted)
 {
 	(void)src;
-	if (!active || s.phase != XB_P_LISTEN || encrypted || capacity == 0)
-		return;		/* sending, identifying, or a call we can't relay (encrypted: no clear voice) */
+	uint32_t want = req.side[s.side].rx_tg;
+	if (!active || s.phase != XB_P_LISTEN || encrypted || capacity == 0 ||
+	    (req.mode[s.side] == XB_MODE_DMR && want != 0 && dst != want))
+		return;		/* sending, identifying, a call we can't relay (encrypted: no clear voice), or filtered out */
 	s.rx_open = true;
 	s.rx_ended = false;
 	s.dst = dst & 0xFFFFFFu;
@@ -285,6 +311,12 @@ void xband_rx_begin(uint32_t src, uint32_t dst, bool group, bool encrypted)
 	view.phase = XB_P_RECORD;
 	view.frames = 0;
 	touch();
+}
+
+bool xband_nac_ok(uint16_t nac)
+{
+	uint16_t want = req.side[s.side].rx_nac;
+	return want == XB_NAC_ANY || nac == want;
 }
 
 void xband_rx_frame(const uint8_t *frame)
@@ -420,7 +452,10 @@ void xband_poll(const xband_io_t *io, const xband_in_t *in, uint32_t now)
 		phase(XB_P_SEND, (uint8_t)(1u - s.side));
 		view.frames = s.rec;
 		io->tune(s.side);
-		s.keyed = io->key(s.side, s.dst, s.group);
+		{
+			uint32_t tg = req.side[s.side].tx_tg;	/* the talkgroup set for this side, else the one heard */
+			s.keyed = io->key(s.side, tg != 0 ? tg : s.dst, tg != 0 || s.group);
+		}
 		if (!s.keyed) {
 			io->beep(XB_BEEP_ERROR);	/* the radio would not transmit there: the over is dropped */
 			listen(io, (uint8_t)(1u - s.side));

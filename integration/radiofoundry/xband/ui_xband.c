@@ -14,6 +14,7 @@
 #include "ui_svc.h"
 #include "ui_app.h"
 #include "fmt.h"
+#include "gfx.h"
 #include "i18n.h"
 #include "board.h"
 #include "radio/radio.h"
@@ -63,12 +64,12 @@ static const char *why_text(uint8_t why)
 	return why < XB_R_COUNT && text[why] != NULL ? tr(text[why]) : NULL;
 }
 
-/* One frequency: the band plan (xband_check_hz), then the repeater list's */
-static uint8_t hz_why(uint32_t hz)
+/* One frequency: the band plan, then the repeater list's; free: the segments free (Cross-band's #, never DOTA's) */
+static uint8_t hz_why(uint32_t hz, bool free)
 {
-	uint8_t why = xband_check_hz(hz);
+	uint8_t why = xband_check_hz_free(hz, free);
 #if CONFIG_REPEATERS
-	if (why == XB_R_OK && known_repeater(hz))
+	if (why == XB_R_OK && !free && known_repeater(hz))
 		why = XB_R_REPEATER;
 #endif
 	return why;
@@ -76,17 +77,23 @@ static uint8_t hz_why(uint32_t hz)
 
 const char *ui_xband_refusal(uint32_t hz)
 {
-	return why_text(hz_why(hz));
+	return why_text(hz_why(hz, false));
 }
 #endif
 
 #if CONFIG_XBAND
-enum { R_A, R_AM, R_B, R_BM, R_CC, R_TS, R_POWER, R_GO, R_ROWS };
-#define FREQ_ROW(r)	((r) == R_A || (r) == R_B)
-#define SIDE(r)		((r) >= R_B ? 1u : 0u)	/* A / B of a frequency or mode row */
+/* A row: its kind, and in bit 4 the side (A 0, B 1) for the side's rows. The form: A, A mode, B, B mode, then each
+ * side's filters and TX values for its mode (DMR: RX CC / TS / TG, TX CC / TS / TG; P25: RX NAC, TX NAC, TX TG), Power,
+ * Start (owner, 2026-11-25: the per-side rows) */
+enum { K_FREQ, K_MODE, K_RXCC, K_RXTS, K_RXTG, K_TXCC, K_TXTS, K_TXTG, K_RXNAC, K_TXNAC, K_POWER, K_GO };
+#define ROW(side, k)	((uint8_t)((side) << 4 | (k)))
+#define KIND(r)		((r) & 15u)
+#define SIDE(r)		((r) >> 4 & 1u)
+#define ROWS_MAX	18u
 
 static uint8_t focus, ndigits, page;	/* page 1: the attended-operation question */
-static char digits[8];			/* a frequency being typed on A / B */
+static char digits[9];			/* a frequency or a number being typed */
+static uint8_t rows[ROWS_MAX], nrows;	/* the form's rows as the modes make it */
 static uint16_t form_top;
 static uint16_t shown_serial;
 static uint8_t was_on;			/* the session ran at the last tick (its end is told once) */
@@ -105,7 +112,7 @@ static bool checks(void)
 		why = XB_R_MODE;	/* no NXDN receiver in this build */
 #endif
 	for (uint8_t k = 0; why == XB_R_OK && k < 2; k++)
-		why = hz_why(r->hz[k]);	/* the repeater list's (the band plan's passed in xband_check) */
+		why = hz_why(r->hz[k], xband_segs_free());	/* the repeater list's (the band plan's passed in xband_check) */
 	if (why == XB_R_OK && ui_view()->dmr.own_id == 0)
 		why = XB_R_ID;
 	const char *t = why_text(why);
@@ -139,39 +146,104 @@ static void go(void)
 
 /* --- The form --- */
 
-static void row_text(uint8_t r, bool f, sbuf_t *b, const char **label)
+static void form_rows(void)
 {
-	static const char *const labels[R_ROWS] = { "A", TRN("A mode"), "B", TRN("B mode"), TRN("Color code"), TRN("Slot"),
-						    TRN("Power"), TRN("Start") };
-	static const char *const modes[XB_MODES] = { "DMR", "FM", "P25", "NXDN" };
 	const xband_req_t *q = xband_req();
-	*label = FREQ_ROW(r) ? labels[r] : tr(labels[r]);
-	switch (r) {
-	case R_A:
-	case R_B:
-		if (f && ndigits != 0)
-			sb_str(b, digits);
-		else if (q->hz[SIDE(r)] != 0)
-			sb_freq(b, q->hz[SIDE(r)]);
-		else
-			sb_str(b, "---");
-		break;
-	case R_AM:
-	case R_BM: sb_str(b, modes[q->mode[SIDE(r)] < XB_MODES ? q->mode[SIDE(r)] : 0]); break;
-	case R_CC: sb_u32(b, q->cc, 1); break;
-	case R_TS: sb_u32(b, q->ts, 1); break;
-	case R_POWER: sb_str(b, q->power <= 1u ? TR("Low") : q->power == 2u ? TR("Mid") : TR("High")); break;
-	default: break;
+	static const uint8_t dmr[] = { K_RXCC, K_RXTS, K_RXTG, K_TXCC, K_TXTS, K_TXTG }, p25[] = { K_RXNAC, K_TXNAC, K_TXTG };
+	nrows = 0;
+	for (uint8_t k = 0; k < 4; k++)
+		rows[nrows++] = ROW(k >> 1, k & 1u);	/* A, A mode, B, B mode */
+	for (uint8_t sd = 0; sd < 2; sd++) {
+		bool d = q->mode[sd] == XB_MODE_DMR, p = q->mode[sd] == XB_MODE_P25;
+		uint8_t n = d ? sizeof dmr : p ? sizeof p25 : 0;
+		for (uint8_t i = 0; i < n; i++)
+			rows[nrows++] = ROW(sd, d ? dmr[i] : p25[i]);
 	}
+	rows[nrows++] = K_POWER;
+	rows[nrows++] = K_GO;
+	if (focus >= nrows)
+		focus = (uint8_t)(nrows - 1u);
+}
+
+static uint32_t tg_max(uint8_t sd)
+{
+	return xband_req()->mode[sd] == XB_MODE_P25 ? XB_P25_TG_MAX : XB_TG_MAX;
+}
+
+static void sb_hex3(sbuf_t *b, uint16_t v)
+{
+	for (int sh = 8; sh >= 0; sh -= 4)
+		sb_chr(b, "0123456789ABCDEF"[v >> sh & 15u]);
 }
 
 static void form_item(uint16_t i, ui_item_t *it)
 {
-	const char *label;
+	static const char *const kinds[] = { [K_RXCC] = "RX CC", [K_RXTS] = "RX TS", [K_RXTG] = "RX TG", [K_TXCC] = "TX CC",
+					     [K_TXTS] = "TX TS", [K_TXTG] = "TX TG", [K_RXNAC] = "RX NAC", [K_TXNAC] = "TX NAC" };
+	static const char *const modes[XB_MODES] = { "DMR", "FM", "P25", "NXDN" };
+	const xband_req_t *q = xband_req();
+	uint8_t r = rows[i], k = KIND(r), sd = (uint8_t)SIDE(r);
+	const xband_side_t *x = &q->side[sd];
+	const char *any = TR("Any");
 	sbuf_t b;
+	sb_init(&b, it->label, sizeof it->label);
+	if (k == K_POWER || k == K_GO) {
+		sb_str(&b, k == K_POWER ? TR("Power") : TR("Start"));
+	} else if (k == K_MODE) {
+		sb_str(&b, sd ? TR("B mode") : TR("A mode"));
+	} else {
+		sb_chr(&b, (char)('A' + sd));
+		if (k != K_FREQ) {
+			sb_chr(&b, ' ');
+			sb_str(&b, kinds[k]);
+		}
+	}
 	sb_init(&b, it->value, sizeof it->value);
-	row_text((uint8_t)i, i == focus, &b, &label);
-	str_copy(it->label, sizeof it->label, label);
+	if (i == focus && ndigits != 0) {
+		sb_str(&b, digits);
+		return;
+	}
+	switch (k) {
+	case K_FREQ:
+		if (q->hz[sd] != 0)
+			sb_freq(&b, q->hz[sd]);
+		else
+			sb_str(&b, "---");
+		break;
+	case K_MODE: sb_str(&b, modes[q->mode[sd] < XB_MODES ? q->mode[sd] : 0]); break;
+	case K_RXCC:
+	case K_TXCC:
+		if (k == K_RXCC && x->rx_cc >= XB_CC_ANY)
+			sb_str(&b, any);
+		else
+			sb_u32(&b, k == K_RXCC ? x->rx_cc : x->tx_cc, 1);
+		break;
+	case K_RXTS:
+	case K_TXTS:
+		if (k == K_RXTS && x->rx_ts >= XB_TS_ANY)
+			sb_str(&b, any);
+		else
+			sb_u32(&b, k == K_RXTS ? x->rx_ts : x->tx_ts, 1);
+		break;
+	case K_RXTG:
+	case K_TXTG: {
+		uint32_t v = k == K_RXTG ? x->rx_tg : x->tx_tg;
+		if (v == 0)
+			sb_str(&b, k == K_RXTG ? any : TR("As heard"));
+		else
+			sb_u32(&b, v, 1);
+		break;
+	}
+	case K_RXNAC:
+		if (x->rx_nac >= XB_NAC_ANY) {
+			sb_str(&b, any);
+			break;
+		}
+		/* fall through */
+	case K_TXNAC: sb_hex3(&b, k == K_RXNAC ? x->rx_nac : x->tx_nac); break;
+	case K_POWER: sb_str(&b, q->power <= 1u ? TR("Low") : q->power == 2u ? TR("Mid") : TR("High")); break;
+	default: break;
+	}
 }
 
 static void xband_draw(void)
@@ -179,32 +251,71 @@ static void xband_draw(void)
 	ui_list_t l;
 	memset(&l, 0, sizeof l);
 	l.prefix = TR("Cross-band");
+	if (xband_segs_free())
+		l.header = TR("Segments free");	/* the band plan's segment refusals are lifted (#) */
 	if (page == 1) {
 		l.body = TR("Attended only: stay at the radio while it relays. Start?");
 		l.hint = TR("OK yes  Back no");
 	} else {
-		l.count = R_ROWS;
+		form_rows();
+		l.count = nrows;
 		l.focus = focus;
 		l.top = &form_top;
 		l.item = form_item;
-		l.hint = TR("OK pick  <> change");
+		/* the # group last; the shortest form fits 24 characters (9 px each, 220 px): it is never dropped */
+		l.hint = xband_segs_free() ? TR(TEXT_ALT_OPEN "OK pick  <> change  # segs: on" TEXT_ALT_NEXT
+						"OK pick  <>  # segs: on" TEXT_ALT_NEXT
+						"OK  <>  # segs: on" TEXT_ALT_CLOSE) :
+					     TR(TEXT_ALT_OPEN "OK pick  <> change  # segs: off" TEXT_ALT_NEXT
+						"OK pick  <>  # segs: off" TEXT_ALT_NEXT
+						"OK  <>  # segs: off" TEXT_ALT_CLOSE);
 	}
 	ui_draw_list(ui_view(), &ui_st, &l);
+}
+
+/* (v + dir) round n values from 0 */
+static uint32_t wrap(uint32_t v, int dir, uint32_t n)
+{
+	return (v + n + (uint32_t)dir) % n;
 }
 
 static void step(uint8_t r, int dir)
 {
 	xband_req_t *q = xband_req();
-	switch (r) {
-	case R_A:
-	case R_B: q->hz[SIDE(r)] = (uint32_t)((int32_t)q->hz[SIDE(r)] + dir * 12500); break;
-	case R_AM:
-	case R_BM: q->mode[SIDE(r)] = (uint8_t)((q->mode[SIDE(r)] + XB_MODES + (unsigned)dir) % XB_MODES); break;
-	case R_CC: q->cc = (uint8_t)((q->cc + 16 + dir) % 16); break;
-	case R_TS: q->ts = (uint8_t)(3 - q->ts); break;
-	case R_POWER: q->power = (uint8_t)((q->power + 2u + (unsigned)dir) % 3u + 1u); break;
+	uint8_t sd = (uint8_t)SIDE(r);
+	xband_side_t *x = &q->side[sd];
+	switch (KIND(r)) {
+	case K_FREQ: q->hz[sd] = (uint32_t)((int32_t)q->hz[sd] + dir * 12500); break;
+	case K_MODE:
+		q->mode[sd] = (uint8_t)wrap(q->mode[sd], dir, XB_MODES);
+		if (x->tx_tg > tg_max(sd))
+			x->tx_tg = 0;	/* a DMR talkgroup P25 can't send to: as heard */
+		break;
+	case K_RXCC: x->rx_cc = (uint8_t)wrap(x->rx_cc, dir, XB_CC_ANY + 1u); break;	/* 0-15, Any */
+	case K_TXCC: x->tx_cc = (uint8_t)wrap(x->tx_cc, dir, 16); break;
+	case K_RXTS: x->rx_ts = (uint8_t)(wrap(x->rx_ts - 1u, dir, 3) + 1u); break;	/* 1, 2, Any */
+	case K_TXTS: x->tx_ts = (uint8_t)(3u - x->tx_ts); break;
+	case K_RXTG:
+	case K_TXTG: {
+		uint32_t *v = KIND(r) == K_RXTG ? &x->rx_tg : &x->tx_tg;
+		if ((dir > 0 && *v < tg_max(sd)) || (dir < 0 && *v > 0))
+			*v = (uint32_t)((int32_t)*v + dir);	/* 0: Any / as heard */
+		break;
+	}
+	case K_RXNAC: x->rx_nac = (uint16_t)wrap(x->rx_nac, dir, XB_NAC_ANY + 1u); break;	/* 000-F7D, Any */
+	case K_TXNAC: x->tx_nac = (uint16_t)wrap(x->tx_nac, dir, XB_NAC_ANY); break;
+	case K_POWER: q->power = (uint8_t)(wrap(q->power - 1u, dir, 3) + 1u); break;
 	default: break;
 	}
+}
+
+/* The digits a row takes (0: none): a frequency 7, a talkgroup 8, a NAC 3 (hex: 0-9 typed, Left / Right the rest), a
+ * colour code 2 */
+static uint8_t digits_max(uint8_t r)
+{
+	static const uint8_t n[] = { [K_FREQ] = 7, [K_RXTG] = 8, [K_TXTG] = 8, [K_RXNAC] = 3, [K_TXNAC] = 3,
+				     [K_RXCC] = 2, [K_TXCC] = 2, [K_GO] = 0 };
+	return n[KIND(r)];
 }
 
 /* A typed frequency in MHz, its first three digits the MHz (every band the relay may use has three): 433 is 433.000,
@@ -213,15 +324,30 @@ static void step(uint8_t r, int dir)
  * an older frequency, maybe one refused, while the user believed the typed one was set) */
 static void typed(uint8_t r)
 {
+	uint8_t k = KIND(r), sd = (uint8_t)SIDE(r);
+	bool hex = k == K_RXNAC || k == K_TXNAC;
+	xband_side_t *x = &xband_req()->side[sd];
 	uint32_t n = 0;
 	for (uint8_t i = 0; i < ndigits; i++)
-		n = n * 10u + (uint32_t)(digits[i] - '0');
-	if (FREQ_ROW(r) && ndigits >= 3u) {
+		n = n * (hex ? 16u : 10u) + (uint32_t)(digits[i] - '0');
+	if (ndigits == 0) {
+		/* nothing typed */
+	} else if (k == K_FREQ && ndigits >= 3u) {
 		for (uint8_t i = ndigits; i < 9u; i++)
 			n *= 10u;	/* (7 digits at most: below 10^9) */
-		xband_req()->hz[SIDE(r)] = n;
-	} else if (FREQ_ROW(r) && ndigits != 0) {
+		xband_req()->hz[sd] = n;
+	} else if (k == K_FREQ) {
 		ui_toast(TR("Type the MHz: 433500"));
+	} else if ((k == K_RXTG || k == K_TXTG) && n <= tg_max(sd)) {
+		*(k == K_RXTG ? &x->rx_tg : &x->tx_tg) = n;	/* 0: Any / as heard */
+	} else if (k == K_RXNAC && n <= XB_NAC_ANY) {
+		x->rx_nac = (uint16_t)n;
+	} else if (k == K_TXNAC && n < XB_NAC_ANY) {
+		x->tx_nac = (uint16_t)n;
+	} else if ((k == K_RXCC || k == K_TXCC) && n <= 15u) {
+		*(k == K_RXCC ? &x->rx_cc : &x->tx_cc) = (uint8_t)n;
+	} else {
+		ui_toast(TR("Out of range"));	/* the value stays */
 	}
 	ndigits = 0;
 }
@@ -240,21 +366,28 @@ static bool xband_key(const input_event_t *ev)
 		ui_dirty();
 		return true;
 	}
+	form_rows();
+	uint8_t r = rows[focus];
 	if (press && (act == ACT_NAV_UP || act == ACT_NAV_DOWN)) {
 		if (ndigits)
-			typed(focus);
+			typed(r);
 		if (act == ACT_NAV_UP && focus > 0)
 			focus--;
-		else if (act == ACT_NAV_DOWN && focus + 1u < R_ROWS)
+		else if (act == ACT_NAV_DOWN && focus + 1u < nrows)
 			focus++;
 	} else if ((press && (act == ACT_NAV_LEFT || act == ACT_NAV_RIGHT)) || (act == ACT_ENC_STEP && ev->value != 0)) {
-		step(focus, act == ACT_ENC_STEP ? (ev->value > 0 ? 1 : -1) : act == ACT_NAV_RIGHT ? 1 : -1);
-	} else if (ev->gesture == GESTURE_PRESS && act >= ACT_DIGIT_0 && act <= ACT_DIGIT_9 && FREQ_ROW(focus)) {
-		if (ndigits < 7u)
+		ndigits = 0;
+		step(r, act == ACT_ENC_STEP ? (ev->value > 0 ? 1 : -1) : act == ACT_NAV_RIGHT ? 1 : -1);
+	} else if (ev->gesture == GESTURE_PRESS && act >= ACT_DIGIT_0 && act <= ACT_DIGIT_9 && digits_max(r) != 0) {
+		if (ndigits < digits_max(r))
 			digits[ndigits++] = (char)('0' + act - ACT_DIGIT_0);
 		digits[ndigits] = '\0';
 	} else if (ev->gesture != GESTURE_PRESS) {
 		return false;
+	} else if (act == ACT_CONTEXT) {
+		/* # : the segments free or not (owner, 2026-11-25); never while a session runs */
+		if (!xband_set_segs_free(!xband_segs_free()))
+			ui_toast(TR("Cross-band on: stop it first"));
 	} else if (act == ACT_BACK) {
 		if (!ndigits)
 			return false;	/* leaves */
@@ -262,14 +395,14 @@ static bool xband_key(const input_event_t *ev)
 	} else if (act != ACT_SELECT) {
 		return false;
 	} else if (ndigits) {
-		typed(focus);
-	} else if (FREQ_ROW(focus)) {
-		ui_push(SCR_XBAND_PICK, SIDE(focus));
-	} else if (focus == R_GO) {
+		typed(r);
+	} else if (KIND(r) == K_FREQ) {
+		ui_push(SCR_XBAND_PICK, SIDE(r));
+	} else if (KIND(r) == K_GO) {
 		if (checks())
 			page = 1;	/* the question */
 	} else {
-		step(focus, 1);
+		step(r, 1);
 	}
 	ui_dirty();
 	return true;
@@ -343,11 +476,21 @@ static void pick_select(uint16_t i, bool hold)
 		return;
 	}
 	xband_req_t *q = xband_req();
+	xband_side_t *x = &q->side[side];
 	q->hz[side] = ch->rx_hz;
 	q->mode[side] = mode;
-	if (ch->mode == RADIO_MODE_DMR) {
-		q->cc = (uint8_t)(ch->color_code & 15u);	/* a DMR channel brings its colour code and slot */
-		q->ts = ch->timeslot == 2 ? 2 : 1;
+	x->tx_tg = 0;
+	if (mode == XB_MODE_DMR) {
+		/* a DMR channel brings its colour code, slot and group contact as the side's TX values (heard: as set) */
+		contact_t c;
+		x->tx_cc = (uint8_t)(ch->color_code & 15u);
+		x->tx_ts = ch->timeslot == 2 ? 2 : 1;
+		if (codeplug_contact(codeplug_channel_talk_contact(ch), &c) && c.type == CONTACT_GROUP && c.id <= XB_TG_MAX)
+			x->tx_tg = c.id;
+	} else if (mode == XB_MODE_P25) {
+		uint16_t nac = codeplug_p25_tx_nac(ch);	/* a P25 channel its TX NAC (0x293 for one that hears any) */
+		if (nac < XB_NAC_ANY)
+			x->tx_nac = nac;
 	}
 	ui_pop();
 	ui_dirty();

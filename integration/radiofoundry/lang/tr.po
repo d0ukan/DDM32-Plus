@@ -6342,6 +6342,28 @@ msgstr "Çapraz bant kapalı: bellek yok"
 msgid "Cross-band off: refused"
 msgstr "Çapraz bant kapalı: reddedildi"
 
+# DDM32 Plus: Tools > Cross-band, # lifts the band plan's segment refusals (owner, 2026-11-25)
+#: core/ui/ui_xband.c
+msgid "Segments free"
+msgstr "Bölümler serbest"
+
+# DDM32 Plus: Tools > Cross-band, a side's TX talkgroup left to the over heard; a number typed too large
+#: core/ui/ui_xband.c
+msgid "As heard"
+msgstr "Duyulan"
+
+#: core/ui/ui_xband.c
+msgid "Out of range"
+msgstr "Aralık dışı"
+
+#: core/ui/ui_xband.c
+msgid "{OK pick  <> change  # segs: on|OK pick  <>  # segs: on|OK  <>  # segs: on}"
+msgstr "{OK seç  <> değiştir  # bölüm: açık|OK seç  <>  # bölüm: açık|OK  <>  # bölüm: açık}"
+
+#: core/ui/ui_xband.c
+msgid "{OK pick  <> change  # segs: off|OK pick  <>  # segs: off|OK  <>  # segs: off}"
+msgstr "{OK seç  <> değiştir  # bölüm: kapalı|OK seç  <>  # bölüm: kapalı|OK  <>  # bölüm: kapalı}"
+
 # DDM32 Plus beta.8: Tools > Repeaters, * adds the repeater as a channel (ui_rpt.c)
 #: core/ui/ui_rpt.c
 msgid "OK tune  * add  ^v next"

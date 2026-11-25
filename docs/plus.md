@@ -3828,6 +3828,76 @@ the FM channel and the memory, a refused transmission, a P25 worker that keeps i
 (10 flows, English and Turkish: the form, every refusal, the picker, the question, Home while it relays, the lock, the
 stop, an end by itself; the layout). Radio rows: `docs/plus-radio-test.md` "Round 14 xband", XB-*.
 
+### Segments free: the # key (2026-11-25, branch `xbfree`)
+
+Owner decision (2026-11-25, in chat): on the Tools > Cross-band form **#** switches "segments free" on and off. While
+it is on, the band plan's **segment** refusals are lifted: the satellite segments (145.800-146.000, 435-438 MHz), the
+repeater input / output segments, the repeater list's frequencies, APRS 144.800. **Always kept**: outside 144-146 /
+430-440 MHz, PMR446, A = B, a repeater channel (RX and TX differ) from the picker, the callsign, the DMR ID, a pair of
+modes not built, a band the radio cannot transmit on, a DOTA session, the attended-only question, the lock, CROSS, the
+CW ID and every TX time-out.
+
+- **RAM only, off at every power-on**, never written to the settings (`segs_free` in `xband.c`); it stays as set while
+  the radio runs (leaving and opening the screen again keeps it).
+- **Shown**: the hint names the key and its state, "# segs: off" / "# segs: on" (Turkish "# bölüm: kapalı" /
+  "# bölüm: açık"), as text alternates whose shortest form ("OK  <>  # bölüm: kapalı", 23 characters) fits 220 px
+  even with the 9 px large-text font, so the # group is never dropped; while on, the line "Segments free" ("Bölümler
+  serbest") stands under the title, on the question page too.
+- **Not during a session**: `xband_set_segs_free` refuses while `xband_on()` (from the start request until the end);
+  the lock catches # on Home anyway ("Cross-band on: Back stops"), and # on the form during a session would toast
+  "Cross-band on: stop it first". So every check of a session (the start's `xband_check`, `xband_begin`'s check again)
+  reads the value it started with; nothing caches a result.
+- **DOTA is not affected**: `xband_check_hz` (DOTA's band plan, `radio_dota.inc`, `ui_dota.c`) and `ui_xband_refusal`
+  always check with the segments; only `xband_check` and the form's repeater-list check read the flag
+  (`xband_check_hz_free`).
+- Host tests: `tests/plus/test_xband.c` `test_segs_free` (off at power-on; 10 segment frequencies refused off and
+  accepted on, the band plan unchanged for both; PMR446, 150.000, 440.500, 143.990, 162.550, A = B, the callsign and a
+  mode pair refused either way; a 435.500 session starts only while on; the setter refused between the start and the
+  radio core's take and while it runs), `tests/plus/test_ui_xband.c` `segs_free` (EN + TR: the hint and the marker,
+  the layout; 435.500, 436.275-like satellite, 145.800, 144.800, 145.600, 439.000, the list's 432.000 / 430.400 reach
+  the question while DOTA's refusal still refuses them; 446.100, 150.000, 440.500, A = B, no callsign, the picker's
+  repeater channel still refused; # again: refused again; # during a session changes nothing). Radio row XB-14.
+- Cost: FLASH 894,664 B (about +500 B; 6,456 B left of 901,120).
+
+### A side's filters and TX values (2026-11-25, branch `xbfree`)
+
+Owner request (2026-11-25, through the coordinator): per side, what is recorded there and what is sent there. Each side
+of the request (`xband_side_t`, `xband_req()->side[0/1]`) has RX filters and TX values; RAM only like the rest of the
+request (frequencies and modes are not saved either). The old single colour code / slot pair (`cc`, `ts`, used for
+both sides and both directions) is gone.
+
+| Side mode | Rows (under B mode, A's first, then B's) | Default | Where it acts |
+|---|---|---|---|
+| DMR | RX CC: 0-15 or Any | Any | the session channel's colour code (`CODEPLUG_CC_ANY`: the call stack hears every colour code, `CONFIG_DMR_ANY`) |
+| | RX TS: 1, 2 or Any | Any | the channel's slot (`CODEPLUG_TS_ANY`: either, the first heard holds the call) |
+| | RX TG: a number or Any (0) | Any | the engine: `xband_rx_begin` records an over only to that talkgroup (or unit) |
+| | TX CC 0-15, TX TS 1-2 | 1, 1 | `xb_key_dmr` sets them on the channel before `ptt_down` (so `radio_sm_tx_check` never sees Any) |
+| | TX TG: a number or As heard (0) | As heard | the engine passes it to `io->key` as a group call; As heard: the talkgroup (or unit) heard, group or private as heard |
+| P25 | RX NAC: 000-F7D or Any (F7E) | Any | the channel's NAC for the native receiver, and the radio core drops ring frames of another NAC (`xband_nac_ok`) |
+| | TX NAC 000-F7D | 293 | `xb_key_p25`: the over goes out with it (before: the NAC heard) |
+| | TX TG 1-65535 or As heard | As heard | the engine, as for DMR |
+
+FM and NXDN sides have no rows (FM is sent only, NXDN heard only and its RAN is any). Editing: Left / Right (and the
+knob) step and wrap (Any after 15 / 2 / F7D); digits type a number (talkgroup 8 digits, colour code 2, NAC 3 digits
+read as hex: 0-9 typed, A-F reached with Left / Right); a value out of range is refused with "Out of range" ("Aralık
+dışı") and the old one stays. A mode change that leaves a P25 side with a DMR-sized TX TG puts it back to As heard. A
+channel picked from a zone brings its TX values: DMR its colour code, slot and its group talk contact
+(`codeplug_channel_talk_contact`); P25 its TX NAC (`codeplug_p25_tx_nac`); the RX filters stay as they are.
+Labels are the usual abbreviations ("A RX CC", "B TX NAC"), values "Any" / "As heard" ("Tümü" / "Duyulan").
+Every TX guard stays: the band plan, the question, the lock, the CW ID, `ptt_down` / the native PTT path (TX inhibit,
+battery, band, time-out), `xb_key_p25`'s NAC and talkgroup range checks.
+
+Host tests: `tests/plus/test_xband.c` `test_sides` (the defaults; RX TG 2862: an over to 91 not recorded, one to 2862
+recorded and sent; TX TG 101: a private call heard goes out to TG 101 as a group call; RX NAC 659 passes 659 only, Any
+passes all; a P25 side ignores an RX TG field), `tests/plus/test_xband_radio.inc` `test_xband_sides` (the real radio
+core and call stack: A on CC 2, the modem's colour code 2; a call on CC 1 not recorded; one on CC 2 sent on B on CC 3,
+slot 2, the header to TG 101 from our ID; B heard on its RX colour code after) and `test_xband_p25_sides` (the real
+native receiver: A's channel NAC 659, 90 frames of NAC 293 taken and dropped, 90 of NAC 659 recorded and sent with B's
+TX NAC to TG 101), `test_xband_p25` now sends with B's TX NAC 1C8, `tests/plus/test_ui_xband.c` (the rows for DMR, P25,
+NXDN sides, Left / Right and typed values, out of range refused, EN + TR, the layout). Radio row XB-15.
+Cost: FLASH 895,924 B (+1,260 over the # step; **5,196 B left** of 901,120), static RAM 205,072 B (+48); zero warnings,
+forced rebuild identical. **Host-tested only; nothing of it has been on the air.**
+
 ## DMR receive audio diagnostics (`CONFIG_DMR_AUDIO_DIAG`, ours; branch `fix-dmr-audio`)
 
 Owner's report on v1.0.0-beta.3 (public build): received DMR audio sounds crackly / scratchy and artificial; our

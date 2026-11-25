@@ -74,10 +74,28 @@ enum { XB_E_NONE, XB_E_STOPPED, XB_E_BATTERY, XB_E_MEMORY, XB_E_REFUSED };
 /* Sounds the engine asks for (xband_io_t.beep) */
 enum { XB_BEEP_CUT, XB_BEEP_ERROR };
 
+#define XB_CC_ANY	16u		/* rx_cc: every colour code (CODEPLUG_CC_ANY) */
+#define XB_TS_ANY	3u		/* rx_ts: either slot (CODEPLUG_TS_ANY) */
+#define XB_NAC_ANY	0xF7Eu		/* rx_nac: every NAC (P25's "receive any") */
+#define XB_NAC_DEFAULT	0x293u		/* tx_nac before one is set (P25's default NAC) */
+#define XB_TG_MAX	16777215u	/* a DMR talkgroup (24 bits) */
+#define XB_P25_TG_MAX	65535u
+
+/* A side's filters (what is recorded there) and what is sent there (owner, 2026-11-25). RAM only, as the rest of the
+ * request */
+typedef struct {
+	uint32_t rx_tg;			/* DMR: only overs to this talkgroup (or unit) are recorded; 0 any */
+	uint32_t tx_tg;			/* DMR / P25: overs sent there go to this talkgroup; 0 the one heard */
+	uint16_t rx_nac;		/* P25: only this NAC is recorded; XB_NAC_ANY any */
+	uint16_t tx_nac;		/* P25: sent with this NAC (0-0xF7D) */
+	uint8_t rx_cc, rx_ts;		/* DMR: heard on 0-15 / XB_CC_ANY, slot 1, 2 / XB_TS_ANY */
+	uint8_t tx_cc, tx_ts;		/* DMR: sent on 0-15, slot 1, 2 */
+} xband_side_t;
+
 typedef struct {
 	uint32_t hz[2];			/* A, B */
 	uint8_t mode[2];		/* XB_MODE_* of A, B */
-	uint8_t cc, ts;			/* DMR colour code 0-15, slot 1-2 (the DMR sides) */
+	xband_side_t side[2];
 	uint8_t power;			/* 1 low, 2 mid, 3 high (a power class) */
 	char call[XB_CALL_MAX + 1];	/* the CW ID's callsign (radio_cwid_callsign of the radio name) */
 } xband_req_t;
@@ -94,19 +112,29 @@ typedef struct {
 } xband_view_t;
 
 /* --- The rules (any task) --- */
+/* The band plan (DOTA's too): the amateur bands, PMR446, the repeater, satellite and APRS segments */
 uint8_t xband_check_hz(uint32_t hz);
+/* free: the segment refusals lifted (XB_R_REPEATER, XB_R_SATELLITE, XB_R_APRS); outside the bands and PMR446 stay */
+uint8_t xband_check_hz_free(uint32_t hz, bool free);
+/* "Segments free" (Tools > Cross-band's # key, owner 2026-11-25): xband_check lifts the band plan's segment refusals
+ * while it is set. RAM only: off at power-on, never saved. The setter refuses (false) while a session runs */
+bool xband_segs_free(void);
+bool xband_set_segs_free(bool on);
 /* An over heard in mode from can be sent in mode to (the pairs built) */
 bool xband_pair_ok(uint8_t from, uint8_t to);
 /* The sides an over is heard on: bit 0 A (relayed to B), bit 1 B (relayed to A); 0: the pair is refused */
 uint8_t xband_listens(const xband_req_t *r);
 /* The bytes a frame of r's session takes: XB_P25_FRAME_BYTES for P25, else XB_FRAME_BYTES */
 uint8_t xband_frame_bytes(const xband_req_t *r);
-/* Both frequencies, the pair, the modes, the callsign */
+/* Both frequencies (the segments as xband_segs_free says), the pair, the modes, the callsign */
 uint8_t xband_check(const xband_req_t *r);
 /* A power class (1 low, 2 mid, 3 high) as the board's level */
 uint8_t xband_power_level(uint8_t cls, uint8_t power_count);
 /* The frames that n bytes hold (of the session's size, XB_FRAME_BYTES before the first) */
 uint16_t xband_frames_for(size_t bytes);
+
+/* The listening side's NAC filter passes nac (P25 frames heard; the radio core drops the others) */
+bool xband_nac_ok(uint16_t nac);
 
 /* --- The UI (any task) --- */
 bool xband_on(void);

@@ -22,6 +22,7 @@
 #include "ui/i18n.h"
 #include "ui/rpt.h"
 #include "radio/xband.h"
+#include "ui/ui_xband.h"
 #include "codeplug/codeplug.h"
 
 /* Tools > Repeaters' table: one repeater outside the band plan's segments (430.400, input 432.000) */
@@ -176,7 +177,11 @@ static void start(const char *n)
 	expect("screen=xband");
 }
 
-/* A valid pair on the form; then Start (the 8th row) */
+/* The form's first row (A) and its last (Start): the rows below B mode follow the modes (at most 18) */
+#define TOP	"up up up up up up up up up up up up up up up up up up up up "
+#define BOTTOM	"down down down down down down down down down down down down down down down down down down down down "
+
+/* A valid pair on the form; then Start (the last row) */
 static void pair(uint32_t a, uint32_t b)
 {
 	xband_req_t *r = xband_req();
@@ -186,7 +191,7 @@ static void pair(uint32_t a, uint32_t b)
 }
 static void press_start(void)
 {
-	ok_run("up up up up up up up up down down down down down down down ok wait:100");
+	ok_run(BOTTOM "ok wait:100");
 }
 
 /* --- The cases --- */
@@ -197,28 +202,55 @@ static void form(void)
 	expect("shows=A shows=B shows=DMR");
 	expect_tr("shows", "A mode");
 	expect_tr("shows", "B mode");
-	expect_tr("shows", "Color code");
+	expect("shows=A_RX_CC shows=A_RX_TS");
+	expect_tr("shows", "Any");
+	layout();
+	ok_run("shot:xband-form");
+	ok_run(BOTTOM "wait:100");
+	expect("shows=B_TX_TG");
+	expect_tr("shows", "As heard");
 	expect_tr("shows", "Start");
 	expect_tr("shows", "Low");
 	layout();
-	ok_run("shot:xband-form");
+	ok_run(TOP "wait:100");
 	/* A typed (kHz), B typed with its 100 Hz digit */
 	ok_run("1 4 5 5 0 0 down down 4 3 3 5 1 2 5 down");
 	expect("shows=145.500 shows=433.5125");
 	check(xband_req()->hz[0] == 145500000 && xband_req()->hz[1] == 433512500, "typed");
-	/* the steps: B's mode, colour code, slot, power */
+	/* B's mode a step; then A's rows: RX CC Any -> 0 -> 2, RX TS Any -> 1 -> 2, RX TG typed 91, TX CC 1 -> 3, TX TS
+	 * 1 -> 2, TX TG typed 2862; B's six rows; Power Mid */
 	ok_run("right");
 	expect("shows=FM");
-	ok_run("left down right right down right down right");
-	check(xband_req()->mode[1] == XB_MODE_DMR && xband_req()->cc == 3 && xband_req()->ts == 2 &&
-	      xband_req()->power == 2, "B DMR, CC 3, TS 2, Mid");
+	ok_run("left down right right right down right right down 9 1 down right right down right down 2 8 6 2 down");
+	const xband_side_t *a = &xband_req()->side[0];
+	check(xband_req()->mode[1] == XB_MODE_DMR && a->rx_cc == 2 && a->rx_ts == 2 && a->rx_tg == 91 && a->tx_cc == 3 &&
+	      a->tx_ts == 2 && a->tx_tg == 2862, "A: RX CC 2 TS 2 TG 91, TX CC 3 TS 2 TG 2862");
+	expect("shows=91 shows=2862");
+	layout();
+	ok_run("shot:xband-dmr-sides");
+	/* B's RX CC typed 16: out of range, Any kept; a colour code typed 7 is taken */
+	ok_run("1 6 down wait:100");
+	expect_tr("toast", "Out of range");
+	check(xband_req()->side[1].rx_cc == XB_CC_ANY, "B RX CC: Any kept");
+	ok_run("wait:3000 up 7 down");
+	check(xband_req()->side[1].rx_cc == 7, "B RX CC 7");
+	ok_run("down down down down down right");
+	check(xband_req()->power == 2, "Mid");
 	expect_tr("shows", "Mid");
-	/* A's mode: back one from DMR is NXDN; B's on to P25 */
-	ok_run("up up up up up left");
-	expect("shows=NXDN");
+	/* A's mode: back one from DMR is NXDN (no rows of its own); B's on to P25: RX NAC, TX NAC, TX TG */
+	ok_run(TOP "down left");
+	expect("shows=NXDN hides=A_RX_CC");
 	ok_run("down down right right");
-	expect("shows=P25");
+	expect("shows=P25 shows=B_RX_NAC shows=B_TX_NAC shows=293");
 	check(xband_req()->mode[0] == XB_MODE_NXDN && xband_req()->mode[1] == XB_MODE_P25, "A NXDN, B P25");
+	/* B's NAC typed 659 (hex), TX NAC a step down 292, TX TG 70000 out of range for P25, then 101 */
+	ok_run("down 6 5 9 down left down 7 0 0 0 0 down wait:100");
+	expect_tr("toast", "Out of range");
+	const xband_side_t *b = &xband_req()->side[1];
+	check(b->rx_nac == 0x659 && b->tx_nac == 0x292 && b->tx_tg == 0, "B RX NAC 659, TX NAC 292, TX TG as heard");
+	ok_run("wait:3000 up 1 0 1 down");
+	check(b->tx_tg == 101, "B TX TG 101");
+	expect("shows=659 shows=292 shows=101");
 	layout();
 	ok_run("shot:xband-modes");
 }
@@ -297,7 +329,9 @@ static void picker(void)
 	expect("shows=HS_433.5");
 	ok_run("down ok wait:200");
 	expect("screen=xband shows=433.500");
-	check(xband_req()->hz[0] == 433500000 && xband_req()->cc == 1 && xband_req()->ts == 1, "A from the channel");
+	check(xband_req()->hz[0] == 433500000 && xband_req()->side[0].tx_cc == 1 && xband_req()->side[0].tx_ts == 1 &&
+	      xband_req()->side[0].rx_cc == XB_CC_ANY, "A from the channel: its CC and slot to send on, any heard");
+	printf("  (picked HS 433.5: TX TG %u)\n", (unsigned)xband_req()->side[0].tx_tg);
 	ok_run("down down ok wait:200");	/* B's row: a 2 m DMR channel of the same zone */
 	ok_run("right right down down down down down down down ok wait:200");	/* 36 DMR SPX 5 */
 	check(xband_req()->hz[1] == 145510000, "B from the channel");
@@ -321,7 +355,7 @@ static void owner_pair(void)
 	/* B left on a satellite frequency from before, then typed short (433.50, 433.5): the typed one is set and Start
 	 * asks (before: any entry but 6 or 7 digits was dropped, B stayed 435.500, Start said "Satellite segment") */
 	xband_req()->hz[1] = 435500000;
-	ok_run("up up up up up up up up down down 4 3 3 5 0 down");
+	ok_run(TOP "down down 4 3 3 5 0 down");
 	expect("shows=433.500");
 	check(xband_req()->hz[1] == 433500000, "five digits: 433.50");
 	xband_req()->hz[1] = 435500000;
@@ -337,7 +371,7 @@ static void owner_pair(void)
 	press_start();
 	expect_tr("toast", "Satellite segment");	/* (a real satellite frequency is still refused) */
 	ok_run("wait:3000");
-	ok_run("up up up up up up up up down down 4 3 3 5 0 0 down");
+	ok_run(TOP "down down 4 3 3 5 0 0 down");
 	press_start();
 	expect(T("shows=Attended", "shows=Yaln"));
 	ok_run("back wait:100");
@@ -348,7 +382,7 @@ static void owner_pair(void)
 	c.mode = RADIO_MODE_DMR;
 	check(ui_svc_write_channel(35, &c), "channel 35 written");
 	xband_req()->hz[0] = xband_req()->hz[1] = 0;
-	ok_run("up up up up up up up up ok wait:200");	/* A's row */
+	ok_run(TOP "ok wait:200");	/* A's row */
 	ok_run("right right wait:100 down down down down down down ok wait:200");
 	expect("screen=xband shows=432.275");
 	ok_run("down down ok wait:200");		/* B's row */
@@ -440,11 +474,94 @@ static void ended_itself(void)
 	expect("hides=CROSS");
 }
 
+/* # on the form (owner, 2026-11-25): "Segments free" lifts the band plan's segment refusals and the repeater list's;
+ * the hint names # and its state; outside the bands, PMR446, A = B, a repeater channel stay refused; DOTA's refusal
+ * (ui_xband_refusal) never changes; # does nothing while a session runs */
+static void segs_free(void)
+{
+	start("segments free");
+	check(!xband_segs_free(), "off when the screen opens (power-on)");
+	expect(T("shows=#_segs:_off", "shows=_kapal hides=serbest"));
+	expect_tr("hides", "Segments free");
+	layout();
+	pair(145500000, 435500000);
+	press_start();
+	expect_tr("toast", "Satellite segment");
+	ok_run("wait:3000");
+	ok_run("ctx wait:100");
+	check(xband_segs_free(), "# sets it");
+	expect(T("shows=#_segs:_on", "hides=_kapal shows=serbest"));
+	expect_tr("shows", "Segments free");
+	layout();
+	ok_run("shot:xband-free");
+	static const uint32_t ok[] = { 435500000, 436275000, 145800000, 144800000, 145600000, 439000000,
+				       432000000 /* the list's repeater input */, 430400000 };
+	for (unsigned i = 0; i < sizeof ok / sizeof ok[0]; i++) {
+		pair(145500000, ok[i]);
+		press_start();
+		expect(T("shows=Attended", "shows=Yaln"));
+		expect_tr("shows", "Segments free");	/* the question says it too */
+		layout();
+		ok_run("back wait:100");
+		check(!xband_on(), "the question: Back");
+		check(ui_xband_refusal(ok[i]) != NULL, "DOTA's band plan still refuses it");
+	}
+	static const struct { uint32_t b; const char *why; } t[] = {
+		{ 446100000, "PMR446: no repeaters allowed" },
+		{ 150000000, "Not an amateur band" },
+		{ 440500000, "Not an amateur band" },
+		{ 145500000, "A and B are the same" },
+	};
+	for (unsigned i = 0; i < sizeof t / sizeof t[0]; i++) {
+		pair(145500000, t[i].b);
+		press_start();
+		expect("screen=xband");
+		expect_tr("toast", t[i].why);
+		ok_run("wait:3000");
+	}
+	pair(145500000, 433500000);
+	strcpy(radio_name, "Dogan");
+	press_start();
+	expect_tr("toast", "Set your callsign (the radio name) in qdmr.");
+	ok_run("wait:3000");
+	strcpy(radio_name, "TA2DOU");
+	/* a repeater channel from the picker: still refused */
+	ok_run(TOP "ok wait:200 ok wait:100");
+	expect("screen=xband-pick");
+	expect_tr("toast", "Repeater channel (RX and TX differ)");
+	ok_run("wait:3000 back wait:100");
+	expect("screen=xband");
+	/* # again: off, the satellite segment refused again */
+	ok_run("ctx wait:100");
+	check(!xband_segs_free(), "# clears it");
+	pair(145500000, 435500000);
+	press_start();
+	expect_tr("toast", "Satellite segment");
+	ok_run("wait:3000");
+	/* free, a satellite pair started: # refused while it runs */
+	ok_run("ctx wait:100");
+	press_start();
+	ok_run("ok wait:200");
+	expect("screen=home shows=CROSS");
+	check(xband_on(), "started on 435.500");
+	engine_take(true);	/* (its begin checks the request again, the segments free) */
+	engine_poll();
+	check(xband_owns_radio(), "the radio core took it");
+	ok_run("ctx wait:100");
+	check(xband_segs_free(), "# on Home during the session: nothing");
+	check(!xband_set_segs_free(false) && xband_segs_free(), "the setter refuses during a session");
+	/* the screen stack is gone, the session stopped: the flag is kept (RAM), never saved */
+	ok_run("back wait:100");
+	engine_poll();
+	ok_run("wait:300");
+	check(!xband_on() && xband_segs_free(), "kept while the radio runs");
+}
+
 typedef void (*case_fn)(void);
 
 int main(void)
 {
-	static const case_fn all[] = { form, refusals, picker, owner_pair, question_and_run, ended_itself };
+	static const case_fn all[] = { form, refusals, picker, owner_pair, question_and_run, ended_itself, segs_free };
 	int bad = 0, run = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		for (unsigned i = 0; i < sizeof all / sizeof all[0]; i++) {

@@ -133,10 +133,22 @@ NXDN gönderme, FM dinleme, YSF yok). Kurallar (telsiz uygular):
 - **Yalnız başındayken**: her başlatmada sorar. Çalışırken ekran kilitlidir; yalnız **Geri** durdurur. Her ekranda
   **CROSS** işareti görünür.
 - Yalnız amatör simpleks frekanslar (144-146, 430-440 MHz); röle ve uydu bölümleri, APRS 144.800, PMR446 ve röle
-  listesindeki frekanslar reddedilir. A ve B aynı renk kodu ve slotu kullanır.
+  listesindeki frekanslar reddedilir.
+- **Taraf ayarları** (B modunun altındaki satırlar, her taraf kendi modu için): DMR tarafında **RX CC / RX TS / RX TG**
+  (dinlenen renk kodu, slot, konuşma grubu; varsayılan **Tümü**: hepsi kaydedilir) ve **TX CC / TX TS / TX TG** (o
+  tarafa gönderilirken kullanılan; varsayılan CC 1, TS 1, TG **Duyulan**: duyulan konuşma grubuna gider). P25 tarafında
+  **RX NAC** (varsayılan Tümü), **TX NAC** (varsayılan 293) ve **TX TG** (varsayılan Duyulan). Sol / Sağ değiştirir,
+  rakamla yazılır (NAC onaltılık: 0-9 yazılır, A-F için Sol / Sağ); büyük değer "Aralık dışı" ile reddedilir. Bir
+  kanal seçilince onun CC, slot, konuşma grubu (DMR) ya da TX NAC'ı (P25) TX değeri olur. Uymayan konuşma kaydedilmez.
+  Bu ayarlar da kaydedilmez (telsiz kapanınca gider).
+- **# tuşu (bölümler serbest)**: Çapraz bant ekranında **#** uydu bölümleri, röle giriş / çıkış bölümleri, röle
+  listesi ve APRS 144.800 yasağını kaldırır ya da geri koyar. Açıkken başlığın altında **Bölümler serbest** yazar;
+  alt satırda "# bölüm: açık / kapalı" görünür. Amatör bant dışı, PMR446, A = B, röle kanalı, çağrı işareti ve diğer
+  kurallar her zaman geçerlidir. Ayar kaydedilmez: telsiz her açılışta kapalı başlar. Çalışırken değiştirilemez.
 - Bir konuşma en çok yaklaşık 38 saniye (FM tarafı varsa 32, P25'te 18 saniye) kaydedilir; daha uzunu kesilir. Her
   10 dakikada çağrı işaretiniz CW ile gönderilir (telsiz adı çağrı işareti olmalı).
-- P25 ilerken P25 sizin DMR ID'niz ve duyulan NAC / konuşma grubu ile gider; kaydedilirken hoparlörden duyulmaz.
+- P25 ilerken P25 sizin DMR ID'niz, tarafın TX NAC'ı ve TX TG'si (Duyulan ise duyulan konuşma grubu) ile gider;
+  kaydedilirken hoparlörden duyulmaz.
 - FM tarafına giden ses telsizin kendi AMBE kodlayıcısıyla çözülür. NXDN, FM ve P25 çiftleri telsizde henüz
   denenmedi.
 
