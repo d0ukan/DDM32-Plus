@@ -5203,7 +5203,63 @@ Host tests (`tests/plus/test_ui_sat.c`, `classic-test`): the hint in English and
 caller by id and with a long caller name (the row asserted to fit), in dual watch (and the key tracking there), the
 few-key board, the key tracking on 145.800 / 145.825, the service's word, too early and a hand track opening Tools >
 ISS, a short 4 still Find, a VFO hold still typing with no "4 ISS" in its hint. Host-tested only
-(docs/plus-radio-test.md IK-1, IK-2).
+(docs/plus-radio-test.md IK-1, IK-2). Since the v1.0.4 candidate the held digits are configurable and 4 = ISS is only
+their default: see "Hold keys: any digit, any tool" below (`home_hint` is 56 B there; the group comes from the setting).
+
+### Hold keys: any digit, any tool (branch `holdkeys`, v1.0.4 candidate)
+
+Owner request 2026-11-25: the long-press digits on Home are user-configurable. Each digit 0-9 held on Home (a channel;
+in the VFO a held digit still types it) opens a tool picked from the Tools list, or None. Default: 4 = ISS, the rest
+None, so a radio behaves as 1.0.3 until the owner sets one.
+
+**Settings > Keys, last rows "0 hold" .. "9 hold"** (Turkish "0 uzun" ..): each is a list row of None and the Tools list in
+its own order (OK or Left / Right cycles; the names are the Tools list's, `tool_names` in `ui_menus.c`, so no new
+translation). They are the last rows of Keys, so the rows above keep their places and key paths; a board without a digit's
+key (the few-key sim board) does not list that row. Find knows them ("hold digit shortcut tool"). A tool this build or
+radio does not have (Battery without a voltmeter, the SOS key entry) shows in the list but the hold then falls back to the
+old toast. Design choice: a flat list of ten rows, no sub-page (a page of its own would cost a screen definition).
+
+**Stored** in one appended field, `settings_t.hold_tool[12]` (10 bytes, 2 spare for the size to stay a multiple of 4):
+0 none, else the tool's number in Tools (its enum index + 1; Battery 41; the zone offer is not offered). The record grows
+from 392 to 404 B, page 1 only (still two pages: 168 of 236 B in page 1); no field moves. A record from before has
+no such bytes: `settings_init` starts from `settings_defaults`, so an older record, a fresh radio and a factory reset
+all read hold 4 = ISS (code 40, `SETTINGS_HOLD_ISS`) and the rest none. Firmware from before clamps the page it reads
+(it ignores the 12 bytes) and saves its 392 B page: going back to 1.0.4 then returns the defaults. UI ids
+`UI_SET_HOLD_FIRST..LAST` through `ui_svc_setting_get / _set` (a value above 255 or below 0 is refused). The codes are
+the Tools list's own numbers, which "keep their numbers"; a later new tool goes before Battery as ISS did, so a stored
+Battery code would shift (the static assert in `ui_hold.inc` keeps the ISS default honest). `SETTINGS_LAYOUT` stays 1
+(no field moves or changes meaning) and the release manifest's `settings_format` stays 1 as well: a downgrade loses only
+the hold keys (back to the defaults), which does not warrant the programmers' "settings format goes back" warning. No
+PC program parses the settings record (backups are whole flash images), so nothing there knows its size.
+
+**What a hold does** (`ui_hold_tool`, `integration/radiofoundry/sat/ui_hold.inc`, included by `ui_menus.c` after the
+Tools list; hooks in `tools/plus_satauto.py` `prepare_hold_keys`): `ui_home_key` asks it first for a held digit on a
+channel; it opens the tool through the Tools menu's own dispatch (`tool_open`, which `tools_select` calls too: nothing is
+duplicated). The ISS is the one exception: a hold set to ISS (4 by default, or any digit) does `ui_sat_home_iss` (the held
+track of a pass under way, else Tools > ISS), exactly as in 1.0.3. None, a tool this radio lacks, or a digit with no key
+keeps the old toast "Speed dial N is empty: set it in qdmr". A tool that acts at once (Scan, Air band, Auto repeater,
+Last call replay) runs from Home as from the list; most open a screen. The cache `hold_c[10]` holds what is usable; it
+is read in the key and tick paths and again right after a change in Settings, never in a draw (the settings read is a
+404 B frame, and Home's draw is the UI task's deepest path).
+
+**Hint.** The group after the keys names the first digit set: "4 ISS", "7 Satellites"; a "+" after it when more are set
+("4 ISS+"); none set: no group (as upstream). Home idle: "OK Menu  * Quick  4 ISS" (23 of 24 characters; "4 ISS+" exactly
+24). A group too wide for that row (every tool but ISS) sends "OK Menu" away too ("* Quick  7 Satellites"); with a caller
+the order is: "OK Menu" goes, the caller's name is cut with an ellipsis, and only if the keys and the group alone still
+do not fit is the group cut with an ellipsis: the keys are never cut, nor the group before the caller's name. Dual watch /
+the ring (`ui_hold_dual_hint`, used by `dual_hint` and `mw_hint`): "# options  4 ISS  Back stop" / "# more  4 ISS  Back
+stop" with the group cut to 5 characters (digit, space, three of the name: "7 Sat") because the second form is already
+24 of 24 characters; no "+" there. The template is translated whole with "%" where the group goes (`tr.po`).
+
+**Cost** (`--plus --public`): FLASH 897,336 -> 898,712 B (+1,376), static RAM 205,216 -> 205,552 B (+336: the ten
+labels 80, hint buffers 28 + 96, the cache 11, `home_hint` 40 -> 56, the settings copy). Stack: the build's stack check
+passes (deepest paths unchanged: nothing reads the settings in a draw).
+Host tests: `tests/plus/test_sat_set.c` (the codes persist over power cycles through the real store, default 4 = ISS, a
+factory reset's defaults, refused values, the satellites' bits untouched); `tests/plus/test_ui_sat.c` (a digit set to a
+tool opens it, 4 set to another tool or None, the old toast for None and for 8, the VFO still types, a short digit is
+unchanged, Settings > Keys cycles a row and a change is seen at once, the hint with none / one / several digits set, with
+and without a caller, a long caller, the widest tool name, dual watch; English and Turkish, layout check on).
+Host-tested only (docs/plus-radio-test.md IK-3 ... IK-8).
 
 ## P25 RX group list (`CONFIG_P25_RXGL`, branch `rxgl`)
 

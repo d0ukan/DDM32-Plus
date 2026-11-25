@@ -352,6 +352,19 @@ static bool turkish, large;
 
 /* One flow: a fresh fake and language, the setup, prep (between setup and script, may be NULL), the script, the
  * expectations; layout: the screen checked for clipped or overlapping text too */
+/* Hold keys (ui_hold.inc): the settings the flows change and the cache the UI keeps of them (ui_app_init forgets it) */
+void ui_hold_forget(void);
+static void hold_set(uint8_t digit, int32_t code)
+{
+	ui_svc_setting_set((uint8_t)(UI_SET_HOLD_FIRST + digit), code);
+	ui_hold_forget();
+	ui_dirty();	/* the tick reads it again and the screen is drawn again (in the radio the Settings screen does both) */
+}
+static void hold_defaults(void)
+{
+	for (uint8_t d = 0; d < 10; d++)
+		hold_set(d, d == 4 ? UI_HOLD_ISS : 0);
+}
 static sim_map_t iss_map = SIM_MAP_M;	/* the board's keys (the few-key board has no digits) */
 static int iss_flow(const char *name, const char *setup, void (*prep)(void), const char *script, const char *expect,
 		    bool layout)
@@ -359,6 +372,7 @@ static int iss_flow(const char *name, const char *setup, void (*prep)(void), con
 	char err[300], exp[400], issues[SIM_LAYOUT_MAX][160];
 	int bad = 0;
 	fake_reset(true);
+	hold_defaults();	/* every flow starts from the default hold keys (4 = the ISS) */
 	sim_reset(sim_geom_find("240x320i10x5"), iss_map);
 	if (large) {
 		ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
@@ -417,6 +431,21 @@ static void prep_hand(void) { fv.track = iss; fv.track_state = SAT_TRK_ON; }	/* 
 static void prep_no_clock(void) { fv.clock = SAT_CLOCK_NONE; }
 static void prep_frozen(void) { fv.clock = SAT_CLOCK_NONE; fake_frozen = true; }
 static void prep_aprs(void) { iss_aprs = true; }
+/* Hold keys: the codes are the Tools numbers + 1 (Position 1, Satellites 15, Single-freq repeater 4: ui_menus.c enum) */
+static void prep_h7pos(void) { hold_set(7, 2); }
+static void prep_h4sat(void) { hold_set(4, 16); }
+static void prep_h4iss(void) { hold_set(4, UI_HOLD_ISS); }
+static void prep_h4none(void) { hold_set(4, 0); }
+static void prep_h4none_h7sat(void)
+{
+	hold_set(4, 0);
+	hold_set(7, 16);
+}
+static void prep_h4none_h7sfr(void)
+{
+	hold_set(4, 0);
+	hold_set(7, 5);
+}
 static void prep_busy(void) { refuse = SAT_NO_BUSY; }
 static void prep_em(void) { ui_svc_emergency(true); }
 /* The fake alarm's warning and rise not coming (its banner hidden): the page's own lines in view */
@@ -605,6 +634,64 @@ static int iss_checks(void)
 	ISS_CHECK(starts == 0, n);
 	bad += iss_flow(n = "VFO hold 4 types the digit", "ok 4 up ok ", NULL, "long:4", "screen=home", false);
 	ISS_CHECK(starts == 0 && ui_st.entry, n);
+	/* Hold keys (ui_hold.inc, Settings > Keys "N hold": settings_t.hold_tool): hold 4 = the ISS is the default (above);
+	 * another digit set to a tool opens that tool; none keeps the speed dial toast; the VFO still types the digit; the
+	 * Home hint names the first digit set (a "+" when more are) and fits the row, with and without a caller */
+	bad += iss_flow(n = "Hold 7 set to Position opens Position", "", prep_h7pos, "long:7", "screen=gps", false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Hold 7 set to Position: hold 4 is still the ISS", "", prep_h7pos, "long:4", "screen=home banner=none", false);
+	ISS_CHECK(starts == 1 && start_sat == iss, n);
+	bad += iss_flow(n = "Hold 4 set to Satellites opens Satellites, not the ISS", "", prep_h4sat, "long:4", "screen=satellites", false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Hold 4 set to the ISS again: the held track", "", prep_h4iss, "long:4", "screen=home banner=none", false);
+	ISS_CHECK(starts == 1 && start_sat == iss, n);
+	bad += iss_flow(n = "Hold 4 set to none: the speed dial toast", "", prep_h4none, "long:4",
+			T("screen=home toast=Speed_dial_4", "screen=home toast=H"), false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Hold 8 (none): the speed dial toast", "", NULL, "long:8",
+			T("screen=home toast=Speed_dial_8", "screen=home toast=H"), false);
+	bad += iss_flow(n = "Hold 4 set to Satellites: the VFO still types the digit", "ok 4 up ok ", prep_h4sat, "long:4", "screen=home", false);
+	ISS_CHECK(ui_st.entry && starts == 0, n);
+	bad += iss_flow(n = "Hold 4 set to Satellites: a short 4 is still Find", "", prep_h4sat, "4", "screen=find", false);
+	bad += iss_flow(n = "Hold hint: 4 set to none, nothing else: no group", "", prep_h4none, "wait:300",
+			T("screen=home shows=OK_Menu hides=4_ISS", "screen=home shows=OK_Men hides=4_ISS"), true);
+	ISS_CHECK(strstr(ui_st.home_hint, "ISS") == NULL && strstr(ui_st.home_hint, "  # ") == NULL, n);
+	bad += iss_flow(n = "Hold hint: 7 Satellites alone", "", prep_h4none_h7sat, "wait:300", T("screen=home shows=*_Quick hides=4_ISS", "screen=home shows=*_H hides=4_ISS"), true);
+	ISS_CHECK(strncmp(ui_st.home_hint, TR("* Quick") , strlen(TR("* Quick"))) == 0 && strstr(ui_st.home_hint, "  7 ") != NULL &&
+		  gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2 && strstr(ui_st.home_hint, "+") == NULL, n);
+	bad += iss_flow(n = "Hold hint: 4 ISS and 7 Position: the first, and a plus", "", prep_h7pos, "wait:300",
+			T("screen=home shows=OK_Menu shows=*_Quick shows=4_ISS+", "screen=home shows=OK_Men shows=4_ISS+"), true);
+	ISS_CHECK(gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2, n);
+	bad += iss_flow(n = "Hold hint: 4 ISS and 7 Position with a caller", CALLER, prep_h7pos, "wait:300",
+			T("screen=home shows=*_Quick hides=OK_Menu shows=4_ISS+", "screen=home hides=OK_Men shows=4_ISS+"), true);
+	ISS_CHECK(gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2, n);
+	bad += iss_flow(n = "Hold hint: the longest tool name with a long caller", "worst call:3108765,91,g wait:11000 ", prep_h4none_h7sat,
+			"wait:300", "screen=home", true);
+	ISS_CHECK(gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2 && strstr(ui_st.home_hint, "  7 ") != NULL &&
+		  strncmp(ui_st.home_hint, TR("* Quick"), strlen(TR("* Quick"))) == 0, n);
+	bad += iss_flow(n = "Hold hint: 7 Single-freq repeater, the widest name", "", prep_h4none_h7sfr, "wait:300",
+			T("screen=home shows=*_Quick hides=OK_Menu", "screen=home shows=*_H hides=OK_Men"), true);
+	ISS_CHECK(gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2 && strstr(ui_st.home_hint, "  7 ") != NULL, n);
+	bad += iss_flow(n = "Hold hint: dual watch, 7 Satellites alone", "quick 7 ctx 3 5 ok", prep_h4none_h7sat, "wait:300",
+			T("dual=1 shows=7_Sat hides=4_ISS", "dual=1 shows=7_Uyd hides=4_ISS"), true);
+	bad += iss_flow(n = "Hold hint: dual watch, none set", "quick 7 ctx 3 5 ok", prep_h4none, "wait:300",
+			"dual=1 hides=ISS", true);
+	bad += iss_flow(n = "Hold 7 in dual watch opens its tool", "quick 7 ctx 3 5 ok", prep_h7pos, "long:7", "screen=gps", false);
+	/* Settings > Keys: the ten rows come last ("up" from the top wraps to the last, 9 hold); OK cycles a row through None
+	 * and the tools in the Tools list's order (set<N> = the hold code stored) */
+	{
+		char want[40];
+		snprintf(want, sizeof want, "set%d=2", UI_SET_HOLD_FIRST + 7);
+		bad += iss_flow(n = "Settings > Keys: hold 7 cycled to the second tool", "ok 7 8 up up up ok ok", NULL, "wait:300", want, false);
+		snprintf(want, sizeof want, "set%d=41", UI_SET_HOLD_FIRST + 4);
+		bad += iss_flow(n = "Settings > Keys: hold 4 starts as the ISS and cycles on", "ok 7 8 up up up up up up ok", NULL, "wait:300",
+				want, false);
+		snprintf(want, sizeof want, "set%d=40", UI_SET_HOLD_FIRST + 4);
+		bad += iss_flow(n = "Settings > Keys: hold 4 is the ISS in a new radio", "ok 7 8", NULL, "wait:300", want, false);
+	}
+	/* a change in Settings is seen at once: hold 7 set there opens its tool without a restart */
+	bad += iss_flow(n = "Settings > Keys: hold 7 set there opens its tool", "ok 7 8 up up up ok ok long:back long:back ", NULL,
+			"long:7", "screen=gps", false);
 #undef ISS_CHECK
 	return bad;
 }

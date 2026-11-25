@@ -244,8 +244,11 @@ static const char *mw_hint(const radio_view_t *v, const ui_state_t *s)
 	if (s->locked)
 		return TR(TEXT_ALT_OPEN "Keys locked: hold * to unlock" TEXT_ALT_NEXT "Locked: hold * to unlock" TEXT_ALT_CLOSE);
 #if CONFIG_SATELLITES
-	if (ui_has_action(ACT_DIGIT_4) && !v->vfo)	// a keypad; on a VFO letter a held 4 types the digit
-		return TR(TEXT_ALT_OPEN "# options  4 ISS  Back stop" TEXT_ALT_NEXT "# more  4 ISS  Back stop" TEXT_ALT_CLOSE);
+	if (!v->vfo) {	// on a VFO letter a held digit types it: no shortcut
+		const char *hh = ui_hold_dual_hint();	// "# options  4 ISS  Back stop"; NULL: no digit is set
+		if (hh != NULL)
+			return hh;
+	}
 #endif
 	return TR("# options  Back stop");
 }

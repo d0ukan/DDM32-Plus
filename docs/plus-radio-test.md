@@ -962,6 +962,20 @@ Receive only; nothing keyed.
 | IK-1 | On a channel (not the VFO), Home idle: look at the bottom row; hold 4 about a second with no ISS pass within 10 min (needs GPS time and TLEs) | the row reads "OK Menu  * Quick  4 ISS" (Turkish "OK Menü  * Hızlı  4 ISS"; with a caller heard "* Quick  # name  4 ISS", the name cut with an ellipsis; in dual watch "# more  4 ISS  Back stop"); the hold opens Tools > ISS with the next pass time |
 | IK-2 | Within 10 min of an ISS AOS (or during a pass), Home on a channel: hold 4; then any key | the radio goes to 145.800 receive-only, banner "ISS tracking, max NN" once the radio holds (or a toast "Can't track: ..."); any key ends it, the radio back as before; a short 4 still opens Find; in the VFO a held 4 types the digit |
 
+### Hold keys (branch `holdkeys`, docs/plus.md "Hold keys: any digit, any tool", v1.0.4 candidate)
+
+Settings only; nothing keyed. Run IK-1 and IK-2 again first: with the default map they are unchanged.
+
+| Row | Do | Expect |
+|---|---|---|
+| IK-0 | Before installing over 1.0.3: note a few settings (language, theme, brightness, Settings > Keys rows, VFO A frequency and mode). After the install, look at them again | every one as before (the settings record only grew at its end); "4 hold" reads ISS, the other nine None |
+| IK-3 | Settings > Keys, scroll to the end: ten rows "0 hold" .. "9 hold"; "4 hold" reads ISS, the others None; set "7 hold" to Pager (OK or Left / Right), power cycle the radio, look again | the rows are last; 4 = ISS, 7 = Pager after the power cycle, the rest None |
+| IK-4 | On a channel, Home idle: look at the bottom row; hold 7 about a second; Back | "OK Menu  * Quick  4 ISS+" (the plus: more than one digit is set); the Pager screen opens; hold 4 still starts the ISS track / Tools > ISS |
+| IK-5 | Set 4 to None and 7 to Satellites: look at Home's bottom row; hold 4; hold 7 | the row reads "* Quick  7 Satellites" (OK Menu gone to make room); hold 4 shows the toast "Speed dial 4 is empty: set it in qdmr"; hold 7 opens Satellites |
+| IK-6 | With 7 set and a caller heard (the row shows "# name"): look at the row; then start dual watch: look at its bottom row | the keys and the shortcut are whole, the caller's name cut with an ellipsis; in dual watch "# more  7 Sat  Back stop" (second form) |
+| IK-7 | Switch to the VFO, hold 7 (and 4); then hold 7 in dual watch on the VFO letter | the digit is typed (no tool), no shortcut in the hint |
+| IK-8 | Set 7 back to None and 4 to ISS (or Factory reset, only if you accept it) | hold 4 = ISS and the rest None again |
+
 ## RAM saving: the safe-area frame buffer (branch `ramsave`, docs/plus.md "RAM budget", v1.0.2 candidate)
 
 The frame buffer now holds only the 220 x 310 area inside the bezel; the radio paints the 10 px left / right and

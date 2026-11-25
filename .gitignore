@@ -714,6 +714,7 @@ __pycache__/
 # satellites' ISS notifications and auto track: every pass, the radio core's hold (tools/plus_satauto.py)
 !/tools/plus_satauto.py
 !/integration/radiofoundry/sat/radio_sathold.inc
+!/integration/radiofoundry/sat/ui_hold.inc
 !/tests/plus/test_sathold_radio.inc
 !/tests/plus/test_sat_set.c
 # dual watch / multi-watch TX target fix (tools/plus_mwfix.py)

@@ -18,6 +18,12 @@ Firmware. Host-tested only; not yet run on the radio.
   10 s 2000 -> 455 ms a stop (fast), no re-learning every 2 minutes (20 slow stops in 4 minutes -> 0), a restart has no
   slow stops; real P25 overs noticed 13 -> 16 of 18; calls after a learned foreign carrier 5 -> 16 of 16; DMR and FM
   unchanged. FLASH +224 B, RAM +8.
+- Hold keys on Home: every digit 0-9 held on a channel (in the VFO a held digit still types it) opens a tool you pick in
+  Settings > Keys, rows "0 hold" .. "9 hold" (None or any tool of the Tools list). Default as before: 4 = ISS tracking,
+  the others None (the old "Speed dial N is empty" toast). Home's hint row names the first digit set ("4 ISS", "7
+  Satellites", a "+" when more are set) and still never cuts the keys. Stored in one appended settings field
+  (`hold_tool[12]`, the record 392 -> 404 B, no field moves; an older record reads the defaults). Cost: FLASH +1,376 B,
+  RAM +336 B. docs/plus.md "Hold keys: any digit, any tool"; radio rows IK-3 .. IK-8.
 
 ## v1.0.3 (test build, not published)
 

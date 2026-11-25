@@ -23,6 +23,7 @@ SAT = 'integration/radiofoundry/sat/'
 
 def prepare_sat_auto(transform, install):
     install('core/radio/radio_sathold.inc', SAT + 'radio_sathold.inc')
+    install('core/ui/ui_hold.inc', SAT + 'ui_hold.inc')
 
     # ---- The stored settings: spare bits of cp_flags and rs_flags ----
     transform('core/settings/settings.h', [
@@ -36,6 +37,21 @@ def prepare_sat_auto(transform, install):
          '#define SETTINGS_RS_SAT_AUTO\t\t0xC0u\t// DDM32 Plus Satellites\' auto track: 0 off, 1 the downlink, 2 the ISS\'s APRS\n'
          '#define SETTINGS_RS_SAT_SHIFT\t\t6\t// (ui_sat.c; the radio core\'s rs_flags write keeps these bits)\n'
          '#define SETTINGS_RS_NO_TALK_PERMIT'),
+        # DDM32 Plus hold keys: the one appended field (page 1 grows from 392 to 404 B, still two pages; an older record
+        # or a firmware without it reads the defaults below; a firmware from before clamps the page it reads)
+        ('\tsettings_zs_import_t zs_import[SETTINGS_ZS_IMPORTS];\n} settings_t;',
+         '\tsettings_zs_import_t zs_import[SETTINGS_ZS_IMPORTS];\n'
+         '\t// DDM32 Plus hold keys (ui_menus.c, Settings > Keys): the tool a held digit 0-9 opens on Home, 0 none, else its\n'
+         '\t// number in the Tools list (the default: 4 the ISS, SETTINGS_HOLD_ISS). 12 B keeps the size a multiple of 4\n'
+         '\tuint8_t hold_tool[12];\n'
+         '} settings_t;\n'
+         '#define SETTINGS_HOLD_ISS\t40u\t// Tools > ISS is number 39 (code 40): ui_menus.c checks it'),
+    ])
+    transform('core/settings/settings.c', [
+        ('_Static_assert(sizeof(settings_t) == 392, "settings_t changed size: update docs/spec/settings-store.md 3 and this");',
+         '_Static_assert(sizeof(settings_t) == 404, "settings_t changed size: update docs/spec/settings-store.md 3 and this");'),
+        ('\ts->vfo2_cc = 1;\n\ts->vfo2_ts = 1;\n}',
+         '\ts->vfo2_cc = 1;\n\ts->vfo2_ts = 1;\n\ts->hold_tool[4] = SETTINGS_HOLD_ISS;\t// DDM32 Plus: hold 4 = ISS\n}'),
     ])
     transform('core/radio/radio_sm.c', [
         # The radio core's own rs_flags write keeps the satellites' bits (they are the UI's)
@@ -112,6 +128,9 @@ def prepare_sat_auto(transform, install):
          '#if CONFIG_SATELLITES\n'
          '\tUI_SET_SAT_NOTE,\t// DDM32 Plus Satellites\' "Every pass" alarm, 0..63 (settings_t.cp_flags SETTINGS_CP_SAT_NOTE)\n'
          '\tUI_SET_SAT_AUTO,\t// ... auto track 0..2 (settings_t.rs_flags SETTINGS_RS_SAT_AUTO)\n'
+         '\tUI_SET_HOLD_FIRST,\t// DDM32 Plus hold keys: the tool a held digit 0-9 opens on Home, 0 none, else its Tools\n'
+         '\tUI_SET_HOLD_LAST = UI_SET_HOLD_FIRST + 9,\t// number (settings_t.hold_tool; ui_menus.c)\n'
+         '#define UI_HOLD_ISS\t40\t// the ISS (Tools number 39) as a hold code: hold 4\'s default (settings.h)\n'
          '#endif\n'
          '\tUI_SET_COUNT\n'),
     ])
@@ -124,6 +143,9 @@ def prepare_sat_auto(transform, install):
          '\tcase UI_SET_SAT_AUTO:\n'
          '\t\tsettings_read(&st);\n'
          '\t\treturn (st.rs_flags & SETTINGS_RS_SAT_AUTO) >> SETTINGS_RS_SAT_SHIFT;\n'
+         '\tcase UI_SET_HOLD_FIRST ... UI_SET_HOLD_LAST:\t// DDM32 Plus hold keys (ui_menus.c)\n'
+         '\t\tsettings_read(&st);\n'
+         '\t\treturn st.hold_tool[id - UI_SET_HOLD_FIRST];\n'
          '#endif\n'
          '\tcase UI_SET_NOISE_REDUCTION:\n'),
         ('\tcase UI_SET_NOISE_REDUCTION:\t// ui_svc_apply hands them to the vocoder\n',
@@ -138,6 +160,13 @@ def prepare_sat_auto(transform, install):
          '\t\tst = settings_begin();\n'
          '\t\tst->rs_flags = (uint8_t)((st->rs_flags & ~SETTINGS_RS_SAT_AUTO) |\n'
          '\t\t\t\t\t  (((uint32_t)value << SETTINGS_RS_SAT_SHIFT) & SETTINGS_RS_SAT_AUTO));\n'
+         '\t\tsettings_end(hal_millis());\n'
+         '\t\treturn true;\n'
+         '\tcase UI_SET_HOLD_FIRST ... UI_SET_HOLD_LAST:\t// DDM32 Plus hold keys (ui_menus.c)\n'
+         '\t\tif (value < 0 || value > 255)\n'
+         '\t\t\treturn false;\n'
+         '\t\tst = settings_begin();\n'
+         '\t\tst->hold_tool[id - UI_SET_HOLD_FIRST] = (uint8_t)value;\n'
          '\t\tsettings_end(hal_millis());\n'
          '\t\treturn true;\n'
          '#endif\n'
@@ -270,19 +299,23 @@ def prepare_iss_tool(transform):
          '\tSCR_SATELLITES,\t\t\t// DM32 Plus: Tools > Satellites (CONFIG_SATELLITES)\n'
          '\tSCR_ISS,\t\t\t// DDM32 Plus: Tools > ISS (CONFIG_SATELLITES)\n'),
     ])
-    # Home's hold-4 key (a channel; every other digit hold there was the dead "Speed dial N is empty" toast, and in the
-    # VFO a hold types the digit): the ISS's held track, else Tools > ISS (ui_sat.c ui_sat_home_iss). The hint group
-    # "4 ISS" ends the row; with a caller "OK Menu" goes and the name is cut with an ellipsis to fit
+    # Home's held digits (a channel; every digit hold there was the dead "Speed dial N is empty" toast, and in the VFO a
+    # hold types the digit): the tool chosen in Settings > Keys, hold 4 = the ISS by default (ui_menus.c ui_hold_tool;
+    # the ISS: its held track, else Tools > ISS, ui_sat.c ui_sat_home_iss). The hint group "4 ISS" ends the row; with a
+    # caller "OK Menu" goes and the name is cut with an ellipsis to fit
     transform('core/ui/ui_app.c', [
         ('bool ui_home_key(const input_event_t *ev)\n{\n',
-         '#if CONFIG_SATELLITES\n#include "ui/gfx.h"\n#include "ui/ui_screens.h"\nvoid ui_sat_home_iss(void);\t// ui_sat.c (DDM32 Plus)\n#endif\n'
+         '#if CONFIG_SATELLITES\n#include "ui/gfx.h"\n#include "ui/ui_screens.h"\n'
+         'bool ui_hold_tool(uint8_t digit);\t// ui_menus.c (DDM32 Plus hold keys)\n'
+         'const char *ui_hold_hint(bool load);\nvoid ui_hold_forget(void);\n#endif\n'
          'bool ui_home_key(const input_event_t *ev)\n{\n'),
+        ('\thas_quick_key = ui_has_action(ACT_QUICK);\n',
+         '\thas_quick_key = ui_has_action(ACT_QUICK);\n'
+         '#if CONFIG_SATELLITES\n\tui_hold_forget();\t// DDM32 Plus: the hold keys read again\n#endif\n'),
         ('\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo) {\n\t\tstatic char msg[48];\n',
          '#if CONFIG_SATELLITES\n'
-         '\tif (d == 4 && ev->gesture == GESTURE_LONG && !view->vfo) {\n'
-         '\t\tui_sat_home_iss();\t// DDM32 Plus: hold 4 = ISS\n'
-         '\t\treturn true;\n'
-         '\t}\n'
+         '\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo && ui_hold_tool((uint8_t)d))\n'
+         '\t\treturn true;\t// DDM32 Plus: a held digit opens its tool (Settings > Keys; hold 4 = the ISS)\n'
          '#endif\n'
          '\tif (d >= 0 && ev->gesture == GESTURE_LONG && !view->vfo) {\n\t\tstatic char msg[48];\n'),
         ('\tsb_str(&b, home_hint_keys());\n'
@@ -300,14 +333,16 @@ def prepare_iss_tool(transform):
          '\t\t}\n'
          '\t}\n',
          '#if CONFIG_SATELLITES\n'
-         '\t// DDM32 Plus: "OK Menu  * Quick  4 ISS"; with a caller "* Quick  # Joe  4 ISS": OK Menu goes (OK opens the menu\n'
-         '\t// anyway) and the name is cut with an ellipsis until the row fits, so the keys and "4 ISS" are never cut\n'
+         '\t// DDM32 Plus: "OK Menu  * Quick  4 ISS" (the held-digit shortcut, Settings > Keys; none: as upstream); with a\n'
+         '\t// caller "* Quick  # Joe  4 ISS": OK Menu goes (OK opens the menu anyway) and the name is cut with an ellipsis\n'
+         '\t// until the row fits, so the keys and the shortcut are never cut. A shortcut too wide for the idle row sends\n'
+         '\t// OK Menu away too, and only then is itself cut with an ellipsis\n'
          '\tconst char *keys = home_hint_keys();\n'
+         '\tconst char *hold = ui_hold_hint(true);\t// NULL: no digit is set (or the board has no digit keys)\n'
          '\tbool who = has_context_key && recent_n && caller_target(&t);\n'
-         '\tbool iss = ui_has_action(ACT_DIGIT_4);\t// a keypad: a board without digit keys has no hold-4\n'
-         '\tif (iss && !has_quick_key)\n'
+         '\tif (hold != NULL && !has_quick_key)\n'
          '\t\tkeys = TR("Hold OK Quick");\n'
-         '\telse if (iss && who)\n'
+         '\telse if (hold != NULL && who)\n'
          '\t\tkeys = TR("* Quick");\n'
          '\tname[0] = 0;\n'
          '\tif (who) {\n'
@@ -334,25 +369,40 @@ def prepare_iss_tool(transform):
          '\t\tif (k + len > nl)\n'
          '\t\t\tname[nl = k] = 0;\n'
          '\t}\n'
-         '\tfor (size_t n = nl;; n--) {\n'
-         '\t\tif (n > 0 && n < nl && ((unsigned char)name[n] & 0xC0) == 0x80)\n'
-         '\t\t\tcontinue;\t// not inside a multi-byte character\n'
-         '\t\tsbuf_t rb;\n'
+         '\tsbuf_t rb;\n'
+         '\tfor (int pass = 0;; pass++) {\n'
+         '\t\tfor (size_t n = nl;; n--) {\n'
+         '\t\t\tif (n > 0 && n < nl && ((unsigned char)name[n] & 0xC0) == 0x80)\n'
+         '\t\t\t\tcontinue;\t// not inside a multi-byte character\n'
+         '\t\t\tsb_init(&rb, row, sizeof row);\n'
+         '\t\t\tsb_str(&rb, keys);\n'
+         '\t\t\tif (n > 0) {\n'
+         '\t\t\t\tchar cut[sizeof name];\n'
+         '\t\t\t\tmemcpy(cut, name, n);\n'
+         '\t\t\t\tcut[n] = 0;\n'
+         '\t\t\t\tsb_str(&rb, "  # ");\n'
+         '\t\t\t\tsb_str(&rb, cut);\n'
+         '\t\t\t\tif (n < nl)\n'
+         '\t\t\t\t\tsb_str(&rb, GLYPH_ELLIPSIS);\n'
+         '\t\t\t}\n'
+         '\t\t\tif (hold != NULL) {\n'
+         '\t\t\t\tsb_str(&rb, "  ");\n'
+         '\t\t\t\tsb_str(&rb, hold);\n'
+         '\t\t\t}\n'
+         '\t\t\tif (hold == NULL || n == 0 || gfx_text_width(ui_layout.small, row) <= gfx_width() - 2)\n'
+         '\t\t\t\tbreak;\n'
+         '\t\t}\n'
+         '\t\tif (hold == NULL || pass == 1 || who || !has_quick_key || gfx_text_width(ui_layout.small, row) <= gfx_width() - 2)\n'
+         '\t\t\tbreak;\n'
+         '\t\tkeys = TR("* Quick");\t// the shortcut is wide: OK Menu goes too\n'
+         '\t}\n'
+         '\tif (hold != NULL && gfx_text_width(ui_layout.small, row) > gfx_width() - 2) {\n'
+         '\t\tchar fit[32];\t// still too wide (no caller left to cut): the shortcut itself is cut with an ellipsis\n'
          '\t\tsb_init(&rb, row, sizeof row);\n'
          '\t\tsb_str(&rb, keys);\n'
-         '\t\tif (n > 0) {\n'
-         '\t\t\tchar cut[sizeof name];\n'
-         '\t\t\tmemcpy(cut, name, n);\n'
-         '\t\t\tcut[n] = 0;\n'
-         '\t\t\tsb_str(&rb, "  # ");\n'
-         '\t\t\tsb_str(&rb, cut);\n'
-         '\t\t\tif (n < nl)\n'
-         '\t\t\t\tsb_str(&rb, GLYPH_ELLIPSIS);\n'
-         '\t\t}\n'
-         '\t\tif (iss)\n'
-         '\t\t\tsb_str(&rb, "  4 ISS");\n'
-         '\t\tif (!iss || n == 0 || gfx_text_width(ui_layout.small, row) <= gfx_width() - 2)\n'
-         '\t\t\tbreak;\n'
+         '\t\tsb_str(&rb, "  ");\n'
+         '\t\tgfx_text_fit(ui_layout.small, hold, gfx_width() - 2 - gfx_text_width(ui_layout.small, row), fit, sizeof fit);\n'
+         '\t\tsb_str(&rb, fit);\n'
          '\t}\n'
          '\tstr_copy(home_hint, sizeof home_hint, row);\n'
          '#else\n'
@@ -371,18 +421,21 @@ def prepare_iss_tool(transform):
          '\t\t}\n'
          '\t}\n'
          '#endif\n'),
-        ('static char home_hint[32];', 'static char home_hint[40];\t// DDM32 Plus: room for "* Quick  # name  4 ISS"'),
+        ('static char home_hint[32];', 'static char home_hint[56];\t// DDM32 Plus: room for "* Quick  # name  7 Single-freq repeater+"'),
     ])
     # The same hint in dual watch (Home's own hint there): the ISS group must fit the 220 px row, so the second form is
     # shorter (ui_draw_hint picks the longest that fits)
     transform('core/ui/ui_screens.c', [
         ('static const char *dual_hint(const radio_view_t *v, const ui_state_t *s)\n{\n',
-         '#if CONFIG_SATELLITES\nbool ui_has_action(uint8_t action);\t// ui_app.c (the mwatch hint below uses it too)\n#endif\n'
+         '#if CONFIG_SATELLITES\nconst char *ui_hold_dual_hint(void);\t// ui_menus.c (the mwatch hint uses it too)\n#endif\n'
          'static const char *dual_hint(const radio_view_t *v, const ui_state_t *s)\n{\n'),
         ('\treturn TR("# options  Back stop");\n}',
          '#if CONFIG_SATELLITES\n'
-         '\tif (ui_has_action(ACT_DIGIT_4) && !v->vfo)\t// a keypad; on a VFO letter a held 4 types the digit\n'
-         '\t\treturn TR(TEXT_ALT_OPEN "# options  4 ISS  Back stop" TEXT_ALT_NEXT "# more  4 ISS  Back stop" TEXT_ALT_CLOSE);\n'
+         '\tif (!v->vfo) {\t// on a VFO letter a held digit types it: no shortcut\n'
+         '\t\tconst char *hh = ui_hold_dual_hint();\t// "# options  4 ISS  Back stop"; NULL: no digit is set\n'
+         '\t\tif (hh != NULL)\n'
+         '\t\t\treturn hh;\n'
+         '\t}\n'
          '#endif\n'
          '\treturn TR("# options  Back stop");\n}'),
     ])
@@ -400,4 +453,69 @@ def prepare_iss_tool(transform):
          '#if CONFIG_SATELLITES\n\tcase T_ISS: ui_push(SCR_ISS, 0); break;\n#endif\n'),
         ('\t\t[T_ALLSEARCH] = ART_ICON_P25SEARCH + 1,',
          '\t\t[T_ISS] = ART_ICON_ALMANAC + 1,\t// the sky, as Satellites\n\t\t[T_ALLSEARCH] = ART_ICON_P25SEARCH + 1,'),
+    ])
+    prepare_hold_keys(transform)
+
+
+def prepare_hold_keys(transform):
+    """Hold keys on Home (docs/plus.md "Hold keys on Home"): each digit 0-9 held on a Home channel opens a tool picked in
+    Settings > Keys (ui_hold.inc; stored in settings_t.hold_tool, hold 4 = the ISS by default). The Tools list's names
+    move to file scope (index 0 is "None": the settings list shows them), and its dispatch becomes tool_open."""
+    n_tools = 42   # T_COUNT: the values of the settings list, 0 (None) and the tool numbers 1..41 (not the zone offer)
+    transform('core/ui/ui_menus.c', [
+        # The names at file scope, "None" first: the tool with number n has tool_names[n]
+        ('static void tools_item(uint16_t row, ui_item_t *it)\n{\n\tstatic const char *const names[] = { ',
+         '// DDM32 Plus: at file scope (Settings > Keys lists them for the hold keys); index 0 is "None", the tool T_x has\n'
+         '// tool_names[T_x + 1]\n'
+         'static const char *const tool_names[] = { TRN("None"), '),
+        ('TRN("Zones/Chs Received") };\n\tuint16_t i = tools_row(row);',
+         'TRN("Zones/Chs Received") };\n\nstatic void tools_item(uint16_t row, ui_item_t *it)\n{\n\tuint16_t i = tools_row(row);'),
+        ('TR("Supply") :\n\t\t tr(names[i]));', 'TR("Supply") :\n\t\t tr(tool_names[i + 1u]));'),
+        # The dispatch by tool, for the hold keys too
+        ('static void tools_select(uint16_t row, bool hold)\n{\n\t(void)hold;\n\tswitch (tools_row(row)) {\n\tcase T_SCAN:',
+         'static void tool_open(uint16_t t)\t// DDM32 Plus: a Tools row, or a held digit (ui_hold.inc)\n{\n\tswitch (t) {\n\tcase T_SCAN:'),
+        ('\tcase T_ZONE_OFFER: ui_push(SCR_OFFER, 0); break;\n\tdefault: break;\n\t}\n}\n',
+         '\tcase T_ZONE_OFFER: ui_push(SCR_OFFER, 0); break;\n\tdefault: break;\n\t}\n}\n\n'
+         'static void tools_select(uint16_t row, bool hold)\n{\n\t(void)hold;\n\ttool_open(tools_row(row));\n}\n\n'
+         '#if CONFIG_SATELLITES\n#include "ui_hold.inc"\t// DDM32 Plus hold keys\n#endif\n'),
+        # Settings > Keys: the ten rows, after the others
+        ('static const set_item_t s_keys[] = {\n',
+         '#if CONFIG_SATELLITES\n'
+         '// DDM32 Plus: the value is the hold code (0 None, else the Tools number), the name the tool\'s (tool_names)\n'
+         'static const int16_t v_holdtool[] = { ' + ', '.join(str(i) for i in range(n_tools)) + ' };\n'
+         '_Static_assert(sizeof v_holdtool / sizeof v_holdtool[0] == T_COUNT, "one value per tool and None");\n'
+         '#define HOLD_ROW(d) LIST(hold_label[d], "hold digit long press key shortcut tool", UI_SET_HOLD_FIRST + (d), v_holdtool, tool_names)\n'
+         '#endif\n'
+         'static const set_item_t s_keys[] = {\n'),
+        ('\tACTION(TRN("SOS key"), "emergency sos actions", SA_SOS_KEY),\t// DDM32 Plus\n#endif\n};\n',
+         '\tACTION(TRN("SOS key"), "emergency sos actions", SA_SOS_KEY),\t// DDM32 Plus\n#endif\n'
+         '#if CONFIG_SATELLITES\n'
+         '\tHOLD_ROW(0), HOLD_ROW(1), HOLD_ROW(2), HOLD_ROW(3), HOLD_ROW(4), HOLD_ROW(5), HOLD_ROW(6), HOLD_ROW(7),\n'
+         '\tHOLD_ROW(8), HOLD_ROW(9),\t// DDM32 Plus hold keys: last, so the rows above keep their places\n'
+         '#endif\n};\n'),
+        ('#if CONFIG_KEY_ASSIGN\n\tif (s->type != ST_ACTION && s->id >= UI_SET_KEY_FIRST && s->id <= UI_SET_KEY_LAST) {\n',
+         '#if CONFIG_SATELLITES\n'
+         '\tif (s->type != ST_ACTION && s->id >= UI_SET_HOLD_FIRST && s->id <= UI_SET_HOLD_LAST) {\n'
+         '\t\thold_labels();\n'
+         '\t\treturn !ui_has_action((uint8_t)(ACT_DIGIT_0 + (s->id - UI_SET_HOLD_FIRST)));\t// a digit this radio has no key for\n'
+         '\t}\n'
+         '#endif\n'
+         '#if CONFIG_KEY_ASSIGN\n\tif (s->type != ST_ACTION && s->id >= UI_SET_KEY_FIRST && s->id <= UI_SET_KEY_LAST) {\n'),
+        ('static void set_store(const set_item_t *s, int32_t v)\n{\n\tif (ui_svc_setting_set(s->id, v)) {\n',
+         'static void set_store(const set_item_t *s, int32_t v)\n{\n\tif (ui_svc_setting_set(s->id, v)) {\n'
+         '#if CONFIG_SATELLITES\n'
+         '\t\tif (s->id >= UI_SET_HOLD_FIRST && s->id <= UI_SET_HOLD_LAST)\n'
+         '\t\t\thold_load();\t// DDM32 Plus: the hold keys read again (here, off the draw paths)\n'
+         '#endif\n'),
+    ])
+    # Upstream's factory reset test counts the flash bytes of one settings save (page 1 is 12 B longer now: 156 + 12 B of
+    # payload + the 16 B header + 4 B commit)
+    transform('tests/host/radioCoreTest.c', [
+        ('sim_flash_cut_after(432);\t// the settings records (page 1: 172 + 4 bytes, page 0: 252 + 4) go in',
+         'sim_flash_cut_after(444);\t// the settings records (page 1: 184 + 4 bytes, page 0: 252 + 4) go in'),
+    ])
+    transform('core/ui/ui_svc_stub.c', [
+        ('\t[UI_SET_NOISE_REDUCTION] = 1,\n};',
+         '#if CONFIG_SATELLITES\n\t[UI_SET_HOLD_FIRST + 4] = UI_HOLD_ISS,\t// DDM32 Plus: hold 4 = the ISS\n#endif\n'
+         '\t[UI_SET_NOISE_REDUCTION] = 1,\n};'),
     ])

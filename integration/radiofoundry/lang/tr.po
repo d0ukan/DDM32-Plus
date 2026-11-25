@@ -5392,9 +5392,9 @@ msgstr "{# 1 A'da konuş  Geri durdur|# 1 A'da konuş}"
 msgid "# options  Back stop"
 msgstr "# seçenekler  Geri durdur"
 
-#: core/ui/ui_screens.c core/ui/ui_mwatch_draw.inc
-msgid "{# options  4 ISS  Back stop|# more  4 ISS  Back stop}"
-msgstr "{# seçenekler  4 ISS  Geri durdur|# seç  4 ISS  Geri dur}"
+#: core/ui/ui_hold.inc
+msgid "{# options  %  Back stop|# more  %  Back stop}"
+msgstr "{# seçenekler  %  Geri durdur|# seç  %  Geri dur}"
 
 #: core/ui/ui_screens.c
 msgid "# Open"

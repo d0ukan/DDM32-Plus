@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* DM32 Plus: every mode in the VFO, the settings record (integration/radiofoundry/vfox/vfox.c vfox_store / vfox_load,
  * docs/plus.md "Every mode in the VFO": the byte map), on the actual settings store and the simulated DM32 flash:
- * - settings_t keeps upstream's size (392 B) and every field's offset this feature writes;
+ * - settings_t is upstream's 392 B plus the hold keys' 12 (404 B) and keeps every field's offset this feature writes;
  * - each mode with its parameters, on VFO A and on VFO B, kept across power cycles; edge values (NAC $FFF, talkgroup
  *   65535, unit ID 9999999 and 8388608 (bit 23), Any); AM; DMR's Any flags;
  * - an older record (upstream's FM / DMR VFOs, an own DMR ID in unused_dmr_id) loads unchanged, and a save of the same
@@ -117,7 +117,7 @@ static channel_t vfo(uint32_t hz, uint8_t m, uint16_t nac, uint16_t tg, uint32_t
 int main(void)
 {
     /* The layout this feature relies on: upstream's size and the fields' places (docs/plus.md byte map) */
-    CHECK(sizeof(settings_t) == 392);
+    CHECK(sizeof(settings_t) == 404);  /* upstream 392 + hold_tool[12], appended: no field moves */
     CHECK(offsetof(settings_t, vfo_mode) == 20 && offsetof(settings_t, vfo_bw) == 21 && offsetof(settings_t, vfo_cc) == 23);
     CHECK(offsetof(settings_t, vfo_ts) == 24 && offsetof(settings_t, vfo_rx_tone_type) == 25 &&
           offsetof(settings_t, vfo_tx_tone_type) == 26 && offsetof(settings_t, vfo_rx_tone) == 28 &&
