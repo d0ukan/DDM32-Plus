@@ -155,7 +155,23 @@ static bool xa_pcm(uint16_t (*gen)(int16_t *out, uint16_t max, int16_t amp), uin
 	xa.starts++;
 	return true;
 }
-const hal_afsk_t xb_afsk = { .tx_start = xa_start, .tx_busy = xa_busy, .tx_stop = xa_stop, .tx_pcm = xa_pcm };
+/* FM -> DMR: the board's FM receive audio path (board.afsk rx), faked. rx_read hands the radio task a steady stream of
+ * (non-silent) samples; the fake vocoder ignores them, but the ring and the encode run as on the radio */
+static struct { bool on; int starts, reads; } xa_rx;
+static bool xa_rx_start(void) { xa_rx.on = true; xa_rx.starts++; return true; }
+static void xa_rx_stop(void) { xa_rx.on = false; }
+static uint16_t xa_rx_read(int16_t *buf, uint16_t max)
+{
+	if (!xa_rx.on)
+		return 0;
+	xa_rx.reads++;
+	uint16_t n = max < 48u ? max : 48u;	/* ~6 ms a call: the polls keep the 160-sample encoder fed */
+	for (uint16_t i = 0; i < n; i++)
+		buf[i] = (int16_t)(1000 + i);
+	return n;
+}
+const hal_afsk_t xb_afsk = { .tx_start = xa_start, .tx_busy = xa_busy, .tx_stop = xa_stop, .tx_pcm = xa_pcm,
+			     .rx_rate_hz = 8000, .rx_start = xa_rx_start, .rx_read = xa_rx_read, .rx_stop = xa_rx_stop };
 /* 4 ms of the tone path's interrupt: 32 samples asked for; fewer: the end */
 static void xa_tick(void)
 {
@@ -172,6 +188,7 @@ static void xr_reset(void)
 {
 	memset(xr_beeps, 0, sizeof xr_beeps);
 	memset(&xa, 0, sizeof xa);
+	memset(&xa_rx, 0, sizeof xa_rx);
 	xr_heard_n = xr_heard_taken = xr_put_n = xr_taken_n = 0;
 	xr_send = xr_eof = xr_was_sent = false;
 	xr_cancels = 0;
@@ -764,6 +781,134 @@ static void test_xband_p25_sides(void)
 	       (unsigned)xr_call_tg, (unsigned)xr_call_nac);
 }
 
+/* DMR -> FM with a TX sub-tone (owner, 2026-11-25): the FM side's CTCSS is put on the carrier through ch->tx_tone,
+ * the very path a normal FM channel keys through (ptt_down's KEY_TX reads it; the tone encoder is the radio's own,
+ * independent of the tx_pcm audio). No voice TX path, no change to the carrier audio */
+static void test_xband_fm_tx_tone(void)
+{
+	setup_codeplug();
+	codec_present = true;
+	start();
+	xr_reset();
+	aud.feed = true;
+	run(500);
+	xr_req(145500000, 433500000);
+	xband_req()->mode[1] = XB_MODE_FM;
+	xband_req()->side[1].tx_tone_type = TONE_CTCSS;	/* 88.5 Hz on B's carrier */
+	xband_req()->side[1].tx_tone_value = 885;
+	CHECK(xband_start());
+	run(100);
+	CHECK(xband_owns_radio() && hw_mode == RADIO_MODE_DMR);
+	CHECK(xr_on(145500000));
+	unsigned bursts = xr_call(2862, 3105555, 2);
+	run(200);
+	CHECK(sm.view.state == RS_TX && hw.tx_hz == 433500000 && hw_mode == RADIO_MODE_FM && xa.starts == 1);
+	/* the CTCSS is on the FM carrier the same way a normal FM channel sets it (ch->tx_tone -> board.radio->tx) */
+	CHECK(sm.view.ch.tx_tone.type == TONE_CTCSS && sm.view.ch.tx_tone.value == 885);
+	for (int i = 0; i < 400 && sm.view.state == RS_TX; i++)
+		xr_run_fm(20);
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(v.relayed == 1);
+	xband_stop();
+	run(100);
+	CHECK(!xband_owns_radio() && xr_gives == 1 && hw.rx_hz == 146520000);
+	aud.feed = false;
+	printf("Plus cross-band DMR -> FM: %u bursts, the TX CTCSS 88.5 on the carrier (ch->tx_tone)\n", bursts);
+}
+
+/* FM -> DMR (owner, 2026-11-25, HARDWARE-UNVERIFIED): an FM over heard on A (the carrier opening the squelch, with the
+ * RX sub-tone if set) captured through the board's FM receive audio (board.afsk rx), encoded by the stock AMBE+2 codec
+ * (faked here) and sent on B as a DMR over to the DMR side's TX talkgroup; a carrier whose RX tone does not match is
+ * not relayed. The stock codec runs only on the radio, so the encoder is faked (zero parameters); what this proves is
+ * the capture / encode / relay plumbing and the tone gating, not the audio quality */
+static void test_xband_fm_to_dmr(void)
+{
+	setup_codeplug();
+	codec_present = true;
+	start();
+	xr_reset();
+	aud.feed = true;
+	run(500);
+	xr_req(145500000, 433500000);
+	xband_req()->mode[0] = XB_MODE_FM;		/* A FM (receive), B DMR (transmit) */
+	xband_req()->side[1].tx_tg = 101;		/* FM carries no talkgroup: the DMR side's TX talkgroup is used */
+	CHECK(xband_start());
+	run(100);
+	CHECK(xband_owns_radio() && xr_on(145500000) && sm.view.ch.mode == RADIO_MODE_FM);
+	/* teach the squelch floor on the FM side (quiet), then a carrier with the tone: the over is captured */
+	signal(120, true);
+	run(400);
+	unsigned air0 = sim.air_count;
+	signal(8, true);				/* a carrier with the tone (no RX tone set: tone_ok is ignored) */
+	run(1500);					/* the over: the encoder runs on the FM audio every 20 ms */
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(xa_rx.starts >= 1 && xa_rx.reads > 0);	/* the FM receive audio path ran */
+	CHECK(v.frames > 25 || v.phase == XB_P_SEND || v.relayed == 1);	/* an over of frames recorded */
+	signal(120, true);				/* the carrier gone: the over ends, it is sent on B */
+	for (int i = 0; i < 400 && sm.view.state != RS_TX && (xband_view(&v), v.relayed == 0); i++)
+		run(25);
+	for (int i = 0; i < 600 && sm.view.state == RS_TX; i++)
+		run(25);
+	/* on the air on B: a DMR header to TG 101 from our ID, then the terminator */
+	unsigned first = air0;
+	while (first < sim.air_count && sim.air[first].kind != DMR_BURST_VOICE_LC_HEADER)
+		first++;
+	CHECK(first < sim.air_count);		/* an FM over relayed as DMR on B */
+	if (first < sim.air_count) {
+		dmr_lc_t l;
+		air_lc(first, &l);
+		CHECK(l.dst == 101 && l.src == own_dmr_id && l.flco == DMR_FLCO_GROUP_VOICE);	/* to TG 101 from our ID */
+	}
+	xband_view(&v);
+	CHECK(v.relayed == 1);			/* one FM over relayed as DMR */
+	xband_stop();
+	for (int i = 0; i < 200 && xband_owns_radio(); i++)
+		run(25);
+	CHECK(!xband_owns_radio() && xr_gives == 1 && hw.rx_hz == 146520000 && hw_mode == RADIO_MODE_FM);
+	aud.feed = false;
+	printf("Plus cross-band FM -> DMR: an FM over captured (%d afsk reads) and relayed on B to TG 101\n", xa_rx.reads);
+}
+
+/* FM -> DMR RX tone gating (owner, 2026-11-25): an RX sub-tone on the FM side relays only a carrier carrying it. A
+ * carrier without the tone (the radio's tone_ok false) is not recorded; carrier squelch alone when none is set */
+static void test_xband_fm_rx_tone(void)
+{
+	setup_codeplug();
+	codec_present = true;
+	start();
+	xr_reset();
+	aud.feed = true;
+	run(500);
+	xr_req(145500000, 433500000);
+	xband_req()->mode[0] = XB_MODE_FM;
+	xband_req()->side[0].rx_tone_type = TONE_CTCSS;		/* only a carrier with 100.0 Hz is relayed */
+	xband_req()->side[0].rx_tone_value = 1000;
+	xband_req()->side[1].tx_tg = 101;
+	CHECK(xband_start());
+	run(100);
+	CHECK(xband_owns_radio() && xr_on(145500000) && sm.view.ch.mode == RADIO_MODE_FM);
+	CHECK(sm.view.ch.rx_tone.type == TONE_CTCSS && sm.view.ch.rx_tone.value == 1000);	/* the gate on the channel */
+	unsigned air0 = sim.air_count;
+	signal(120, false);
+	run(400);
+	/* a carrier WITHOUT the tone (tone_ok false): not relayed */
+	signal(8, false);
+	run(1500);
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(v.frames == 0 && v.phase == XB_P_LISTEN && sim.air_count == air0);	/* a carrier without the RX tone: nothing relayed */
+	signal(120, false);
+	run(200);
+	xband_stop();
+	for (int i = 0; i < 200 && xband_owns_radio(); i++)
+		run(25);
+	CHECK(!xband_owns_radio() && hw.rx_hz == 146520000);
+	aud.feed = false;
+	printf("Plus cross-band FM -> DMR: a carrier without the RX tone is not relayed (tone gating)\n");
+}
+
 int main(void)
 {
 	int prior = classic_radio_main();
@@ -772,6 +917,9 @@ int main(void)
 	test_xband_refused();
 	test_xband_no_memory();
 	test_xband_fm();
+	test_xband_fm_tx_tone();
+	test_xband_fm_to_dmr();
+	test_xband_fm_rx_tone();
 	test_xband_p25();
 	test_xband_p25_sides();
 	test_xband_sides();

@@ -39,6 +39,8 @@ static struct {
 	bool cw_wait : 1;	/* a P25 session's CW ID waits for the native receiver to let go of the channel */
 	bool ending : 1;	/* a P25 session ended: the native receiver lets go first, then the user's channel */
 	bool fm_open : 1;	/* an FM over's frames go to the voice bridge (its begin was called) */
+	bool fm_rx : 1;		/* FM -> DMR: an FM over is being captured and encoded now (between begin and end) */
+	bool fm_rx_on : 1;	/* ... the board's FM receive audio path (board.afsk rx) is running */
 	uint8_t cw_side : 1;
 	uint8_t txmode : 2;	/* XB_MODE_* being sent in (FM, P25) */
 	uint8_t waits : 7;	/* polls the P25 worker took to let go of its memory so far */
@@ -89,6 +91,112 @@ static uint16_t xb_gen(int16_t *out, uint16_t max, int16_t amp)
 		}
 	}
 	return n;
+}
+
+/* --- FM -> DMR: the FM receive audio into the stock AMBE+2 encoder (HARDWARE-UNVERIFIED) ---
+ * On the DM-32 (HR_C7000) FM receive audio does not ride the 8 kHz PCM stream (hal_audio.h), so the audio task's
+ * encoder would otherwise see the microphone. The radio task reads the de-emphasised FM receive audio through
+ * board.afsk (the APRS / NXDN receive path, 8 kHz) into a ring in the lent memory; the audio task's encoder takes it
+ * as its microphone (ambeVoiceSetMicSource, a guarded hook in ambeVoice.c) and FEC-encodes each 20 ms block into a
+ * 9-byte air frame; the radio task drains those frames (ambeVoiceSource) into the engine as a DMR over. The stock
+ * codec runs only on the radio, so this path is host-tested with a fake encoder and the afsk receive path faked; the
+ * audio level into the encoder and the de-emphasis are unverified on the owner's unit (docs/plus-radio-test.md). */
+#define XB_RX_SAMPLES	(XB_PCM_SLOTS * VOCODER_FRAME_SAMPLES)	/* 1280 samples = 160 ms at 8 kHz (shares xb_pcm) */
+static volatile uint32_t xb_rx_w, xb_rx_r;	/* sample indices, reset each over (an over is <= 3 min: never wraps) */
+
+/* The audio task's microphone while an FM -> DMR over is captured: a 20 ms block of the FM receive ring, silence on an
+ * underrun (the over keeps its 20 ms timing). Single consumer (the audio task) */
+static const int16_t *xb_fm_mic(void)
+{
+	static int16_t blk[VOCODER_FRAME_SAMPLES];
+	const int16_t *buf = (const int16_t *)xb_pcm;
+	if (xb_pcm == NULL || xb_rx_w - xb_rx_r < (uint32_t)VOCODER_FRAME_SAMPLES) {
+		memset(blk, 0, sizeof blk);
+		return blk;
+	}
+	for (uint16_t i = 0; i < VOCODER_FRAME_SAMPLES; i++)
+		blk[i] = buf[(xb_rx_r + i) % XB_RX_SAMPLES];
+	xb_rx_r += VOCODER_FRAME_SAMPLES;
+	return blk;
+}
+
+/* The radio task: the FM receive audio board.afsk has, into the ring, until the ring is full (the rest stays in the
+ * board's buffer for the next poll) or the board has no more (rx_read returns 0). Bounded by the ring's capacity */
+static void xb_fm_fill(void)
+{
+	const hal_afsk_t *a = board.afsk;
+	int16_t *buf = (int16_t *)xb_pcm;
+	int16_t tmp[64];
+	if (xb_pcm == NULL || a == NULL || a->rx_read == NULL)
+		return;
+	while (xb_rx_w - xb_rx_r < (uint32_t)XB_RX_SAMPLES) {
+		uint16_t n = a->rx_read(tmp, (uint16_t)(sizeof tmp / sizeof tmp[0]));
+		if (n == 0)
+			break;
+		for (uint16_t i = 0; i < n && xb_rx_w - xb_rx_r < (uint32_t)XB_RX_SAMPLES; i++)
+			buf[xb_rx_w++ % XB_RX_SAMPLES] = tmp[i];
+	}
+}
+
+/* The FM receive audio path and the encoder let go (an over's end, leaving the FM side, the session's end) */
+static void xb_fm_rx_off(void)
+{
+	if (xb.fm_rx) {
+		const dmr_voice_source_t *src = ambeVoiceSource();
+		if (src->end != NULL)
+			src->end(src->ctx);
+		ambeVoiceSetMicSource(NULL);
+		xband_rx_end();
+		xb.fm_rx = false;
+	}
+	if (xb.fm_rx_on) {
+		if (board.afsk != NULL && board.afsk->rx_stop != NULL)
+			board.afsk->rx_stop();
+		xb.fm_rx_on = false;
+	}
+}
+
+/* Every poll while the session listens on an FM side (FM -> DMR): the receive audio captured and encoded, the frames
+ * handed to the engine as a DMR over; the RX sub-tone (if set) gates it through the radio's own tone_ok */
+static void xb_fm_rx_poll(radio_sm_t *sm)
+{
+	const hal_afsk_t *a = board.afsk;
+	bool on_fm = xb.owned && !xb.p25 && !xb.keyed && !xb.cw_wait && sm->cw_phase == CW_OFF &&
+		     sm->view.ch.mode == RADIO_MODE_FM && board.vocoder != NULL && board.vocoder->present();
+	if (!on_fm || xb_pcm == NULL || a == NULL || a->rx_read == NULL) {
+		xb_fm_rx_off();
+		return;
+	}
+	if (!xb.fm_rx_on) {
+		if (a->rx_start == NULL || !a->rx_start())
+			return;
+		xb.fm_rx_on = true;
+	}
+	bool open = sm->view.state == RS_RX && sm->view.tone_ok;	/* a carrier with the RX tone (none: carrier squelch) */
+	if (open && !xb.fm_rx) {
+		xb_rx_w = xb_rx_r = 0;
+		ambeVoiceSetMicSource(xb_fm_mic);
+		const dmr_voice_source_t *src = ambeVoiceSource();
+		if (src->begin != NULL)
+			src->begin(src->ctx);	/* the encoder runs on the FM audio (the audio task) */
+		xband_rx_begin(0, 0, true, false);	/* FM carries no talkgroup: the DMR side's TX talkgroup is used */
+		xb.fm_rx = true;
+	}
+	if (xb.fm_rx) {
+		uint8_t fr[XB_FRAME_BYTES];
+		const dmr_voice_source_t *src = ambeVoiceSource();
+		xb_fm_fill();
+		while (src->next != NULL && src->next(fr, src->ctx))
+			xband_rx_frame(fr);
+	}
+	if (!open && xb.fm_rx) {
+		const dmr_voice_source_t *src = ambeVoiceSource();
+		if (src->end != NULL)
+			src->end(src->ctx);
+		ambeVoiceSetMicSource(NULL);
+		xband_rx_end();
+		xb.fm_rx = false;		/* the FM receive path stays on for the next over on this side */
+	}
 }
 
 /* --- The call stack's voice, wrapped --- */
@@ -177,6 +285,16 @@ static void xb_channel(radio_sm_t *sm, uint8_t side, uint8_t mode)
 	ch->p25_tx_nac_override = 0;
 	ch->p25_squelch = 0;
 	ch->p25_id = sm->view.dmr.own_id;
+	/* FM (owner, 2026-11-25): the side's RX sub-tone gates what an FM -> DMR receive side relays (only a carrier with it
+	 * is heard; the radio's own tone_ok), and the TX sub-tone is put on a DMR -> FM carrier (ptt_down's KEY_TX reads
+	 * ch->tx_tone; the DCS tail is ptt_release's). Any other mode: no tone. subtone_t and the channel's tone fields
+	 * exist whatever CONFIG_SUBTONE (the picker that edits them in ui_xband.c needs it; this copy does not) */
+	if (mode == XB_MODE_FM) {
+		ch->rx_tone = (subtone_t){ sd->rx_tone_type, sd->rx_tone_value };
+		ch->tx_tone = (subtone_t){ sd->tx_tone_type, sd->tx_tone_value };
+	} else {
+		ch->rx_tone = ch->tx_tone = (subtone_t){ TONE_NONE, 0 };
+	}
 }
 
 /* Receive on A or B in its mode: DMR every talkgroup on the slot and colour code; a P25 channel the native receiver
@@ -453,6 +571,7 @@ static void xb_take(radio_sm_t *sm, uint32_t now_ms)
  * worker's memory given back, the user's channel or VFO as it was */
 static void xb_restore(radio_sm_t *sm, uint32_t now_ms)
 {
+	xb_fm_rx_off();		/* FM -> DMR: the receive audio path and the encoder let go before the memory goes back */
 	xb_let_go(sm);
 	xb.owned = xb.ending = xb.cw_wait = xband_held = false;
 	if (sm->cw_phase != CW_OFF) {
@@ -573,6 +692,7 @@ static void xb_rf_poll(radio_sm_t *sm, uint32_t now_ms)
 			xband_rx_frame(fr);
 		}
 	}
+	xb_fm_rx_poll(sm);	/* FM -> DMR: capture and encode an FM over on an FM receive side (radio_xband.inc) */
 	uint32_t act = 0;
 	bool rx = sm->view.state == RS_RX;
 	bool heard = dmr_call_last_activity(&act) && now_ms - act < XB_HOLD_MS;
@@ -580,6 +700,8 @@ static void xb_rf_poll(radio_sm_t *sm, uint32_t now_ms)
 	if (codeplug_mode_nxdn(sm->view.ch.mode))
 		rx = heard = radio_nxdn_heard(now_ms);
 #endif
+	if (!xb.p25 && !xb.keyed && sm->view.ch.mode == RADIO_MODE_FM)
+		rx = heard = sm->view.state == RS_RX && sm->view.tone_ok;	/* FM -> DMR: the squelch open with the RX tone */
 	xband_in_t in = {
 		.rx = rx,
 		.activity = heard,

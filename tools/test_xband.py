@@ -49,8 +49,8 @@ def main(ROOT, APP, OUT, flags, host):
     # tests/plus/test_xband_radio.inc, run by tools/test_classic.py with the other radio core suites)
     argv = ui_argv(host, tp / 'test_ui_xband.c', OUT / 'test_ui_xband')
     run([*argv, '-I' + str(host), '-I' + str(APP / 'core'), '-DCONFIG_P25_CHANNELS=1', '-DCONFIG_DEV_TX=1',
-         '-DCONFIG_XBAND=1', '-DCONFIG_REPEATERS=1', '-DCONFIG_SFR_CWID=1', '-DCONFIG_LANG_TR=1', str(ui / 'ui_xband.c'),
-         str(APP / 'core/radio/radio_cwid.c'),
+         '-DCONFIG_XBAND=1', '-DCONFIG_REPEATERS=1', '-DCONFIG_SFR_CWID=1', '-DCONFIG_SUBTONE=1', '-DCONFIG_LANG_TR=1',
+         str(ui / 'ui_xband.c'), str(APP / 'core/radio/radio_cwid.c'),	# (tones.c: in uiFlowTest's own sources)
          str(ui / 'ui_scratch.c'), str(ui / 'rpt.c'), str(ui / 'ui_rpt.c'), str(APP / 'core/radio/xband.c'),
          str(APP / 'core/aprs/aprs_fmt.c'), '-lm'], cwd=host)
     run([OUT / 'test_ui_xband'], cwd=host)

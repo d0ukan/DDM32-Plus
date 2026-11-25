@@ -3738,13 +3738,13 @@ encrypted P25 call; empty list; RAM only; the layout on every page), run by `too
 both LNAs off while it transmits). Tools > Cross-band is therefore a store-and-forward relay between two frequencies
 A and B: an over heard on one is recorded whole, then transmitted on the other (A to B and B to A); while nothing is
 heard the receiver goes between A and B, a second on each (held while bursts are heard). Since 2026-11-24 **each side
-has its own mode** (section "A mode per side" below: DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM, P25 -> P25); the table
-is the DMR relay as first built.
+has its own mode** (section "A mode per side" below: DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM, P25 -> P25; and since
+2026-11-25 FM -> DMR, with CTCSS / DCS sub-tones on the FM side); the table is the DMR relay as first built.
 
 | Mode | Can | Cannot |
 |---|---|---|
 | DMR | relay whole overs between two simplex frequencies in the amateur bands, the same colour code and slot on both: the over's AMBE+2 air frames are kept as heard (9 bytes a 20 ms frame) and sent again through the call stack's voice source, so the voice is bit for bit what was heard (no decode / encode); sent as a new call from our own DMR ID to the talkgroup (or unit) it was heard for; up to **37.98 s an over** (the memory: 1,899 frames); longer overs are cut with the alert tone and "!" on Home (the 3-minute rule is in the engine too, but the memory always cuts first) | keep the caller's own ID (we transmit, so the call is ours), relay encrypted calls (no clear voice), hear the other side while it sends, catch the start of an over that begins while it listens on the other frequency (up to about a second can be lost: the dwell, then DMR late entry), different colour codes or slots on A and B (one pair of settings) |
-| FM | send only (2026-11-24): a DMR or NXDN over decoded into FM | receive (FM -> anything is not built: storing FM needs a codec step at receive, docs/xband-multiproto-study.md step 4) |
+| FM | DMR / NXDN over decoded into FM (send), and FM -> DMR (2026-11-25): the FM receive audio encoded into DMR; CTCSS / DCS sub-tones both ways (RX gate, TX tone) | FM -> FM / P25 / NXDN (only FM -> DMR encodes FM audio; study step 4). FM -> DMR is **radio-unverified** (stock codec, FM receive audio level) |
 | P25 | P25 -> P25 (2026-11-24): the IMBE parameters as heard | P25 <-> DMR / FM (transcoding, over the CPU budget; study step 6) |
 
 Owner's rules (2026-11-20) and how they are kept:
@@ -3830,14 +3830,25 @@ way listens on its source side only (no dwell to the other side), and comes back
 |---|---|---|---|
 | DMR -> DMR | as above: AMBE+2 air frames as heard (9 B) | 37.98 s | host; XB-1..8 not yet on the radio |
 | NXDN -> DMR | the NXDN receiver's voice fields (each a DMR air frame, docs/nxdn.md) recorded as they play (`radio_nxdn.c` hands them to the engine), sent through the call stack as a DMR over from our ID to the NXDN destination number (group or unit as heard) | 37.98 s | host (engine); the NXDN receiver itself never heard a real NXDN source |
-| DMR -> FM, NXDN -> FM | the frames kept as heard; while the over is sent they go to the DMR voice bridge's sink one per 20 ms (as an NXDN call's do), so the stock AMBE+2 codec decodes them in the audio task on its own stack (not the radio task: the codec needs about 4 KB of stack); the decoded blocks are taken from the bridge's mixer hook (`ambeVoiceSetMixer`) into 8 blocks (160 ms) of the lent memory and played into the FM modulator through the SSTV / APRS tone path (`hal_afsk_t.tx_pcm`, level 50 as SSTV); the carrier through `ptt_down` (no sub-tone: the session channel has none) | 32.3 s (1,615 frames: the 2,560 B of decoded blocks come out of the memory) | host with a fake codec and tone path; the stock decoder in FM board mode and the level on the air: radio only |
+| DMR -> FM, NXDN -> FM | the frames kept as heard; while the over is sent they go to the DMR voice bridge's sink one per 20 ms (as an NXDN call's do), so the stock AMBE+2 codec decodes them in the audio task on its own stack (not the radio task: the codec needs about 4 KB of stack); the decoded blocks are taken from the bridge's mixer hook (`ambeVoiceSetMixer`) into 8 blocks (160 ms) of the lent memory and played into the FM modulator through the SSTV / APRS tone path (`hal_afsk_t.tx_pcm`, level 50 as SSTV); the carrier through `ptt_down`, with the FM side's **TX sub-tone** (CTCSS / DCS) on it when one is set (`ch->tx_tone`, the same the board's `tx()` puts on a normal FM channel's carrier; the DCS turn-off tail is `ptt_release`'s) | 32.3 s (1,615 frames: the 2,560 B of decoded blocks come out of the memory) | host with a fake codec and tone path; the stock decoder in FM board mode and the level on the air: radio only |
+| FM -> DMR | the FM receive audio captured and encoded as the over is heard (owner 2026-11-25; **HARDWARE-UNVERIFIED**): the DM-32's modem does not route FM receive audio onto the 8 kHz PCM stream (`hal_audio.h`), so the radio task reads the de-emphasised FM receive audio through `board.afsk` (the APRS / NXDN receive path, 8 kHz) into a ring in the lent memory, and the audio task's stock AMBE+2 encoder takes it as its microphone (`ambeVoiceSetMicSource`, a guarded hook in `ambeVoice.c`), FEC-encoding each 20 ms block into a 9-byte air frame; the radio task drains those frames into the engine as a DMR over sent through the call stack to the **DMR side's TX talkgroup** (FM carries no talkgroup, so the FM side is heard only when the DMR side has one set, `xband_listens`; with "As heard" the pair stays one-way DMR -> FM and nothing listens on FM). The squelch opening is the "heard" signal; an **RX sub-tone** on the FM side relays only a carrier carrying it (the radio's own `tone_ok`, none set: carrier squelch) | 37.98 s | host: the engine relay (`test_xband.c`), and the capture / encode / relay plumbing and tone gating with a fake encoder and a faked `board.afsk` receive path (`test_xband_radio.inc`); the FM receive audio level, the de-emphasis and the encoder on the air: **radio only, never run** |
 | P25 -> P25 | the native receiver owns the session's P25 channel (any NAC, any talkgroup, our DMR ID as the unit ID); the worker plays nothing and hands every IMBE frame it would play (admitted clear voice, decoded) to a 16-frame ring at the start of its lent FIFO; the over is sent by the native transmitter's own PTT path (`native_lab_request`, radio_sm_tx_check, battery, time-out) with the ring in place of the microphone (`p25_voice_tx_imbe`: the encoder skipped), the heard NAC, the talkgroup heard and our ID; PTT is let go when the worker says sent | 18.2 s (909 frames of 11 B: the FIFO past the ring and the call replay's frames; the worker's voice context stays its own) | host: the real worker sends the ring bit for bit and hears it back (`test_xband_worker.c`), the real native receiver / transmitter with a fake worker (`test_xband_radio.inc`); on the air: radio only |
 
-Refused (`XB_R_MODE`, "Mode pair not supported"): FM -> anything (no FM receive is kept), anything -> NXDN (no NXDN
-transmitter), P25 <-> DMR / FM / NXDN (transcoding), NXDN -> NXDN, FM -> FM; YSF is no mode here. Every refusal before
-it stays as it was (amateur bands, PMR446, repeater segments and the list, satellite segments, APRS, A = B, a repeater
-channel, the callsign, the DMR ID, a band the radio cannot transmit on, a DOTA session), and so do the question, the
-lock, CROSS and the CW ID. No new TX or band limit was added.
+Refused (`XB_R_MODE`, "Mode pair not supported"): FM -> FM / P25 / NXDN (only FM -> DMR encodes FM receive audio),
+anything -> NXDN (no NXDN transmitter), P25 <-> DMR / FM / NXDN (transcoding), NXDN -> NXDN; YSF is no mode here. FM is
+heard where the other side is DMR **and that DMR side has a TX talkgroup** (then FM <-> DMR both ways; without one a
+DMR / FM pair is one-way DMR -> FM, as before 2026-11-25). Every refusal before it stays as it was (amateur bands,
+PMR446, repeater segments and the list, satellite segments, APRS, A = B, a repeater channel, the callsign, the DMR ID,
+a band the radio cannot transmit on, a DOTA session), and so do the question, the lock, CROSS and the CW ID. **No new
+TX or band limit was added**; the FM TX sub-tone keys through the same `ptt_down` / `board.radio->tx()` path a normal
+FM channel does, and the FM receive side only receives (it never keys).
+
+**FM sub-tones (owner, 2026-11-25).** An FM side of the form has an **RX Tone** row and a **TX Tone** row
+(`CONFIG_SUBTONE`; None, then the CTCSS / DCS picker, as a channel's tones). A picked FM channel brings its own tones.
+RX Tone gates an FM -> DMR receive side (only a carrier with the tone is relayed; none: carrier squelch). TX Tone goes
+on a DMR / NXDN -> FM carrier. Both are the radio's own sub-tone path (`ch->rx_tone` / `ch->tx_tone`), not the voice
+TX path and not the `tx_pcm` audio: the TX sub-tone is generated by the board's `tx()` beside the `tx_pcm` carrier, so
+it needed no new transmit code. Stored on the side as (type, value) so the engine stays free of `hal_radio.h`.
 
 How the radio core keeps the guards: DMR and FM overs key through `ptt_down` (TX inhibit, the battery, the band, the
 radio's time-out); a P25 over through the native transmitter's PTT path, the same one a user's P25 PTT takes. While a
@@ -3853,16 +3864,20 @@ B left of 901,120), static RAM 205,016 B (+48; 6,440 B free)**; zero warnings, f
 fits (the radio task's deepest path now runs through the P25 keying into `native_lab_request`: 324 B free).
 
 Host tests: `tests/plus/test_xband.c` (every pair accepted or refused, the sides heard, PMR446 / repeater refusals with
-mixed modes, NXDN -> DMR and DMR -> FM one way both directions, P25 frames of 11 B intact and their capacity, an ID that
-was never keyed), `tests/plus/test_xband_radio.inc` (DMR -> FM through the real radio core and voice bridge with a
-fake tone path: the FM carrier on B without a tone, every frame to the bridge, the blocks played out, the ID, a tone
-path that refuses; P25 -> P25 through the real native receiver and transmitter: the channel taken, PTT refused with the
-deny tone and never handed on, 300 frames recorded and handed back in order with the heard NAC, talkgroup and our ID,
-the ID after the native receiver let go, the stop), `tests/plus/test_xband_worker.c` (the real P25 worker: the lend,
-no microphone, 120 frames from the ring out bit for bit in LDUs, the same blocks heard back into the ring, nothing
-played, the lent memory untouched, the give back), `tests/plus/test_ui_xband.c` (the mode rows, every pair refused
-with its toast, DMR -> FM still refused on a repeater segment and PMR446). Radio rows: XB-9..XB-13. **Nothing of
-this has been on the air.**
+mixed modes, NXDN -> DMR and NXDN -> FM one way both directions, FM heard only with a DMR TX talkgroup (then both
+ways), an FM over relayed as DMR to the DMR side's TX talkgroup, P25 frames of 11 B intact and their capacity, an ID that was
+never keyed), `tests/plus/test_xband_radio.inc` (DMR -> FM through the real radio core and voice bridge with a fake
+tone path: the FM carrier on B, every frame to the bridge, the blocks played out, the ID, a tone path that refuses;
+**DMR -> FM with a TX CTCSS** on the carrier (`ch->tx_tone`); **FM -> DMR** through the real radio core with the
+faked `board.afsk` receive path and a fake encoder: an FM over captured, encoded and relayed on B to the DMR TX
+talkgroup, and **RX tone gating** (a carrier without the RX tone is not relayed); P25 -> P25 through the real native
+receiver and transmitter: the channel taken, PTT refused with the deny tone and never handed on, 300 frames recorded
+and handed back in order with the heard NAC, talkgroup and our ID, the ID after the native receiver let go, the stop),
+`tests/plus/test_xband_worker.c` (the real P25 worker: the lend, no microphone, 120 frames from the ring out bit for
+bit in LDUs, the same blocks heard back into the ring, nothing played, the lent memory untouched, the give back),
+`tests/plus/test_ui_xband.c` (the mode rows, an FM side's RX / TX Tone rows and the CTCSS picker, every pair refused
+with its toast, DMR -> FM still refused on a repeater segment and PMR446). Radio rows: XB-9..XB-15. **Nothing of
+this has been on the air; the FM -> DMR encoder and audio level are radio-unverified.**
 
 Tests: `tests/plus/test_xband.c` (the rules at every segment's edge; an over recorded and sent in order; B to A, a
 private call; the dwell, held by bursts; a key-up and an encrypted call not relayed; a recording whose end never comes;
@@ -3924,7 +3939,8 @@ both sides and both directions) is gone.
 | | TX NAC 000-F7D | 293 | `xb_key_p25`: the over goes out with it (before: the NAC heard) |
 | | TX TG 1-65535 or As heard | As heard | the engine, as for DMR |
 
-FM and NXDN sides have no rows (FM is sent only, NXDN heard only and its RAN is any). Editing: Left / Right (and the
+NXDN sides have no rows (heard only, its RAN is any); FM sides have an RX Tone and a TX Tone row (the FM -> DMR
+section below). Editing: Left / Right (and the
 knob) step and wrap (Any after 15 / 2 / F7D); digits type a number (talkgroup 8 digits, colour code 2, NAC 3 digits
 read as hex: 0-9 typed, A-F reached with Left / Right); a value out of range is refused with "Out of range" ("Aralık
 dışı") and the old one stays. A mode change that leaves a P25 side with a DMR-sized TX TG puts it back to As heard. A
@@ -3944,6 +3960,43 @@ TX NAC to TG 101), `test_xband_p25` now sends with B's TX NAC 1C8, `tests/plus/t
 NXDN sides, Left / Right and typed values, out of range refused, EN + TR, the layout). Radio row XB-15.
 Cost: FLASH 895,924 B (+1,260 over the # step; **5,196 B left** of 901,120), static RAM 205,072 B (+48); zero warnings,
 forced rebuild identical. **Host-tested only; nothing of it has been on the air.**
+
+### FM -> DMR and FM sub-tones (2026-11-25, branch `xbandfm`)
+
+Owner request (2026-11-25, approved through the coordinator): (1) **FM -> DMR** cross-band - FM on the receive side,
+DMR on the transmit side, the FM receive audio encoded and sent as DMR; (2) **FM CTCSS / DCS** on the FM side - a RX
+sub-tone that gates an FM -> DMR receive side, and a TX sub-tone put on a DMR / NXDN -> FM carrier. Both are in the
+pair table and the "FM sub-tones" note above.
+
+- **FM -> DMR** (HARDWARE-UNVERIFIED). Only the *engine* half is host-testable with the real codec absent: FM joins
+  the receive sources (`xband_pair_ok` FM -> DMR; `xband_listens` hears the FM side only when the DMR
+  side has a TX talkgroup, since FM carries none and an over with nowhere to go would only beep), stored and relayed exactly as a DMR or
+  NXDN source (9-byte AMBE+2 frames). The *radio* half (`radio_xband.inc`) is new and radio-only: on the DM-32 the
+  modem does not put FM receive audio on the 8 kHz PCM stream (`hal_audio.h`; the board has no `audio_tap`), so the
+  audio-task encoder would otherwise see the microphone. The radio task reads the FM receive audio through
+  `board.afsk` (the proven APRS / NXDN path, 8 kHz, de-emphasised) into a ring in the lent memory; the audio task's
+  stock encoder takes it as its microphone through a guarded hook (`ambeVoiceSetMicSource` in `ambeVoice.c`, NULL for
+  normal DMR TX) and FEC-encodes each block; the radio task drains the frames (`ambeVoiceSource`) into the engine. The
+  FM receive audio level into the encoder and the de-emphasis are **unverified on the owner's unit** (study step 4
+  wanted a read-only measurement first); nothing of it has run on the radio.
+- **FM sub-tones** reuse the radio's own path, so **no new transmit code and no new TX guard**: the TX sub-tone is set
+  on `ch->tx_tone` and generated by `board.radio->tx()` beside the `tx_pcm` carrier audio (the DCS tail is
+  `ptt_release`'s); the RX gate is `ch->rx_tone` and the radio's `tone_ok`. Stored on the side as (type, value)
+  (`xband_side_t`), `CONFIG_SUBTONE`-guarded in the form only.
+
+Cost (`--plus --public`, over `ddm25` 022da23, baseline FLASH 893,900 / RAM 205,352): **FLASH 895,104 B (+1,204;
+6,016 B left of 901,120), static RAM 205,704 B (+352; 5,752 B free)**; zero warnings, forced rebuild identical, stacks
+unchanged (the FM capture adds `ambeVoiceAudioBlock -> tx_block -> xb_fm_mic` and the radio task's
+`xb_fm_rx_poll -> ambeVoiceSource` to `plus_xband.STACK_EDGES`).
+
+Host tests: `tests/plus/test_xband.c` `test_fm_to_dmr` (with a DMR TX talkgroup FM <-> DMR both ways and an FM over
+with no talkgroup heard relayed to it; without one the FM side is never tuned) and `test_rules` (the listens table with
+and without the TG), `tests/plus/test_xband_radio.inc`
+`test_xband_fm_tx_tone` (DMR -> FM, the TX CTCSS 88.5 on `ch->tx_tone`), `test_xband_fm_to_dmr` (the real radio core
+with a faked `board.afsk` receive path and a fake encoder: the receive audio captured, encoded and relayed on B to
+TG 101) and `test_xband_fm_rx_tone` (a carrier without the set RX tone not relayed), `tests/plus/test_ui_xband.c`
+`fm_tones` (an FM side's RX Tone / TX Tone rows, stepping the CTCSS picker, EN + TR). Radio rows: `docs/plus-radio-test.md`
+XB-16..XB-18. **Nothing of this has been on the air; the FM -> DMR encoder path is radio-unverified.**
 
 ## DMR receive audio diagnostics (`CONFIG_DMR_AUDIO_DIAG`, ours; branch `fix-dmr-audio`)
 

@@ -126,6 +126,11 @@ STACK_EDGES = (
     # an FM over: the tone path's interrupt reads the decoded blocks, the voice bridge's audio block hands them over
     'call platform/hrc7000/hrc_afsk.c:fill radio_sstvtx_gen core/radio/radio_xband.inc:xb_gen\n'
     'call ambeVoiceAudioBlock beep_mix core/radio/radio_xband.inc:xb_mix\n'
+    # FM -> DMR: the TX encoder reads the FM receive audio through the mic-source hook (tools/plus_xband.py), and the
+    # radio task drives the real voice source and the board's FM receive path to capture and encode the over
+    'call tx_block core/radio/radio_xband.inc:xb_fm_mic\n'
+    'call xb_fm_rx_poll core/dmr/ambe/ambeVoice.c:source_begin core/dmr/ambe/ambeVoice.c:source_next '
+    'core/dmr/ambe/ambeVoice.c:source_end\n'
 )
 
 
@@ -192,6 +197,30 @@ def prepare_crossband(transform, install):
          XB_ON + '\tif (xb_cw_on) {\n\t\txb_cw_on = false;\t// DDM32 Plus cross-band: its ID is over (or cut)\n'
          '\t\tsm->board_mode = RADIO_MODE_FM;\n\t\ttune(sm, xb_now);\n\t\toutputs(sm);\n\t\tchanged(sm);\n\t\treturn;\n\t}\n'
          '#endif\n#if CONFIG_CW_BEACON\n\tif (beacon.keying) {\n'),
+    ])
+    # --- FM -> DMR (owner, 2026-11-25): the TX encoder's microphone can be the FM receive audio instead of the mic.
+    # The DM-32's modem does not route FM receive audio onto the 8 kHz PCM stream (hal_audio.h), so without this the
+    # audio task's encoder would encode the microphone; radio_xband.inc feeds it the board.afsk receive audio through
+    # this guarded hook. NULL (the normal case) leaves DMR transmit untouched ---
+    transform('core/dmr/ambe/ambeVoice.h', [
+        ('void ambeVoiceSetMixer(ambe_voice_mixer_t mixer);\n',
+         'void ambeVoiceSetMixer(ambe_voice_mixer_t mixer);\n' + XB_ON +
+         '// DDM32 Plus cross-band (tools/plus_xband.py): FM -> DMR makes the TX encoder read src() (a\n'
+         '// VOCODER_FRAME_SAMPLES block) in place of the microphone; NULL = the microphone again. Set from the radio\n'
+         '// task, read in the audio task\nvoid ambeVoiceSetMicSource(const int16_t *(*src)(void));\n#endif\n'),
+    ])
+    transform('core/dmr/ambe/ambeVoice.c', [
+        ('static ambe_voice_mixer_t mixer;\n',
+         'static ambe_voice_mixer_t mixer;\n'
+         + XB_ON + 'static const int16_t *(*mic_src)(void);\t// DDM32 Plus cross-band FM -> DMR (tools/plus_xband.py)\n#endif\n'),
+        ('\t\treturn;\t// not transmitting\n\t}\n',
+         '\t\treturn;\t// not transmitting\n\t}\n'
+         + XB_ON + '\t{\n\t\tconst int16_t *(*ms)(void) = LOAD(mic_src);\t// DDM32 Plus cross-band FM -> DMR: the FM\n'
+         '\t\tif (ms != NULL) {\t\t\t\t// receive audio in place of the microphone\n'
+         '\t\t\tconst int16_t *m = ms();\n\t\t\tif (m != NULL)\n\t\t\t\tmic = m;\n\t\t}\n\t}\n#endif\n'),
+        ('void ambeVoiceSetMixer(ambe_voice_mixer_t m)\n{\n\tSTORE(mixer, m);\n}\n',
+         'void ambeVoiceSetMixer(ambe_voice_mixer_t m)\n{\n\tSTORE(mixer, m);\n}\n'
+         + XB_ON + 'void ambeVoiceSetMicSource(const int16_t *(*src)(void))\n{\n\tSTORE(mic_src, src);\n}\n#endif\n'),
     ])
     # --- Tools > Cross-band (ui_xband.c), after DOTA Transfer; the lock, the tick, Home's mark ---
     transform('core/ui/ui_nav.h', [

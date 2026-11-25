@@ -19,6 +19,7 @@
 #include "board.h"
 #include "radio/radio.h"
 #include "radio/radio_cwid.h"
+#include "radio/tones.h"
 #include "radio/xband.h"
 #include "ui/ui_scratch.h"
 #include "ui/ui_xband.h"
@@ -83,9 +84,9 @@ const char *ui_xband_refusal(uint32_t hz)
 
 #if CONFIG_XBAND
 /* A row: its kind, and in bit 4 the side (A 0, B 1) for the side's rows. The form: A, A mode, B, B mode, then each
- * side's filters and TX values for its mode (DMR: RX CC / TS / TG, TX CC / TS / TG; P25: RX NAC, TX NAC, TX TG), Power,
- * Start (owner, 2026-11-25: the per-side rows) */
-enum { K_FREQ, K_MODE, K_RXCC, K_RXTS, K_RXTG, K_TXCC, K_TXTS, K_TXTG, K_RXNAC, K_TXNAC, K_POWER, K_GO };
+ * side's filters and TX values for its mode (DMR: RX CC / TS / TG, TX CC / TS / TG; P25: RX NAC, TX NAC, TX TG; FM:
+ * RX Tone, TX Tone, owner 2026-11-25), Power, Start (owner, 2026-11-25: the per-side rows) */
+enum { K_FREQ, K_MODE, K_RXCC, K_RXTS, K_RXTG, K_TXCC, K_TXTS, K_TXTG, K_RXNAC, K_TXNAC, K_RXTONE, K_TXTONE, K_POWER, K_GO };
 #define ROW(side, k)	((uint8_t)((side) << 4 | (k)))
 #define KIND(r)		((r) & 15u)
 #define SIDE(r)		((r) >> 4 & 1u)
@@ -146,18 +147,49 @@ static void go(void)
 
 /* --- The form --- */
 
+#if CONFIG_SUBTONE
+/* A side's FM sub-tone as the radio's subtone_t (RX gates what is relayed, TX adds it to the carrier; owner,
+ * 2026-11-25). Stored on the side as (type, value) so the engine stays free of hal_radio.h */
+static subtone_t side_tone(const xband_side_t *x, bool tx)
+{
+	subtone_t t = { tx ? x->tx_tone_type : x->rx_tone_type, tx ? x->tx_tone_value : x->rx_tone_value };
+	return t;
+}
+
+static void set_side_tone(xband_side_t *x, bool tx, subtone_t t)
+{
+	if (tx) {
+		x->tx_tone_type = t.type;
+		x->tx_tone_value = t.value;
+	} else {
+		x->rx_tone_type = t.type;
+		x->rx_tone_value = t.value;
+	}
+}
+#endif
+
 static void form_rows(void)
 {
 	const xband_req_t *q = xband_req();
 	static const uint8_t dmr[] = { K_RXCC, K_RXTS, K_RXTG, K_TXCC, K_TXTS, K_TXTG }, p25[] = { K_RXNAC, K_TXNAC, K_TXTG };
+#if CONFIG_SUBTONE
+	static const uint8_t fm[] = { K_RXTONE, K_TXTONE };	/* an FM side: a sub-tone to receive by and one to send */
+#endif
 	nrows = 0;
 	for (uint8_t k = 0; k < 4; k++)
 		rows[nrows++] = ROW(k >> 1, k & 1u);	/* A, A mode, B, B mode */
 	for (uint8_t sd = 0; sd < 2; sd++) {
 		bool d = q->mode[sd] == XB_MODE_DMR, p = q->mode[sd] == XB_MODE_P25;
+		const uint8_t *tbl = d ? dmr : p ? p25 : NULL;
 		uint8_t n = d ? sizeof dmr : p ? sizeof p25 : 0;
+#if CONFIG_SUBTONE
+		if (q->mode[sd] == XB_MODE_FM) {
+			tbl = fm;
+			n = sizeof fm;
+		}
+#endif
 		for (uint8_t i = 0; i < n; i++)
-			rows[nrows++] = ROW(sd, d ? dmr[i] : p25[i]);
+			rows[nrows++] = ROW(sd, tbl[i]);
 	}
 	rows[nrows++] = K_POWER;
 	rows[nrows++] = K_GO;
@@ -179,7 +211,8 @@ static void sb_hex3(sbuf_t *b, uint16_t v)
 static void form_item(uint16_t i, ui_item_t *it)
 {
 	static const char *const kinds[] = { [K_RXCC] = "RX CC", [K_RXTS] = "RX TS", [K_RXTG] = "RX TG", [K_TXCC] = "TX CC",
-					     [K_TXTS] = "TX TS", [K_TXTG] = "TX TG", [K_RXNAC] = "RX NAC", [K_TXNAC] = "TX NAC" };
+					     [K_TXTS] = "TX TS", [K_TXTG] = "TX TG", [K_RXNAC] = "RX NAC", [K_TXNAC] = "TX NAC",
+					     [K_RXTONE] = "RX Tone", [K_TXTONE] = "TX Tone" };
 	static const char *const modes[XB_MODES] = { "DMR", "FM", "P25", "NXDN" };
 	const xband_req_t *q = xband_req();
 	uint8_t r = rows[i], k = KIND(r), sd = (uint8_t)SIDE(r);
@@ -241,6 +274,17 @@ static void form_item(uint16_t i, ui_item_t *it)
 		}
 		/* fall through */
 	case K_TXNAC: sb_hex3(&b, k == K_RXNAC ? x->rx_nac : x->tx_nac); break;
+#if CONFIG_SUBTONE
+	case K_RXTONE:
+	case K_TXTONE: {
+		subtone_t t = side_tone(x, k == K_TXTONE);
+		if (t.type == TONE_NONE)
+			sb_str(&b, TR("None"));
+		else
+			sb_tone(&b, &t);
+		break;
+	}
+#endif
 	case K_POWER: sb_str(&b, q->power <= 1u ? TR("Low") : q->power == 2u ? TR("Mid") : TR("High")); break;
 	default: break;
 	}
@@ -304,6 +348,15 @@ static void step(uint8_t r, int dir)
 	}
 	case K_RXNAC: x->rx_nac = (uint16_t)wrap(x->rx_nac, dir, XB_NAC_ANY + 1u); break;	/* 000-F7D, Any */
 	case K_TXNAC: x->tx_nac = (uint16_t)wrap(x->tx_nac, dir, XB_NAC_ANY); break;
+#if CONFIG_SUBTONE
+	case K_RXTONE:
+	case K_TXTONE: {
+		bool tx = KIND(r) == K_TXTONE;
+		subtone_t t = side_tone(x, tx);
+		set_side_tone(x, tx, tones_step(&t, dir > 0 ? 1 : -1));	/* None, CTCSS low to high, DCS by code */
+		break;
+	}
+#endif
 	case K_POWER: q->power = (uint8_t)(wrap(q->power - 1u, dir, 3) + 1u); break;
 	default: break;
 	}
@@ -492,6 +545,15 @@ static void pick_select(uint16_t i, bool hold)
 		if (nac < XB_NAC_ANY)
 			x->tx_nac = nac;
 	}
+#if CONFIG_SUBTONE
+	else if (mode == XB_MODE_FM) {
+		/* an FM channel brings its CTCSS / DCS: the one it receives by (RX gate) and the one it sends (TX tone) */
+		x->rx_tone_type = ch->rx_tone.type;
+		x->rx_tone_value = ch->rx_tone.value;
+		x->tx_tone_type = ch->tx_tone.type;
+		x->tx_tone_value = ch->tx_tone.value;
+	}
+#endif
 	ui_pop();
 	ui_dirty();
 }

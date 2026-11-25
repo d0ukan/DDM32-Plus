@@ -2,9 +2,11 @@
 /* DDM32 Plus cross-band store and forward, the portable part (core/radio/xband.c; tools/test_xband.py builds it with
  * -DCONFIG_XBAND=1), on a fake radio core:
  *   - the rules: the amateur bands' edges, PMR446, the repeater input / output and satellite segments, APRS, A = B,
- *     the callsign; the pairs of modes (a mode per side): DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM, P25 -> P25 built,
- *     every other pair refused (FM -> anything, anything -> NXDN, P25 <-> DMR / FM / NXDN), one-way pairs heard on
- *     their source side only;
+ *     the callsign; the pairs of modes (a mode per side): DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM, FM -> DMR,
+ *     P25 -> P25 built, every other pair refused (FM -> FM / P25 / NXDN, anything -> NXDN, P25 <-> DMR / FM / NXDN),
+ *     one-way pairs heard on their source side only;
+ *   - FM -> DMR: an FM over (no talkgroup heard) recorded as 9-byte AMBE+2 frames and sent on the DMR side to its
+ *     TX talkgroup; with no TX talkgroup there the FM side is not heard at all (DMR -> FM stays one-way);
  *   - an over heard on A recorded frame by frame and sent on B in the same order, to the same talkgroup (or unit), the
  *     transmitter let go once the frames are out; and B to A;
  *   - listening goes between A and B every XB_DWELL_MS, held while bursts are heard;
@@ -54,8 +56,8 @@ static bool io_key(uint8_t side, uint32_t dst, bool group)
 	f.keyed_side = side;
 	f.key_dst = dst;
 	f.key_group = group;
-	if (f.refuse_key)
-		return false;
+	if (f.refuse_key || dst == 0)
+		return false;	/* dst 0: nothing to key to (the real xb_key_dmr / xb_key_p25 refuse it) */
 	f.tx = true;
 	return true;
 }
@@ -92,6 +94,7 @@ static void poll_ms(uint32_t ms)
 
 static uint8_t *mem;
 static size_t mem_len;
+static uint32_t start_tx_tg[2];	/* the next start_modes' TX talkgroups (the sides heard are fixed at the start) */
 
 /* A session on 145.500 / 433.500 in modes ma (A) and mb (B), CC1 TS1, with mem_bytes of memory in three pieces */
 static void start_modes(size_t mem_bytes, uint8_t ma, uint8_t mb)
@@ -108,9 +111,10 @@ static void start_modes(size_t mem_bytes, uint8_t ma, uint8_t mb)
 	r->mode[1] = mb;
 	for (int k = 0; k < 2; k++) {
 		xband_side_t d = { .rx_nac = XB_NAC_ANY, .tx_nac = XB_NAC_DEFAULT, .rx_cc = XB_CC_ANY, .rx_ts = XB_TS_ANY,
-				   .tx_cc = 1, .tx_ts = 1 };
+				   .tx_cc = 1, .tx_ts = 1, .tx_tg = start_tx_tg[k] };
 		r->side[k] = d;
 	}
+	start_tx_tg[0] = start_tx_tg[1] = 0;	/* (for this start only) */
 	r->power = 1;
 	strcpy(r->call, "TA2DOU");
 	CHECK(xband_start() && xband_on() && f.req_posts == 1, "starts");
@@ -222,9 +226,9 @@ static void test_rules(void)
 	static const struct { uint8_t a, b, listens; } pairs[] = {
 		{ XB_MODE_DMR, XB_MODE_DMR, 3 }, { XB_MODE_P25, XB_MODE_P25, 3 },
 		{ XB_MODE_NXDN, XB_MODE_DMR, 1 }, { XB_MODE_DMR, XB_MODE_NXDN, 2 },
-		{ XB_MODE_DMR, XB_MODE_FM, 1 }, { XB_MODE_FM, XB_MODE_DMR, 2 },
+		{ XB_MODE_DMR, XB_MODE_FM, 1 }, { XB_MODE_FM, XB_MODE_DMR, 2 },	/* no DMR TX TG: FM not heard */
 		{ XB_MODE_NXDN, XB_MODE_FM, 1 }, { XB_MODE_FM, XB_MODE_NXDN, 2 },
-		{ XB_MODE_FM, XB_MODE_FM, 0 }, { XB_MODE_NXDN, XB_MODE_NXDN, 0 },	/* no FM receive, no NXDN transmitter */
+		{ XB_MODE_FM, XB_MODE_FM, 0 }, { XB_MODE_NXDN, XB_MODE_NXDN, 0 },	/* no FM -> FM, no NXDN transmitter */
 		{ XB_MODE_P25, XB_MODE_DMR, 0 }, { XB_MODE_DMR, XB_MODE_P25, 0 },	/* no transcoding */
 		{ XB_MODE_P25, XB_MODE_FM, 0 }, { XB_MODE_FM, XB_MODE_P25, 0 },
 		{ XB_MODE_P25, XB_MODE_NXDN, 0 }, { XB_MODE_NXDN, XB_MODE_P25, 0 },
@@ -239,6 +243,17 @@ static void test_rules(void)
 		      "pair %u -> %u: %u, listens %u", pairs[i].a, pairs[i].b, (unsigned)xband_check(&r),
 		      (unsigned)xband_listens(&r));
 	}
+	/* FM -> DMR is heard only with a TX talkgroup on the DMR side (FM carries none): then FM <-> DMR both ways */
+	r.mode[0] = XB_MODE_FM;
+	r.mode[1] = XB_MODE_DMR;
+	r.side[1].tx_tg = 101;
+	CHECK(xband_check(&r) == XB_R_OK && xband_listens(&r) == 3, "FM -> DMR with B TX TG: both ways");
+	r.mode[0] = XB_MODE_DMR;
+	r.mode[1] = XB_MODE_FM;
+	CHECK(xband_listens(&r) == 1, "the TG on the FM side does not make FM heard: %u", (unsigned)xband_listens(&r));
+	r.side[0].tx_tg = 9;
+	CHECK(xband_listens(&r) == 3, "DMR A with TX TG: B FM heard too");
+	r.side[0].tx_tg = r.side[1].tx_tg = 0;
 	r.mode[0] = r.mode[1] = XB_MODE_P25;
 	CHECK(xband_frame_bytes(&r) == XB_P25_FRAME_BYTES, "P25 frames: 11 bytes");
 	r.mode[0] = XB_MODE_NXDN;
@@ -469,12 +484,13 @@ static void test_refusals(void)
 	xband_release();
 }
 
-/* NXDN -> DMR (A -> B), and DMR -> FM: heard on the source side only, frames intact, back to the source after */
+/* NXDN -> DMR (A -> B), and NXDN -> FM: heard on the source side only, frames intact, back to the source after (DMR
+ * <-> FM is now two-way, test_fm_to_dmr; NXDN stays one-way, no NXDN transmitter) */
 static void test_one_way(void)
 {
 	static const uint8_t to[2] = { XB_MODE_DMR, XB_MODE_FM };
 	for (int k = 0; k < 2; k++) {
-		start_modes(17104, k ? XB_MODE_DMR : XB_MODE_NXDN, to[k]);
+		start_modes(17104, XB_MODE_NXDN, to[k]);
 		poll_ms(5 * XB_DWELL_MS);
 		CHECK(f.tuned == 0 && f.tunes == 1, "%d: no dwell to the side that is never heard", k);
 		over(300, 2862, true);
@@ -499,7 +515,7 @@ static void test_one_way(void)
 		xband_stop();
 		poll_ms(25);
 		xband_release();
-		start_modes(17104, to[k], k ? XB_MODE_DMR : XB_MODE_NXDN);
+		start_modes(17104, to[k], XB_MODE_NXDN);
 		xband_view(&v);
 		CHECK(f.tuned == 1 && v.side == 1, "%d: the reverse pair listens on B", k);
 		poll_ms(3 * XB_DWELL_MS);
@@ -508,6 +524,52 @@ static void test_one_way(void)
 		poll_ms(25);
 		xband_release();
 	}
+}
+
+/* FM -> DMR (owner, 2026-11-25): an FM over (the radio core hands over 9-byte AMBE+2 frames the stock codec made of
+ * the FM receive audio; it has no talkgroup heard, so dst 0) relayed on the DMR side to that side's TX talkgroup. An
+ * unset TX talkgroup leaves nothing to key to: the over is dropped with an error beep. FM -> DMR is also heard on the
+ * DMR side (DMR -> FM), so the dwell goes both ways */
+static void test_fm_to_dmr(void)
+{
+	start_tx_tg[1] = 101;	/* the DMR side's TX talkgroup: FM has none to carry over */
+	start_modes(17104, XB_MODE_FM, XB_MODE_DMR);
+	CHECK(xband_listens(xband_req()) == 3, "FM <-> DMR heard both ways");
+	to_side(0);
+	/* an FM over: the radio core passes no src and no dst (FM carries none); frames as the encoder makes them */
+	in.rx = true;
+	xband_rx_begin(0, 0, true, false);
+	for (uint32_t k = 0; k < 150; k++) {
+		uint8_t fr[XB_FRAME_BYTES];
+		memset(fr, (int)(k & 0xFF), sizeof fr);
+		fr[0] = (uint8_t)(k >> 8);
+		xband_rx_frame(fr);
+		if (k % 3 == 2)
+			poll_ms(50);
+	}
+	xband_rx_end();
+	in.rx = false;
+	poll_ms(25);
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(f.keys == 1 && f.keyed_side == 1 && f.key_dst == 101 && f.key_group, "sent on the DMR side to TG 101: %u",
+	      (unsigned)f.key_dst);
+	tx_follow();
+	bool order;
+	uint32_t n = drain(NULL, NULL, &order);
+	CHECK(n == 150 && order && f.unkeys == 1, "the FM over out whole as DMR: %u", (unsigned)n);
+	xband_stop();
+	poll_ms(25);
+	xband_release();
+	/* no TX talkgroup on the DMR side: the FM side is not heard at all (DMR -> FM one way, listening on B only) */
+	start_modes(17104, XB_MODE_FM, XB_MODE_DMR);
+	xband_view(&v);
+	CHECK(xband_listens(xband_req()) == 2 && f.tuned == 1 && v.side == 1, "no TX TG: only the DMR side heard");
+	poll_ms(3 * XB_DWELL_MS);
+	CHECK(f.tuned == 1 && f.tunes == 1, "no dwell to the FM side");
+	xband_stop();
+	poll_ms(25);
+	xband_release();
 }
 
 /* P25 -> P25: 11-byte IMBE frames, kept and sent intact, the capacity counted in them */
@@ -714,6 +776,7 @@ int main(void)
 	test_cut();
 	test_refusals();
 	test_one_way();
+	test_fm_to_dmr();
 	test_p25();
 	test_id_wait();
 	test_segs_free();

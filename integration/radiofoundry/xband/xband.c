@@ -48,21 +48,30 @@ uint8_t xband_check_hz(uint32_t hz)
 #endif
 
 #if CONFIG_XBAND
-/* The pairs built (xband.h): frames as heard, or the stock codec's decode into FM */
+/* The pairs built (xband.h): frames as heard, the stock codec's decode into FM, or (FM -> DMR) the stock codec's
+ * encode of FM receive audio */
 bool xband_pair_ok(uint8_t from, uint8_t to)
 {
 	switch (from) {
 	case XB_MODE_DMR:
 	case XB_MODE_NXDN: return to == XB_MODE_DMR || to == XB_MODE_FM;
 	case XB_MODE_P25: return to == XB_MODE_P25;
-	default: return false;	/* FM is never heard (no FM receive path to keep) */
+	case XB_MODE_FM: return to == XB_MODE_DMR;	/* FM receive -> AMBE+2 encode -> DMR (radio_xband.inc) */
+	default: return false;
 	}
+}
+
+/* A side is heard when its over can go to the other side. An FM side is heard only when the DMR side it relays to
+ * has a TX talkgroup: FM carries none, so with "As heard" there is nothing to key to; listening there would only
+ * drop every FM over with an error beep and halve the time the DMR side is heard (DMR -> FM stays one-way then) */
+static bool heard_on(const xband_req_t *r, uint8_t s)
+{
+	return xband_pair_ok(r->mode[s], r->mode[1u - s]) && (r->mode[s] != XB_MODE_FM || r->side[1u - s].tx_tg != 0);
 }
 
 uint8_t xband_listens(const xband_req_t *r)
 {
-	return (uint8_t)((xband_pair_ok(r->mode[0], r->mode[1]) ? 1u : 0u) |
-			 (xband_pair_ok(r->mode[1], r->mode[0]) ? 2u : 0u));
+	return (uint8_t)((heard_on(r, 0) ? 1u : 0u) | (heard_on(r, 1) ? 2u : 0u));
 }
 
 uint8_t xband_frame_bytes(const xband_req_t *r)

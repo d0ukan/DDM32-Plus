@@ -255,6 +255,30 @@ static void form(void)
 	ok_run("shot:xband-modes");
 }
 
+/* FM tone rows (owner, 2026-11-25): an FM side shows an RX Tone row (the sub-tone an FM -> DMR receive side is gated by)
+ * and a TX Tone row (the sub-tone a DMR -> FM transmit side adds to the carrier); both start at None and step through
+ * the CTCSS / DCS picker */
+static void fm_tones(void)
+{
+	start("fm tones");
+	ok_run("down right wait:100");			/* A mode: DMR -> FM */
+	expect("shows=FM");
+	expect("shows=A_RX_Tone shows=A_TX_Tone");	/* the two tone rows appear for an FM side */
+	expect_tr("shows", "None");
+	const xband_side_t *a = &xband_req()->side[0];
+	check(xband_req()->mode[0] == XB_MODE_FM && a->rx_tone_type == TONE_NONE && a->tx_tone_type == TONE_NONE,
+	      "FM on A, tones start at None");
+	/* step A's RX Tone up: the lowest CTCSS; then its TX Tone */
+	ok_run("down down down right wait:100");	/* to A RX Tone, one step from None */
+	check(a->rx_tone_type == TONE_CTCSS && a->rx_tone_value > 0, "A RX tone: a CTCSS value");
+	layout();
+	ok_run("shot:xband-fm-tones");
+	ok_run("down right wait:100");			/* A TX Tone, one step from None */
+	check(a->tx_tone_type == TONE_CTCSS && a->tx_tone_value > 0, "A TX tone: a CTCSS value");
+	/* B stays DMR: it has no tone rows, its RX CC does */
+	expect("shows=B_RX_CC");
+}
+
 static void refusals(void)
 {
 	start("refusals");
@@ -561,7 +585,8 @@ typedef void (*case_fn)(void);
 
 int main(void)
 {
-	static const case_fn all[] = { form, refusals, picker, owner_pair, question_and_run, ended_itself, segs_free };
+	static const case_fn all[] = { form, fm_tones, refusals, picker, owner_pair, question_and_run, ended_itself,
+				       segs_free };
 	int bad = 0, run = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		for (unsigned i = 0; i < sizeof all / sizeof all[0]; i++) {

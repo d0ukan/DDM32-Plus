@@ -11,10 +11,15 @@
  *   DMR -> DMR, NXDN -> DMR    the 72-bit AMBE+2 air frames as heard (an NXDN voice field is a DMR air frame), 9 bytes
  *                              a 20 ms frame, sent again through the call stack's voice source;
  *   DMR -> FM, NXDN -> FM      the same frames kept, decoded by the stock AMBE+2 codec while it sends and played into
- *                              the FM modulator (the SSTV / APRS tone path, hal_afsk.h tx_pcm);
+ *                              the FM modulator (the SSTV / APRS tone path, hal_afsk.h tx_pcm), with the TX side's
+ *                              CTCSS / DCS sub-tone on the carrier where one is set (owner, 2026-11-25);
+ *   FM -> DMR                  the FM receive audio encoded by the stock AMBE+2 codec as the over is heard (radio
+ *                              task feeds it the board.afsk receive audio; the audio task runs the encoder), the
+ *                              9-byte air frames sent through the call stack's voice source as a DMR over; an FM
+ *                              receive side's CTCSS / DCS gates what is relayed (owner, 2026-11-25);
  *   P25 -> P25                 the IMBE voice parameters as heard (88 bits in 11 bytes a frame), sent again through the
  *                              P25 transmitter with its encoder skipped (p25_lab.c).
- * Nothing else: no transcoding (P25 <-> DMR), no transmitter for NXDN, no YSF, no FM receive (XB_R_MODE). A pair that
+ * Nothing else: no transcoding (P25 <-> DMR), no transmitter for NXDN, no YSF, no FM -> P25 / NXDN (XB_R_MODE). A pair that
  * works one way only (NXDN -> DMR, DMR -> FM, ...) listens on its source side only. The memory is the P25 worker's
  * lent while the session runs and given back after (p25_lab.c, plus_xband.py): its voice context, audio FIFO and the
  * call replay's frames (~17 KB, about 38 s of AMBE+2 frames; less the FM side's 160 ms of decoded audio), or for a P25
@@ -90,6 +95,11 @@ typedef struct {
 	uint16_t tx_nac;		/* P25: sent with this NAC (0-0xF7D) */
 	uint8_t rx_cc, rx_ts;		/* DMR: heard on 0-15 / XB_CC_ANY, slot 1, 2 / XB_TS_ANY */
 	uint8_t tx_cc, tx_ts;		/* DMR: sent on 0-15, slot 1, 2 */
+	/* FM sub-tone (owner, 2026-11-25; tone_type_t mirrored: 0 none, 1 CTCSS, 2 DCS, 3 DCS inverted). RX gates an FM
+	 * receive side: only a carrier carrying this tone is relayed (none: carrier squelch). TX adds it to an FM transmit
+	 * side's carrier (DMR -> FM), so tone-gated radios and repeaters open. Value: CTCSS Hz x 10, DCS the octal code */
+	uint8_t rx_tone_type, tx_tone_type;
+	uint16_t rx_tone_value, tx_tone_value;
 } xband_side_t;
 
 typedef struct {
