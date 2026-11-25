@@ -3,7 +3,7 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased (v1.0.4 candidate)
+## v1.0.4 (test build, not published)
 
 Firmware. Host-tested only; not yet run on the radio.
 
