@@ -438,6 +438,10 @@ static void prep_h7pos(void) { hold_set(7, 2); }
 static void prep_h4sat(void) { hold_set(4, 16); }
 static void prep_h4iss(void) { hold_set(4, UI_HOLD_ISS); }
 static void prep_h4none(void) { hold_set(4, 0); }
+/* A hold code stored as Tools > Clock (T_CLOCK 34 + 1 in the ui_menus.c enum, set by 1.0.4) next to a code that is still good */
+#define CLOCK_CODE 35
+static void prep_h7clock(void) { hold_set(7, CLOCK_CODE); }
+static void prep_h7beforeclock(void) { hold_set(7, CLOCK_CODE - 1); }
 static void prep_h4none_h7sat(void)
 {
 	hold_set(4, 0);
@@ -691,6 +695,23 @@ static int iss_checks(void)
 		snprintf(want, sizeof want, "set%d=40", UI_SET_HOLD_FIRST + 4);
 		bad += iss_flow(n = "Settings > Keys: hold 4 is the ISS in a new radio", "ok 7 8", NULL, "wait:300", want, false);
 	}
+#if !CONFIG_CLOCK_TOOLS
+	/* Tools > Clock is not in this build: a hold code stored for it acts as None for that digit only (no crash, the
+	 * speed dial toast, hold 4 still the ISS), and the Settings > Keys picker steps over it (one None, not two) */
+	bad += iss_flow(n = "Hold 7 stored as Clock (not built): the speed dial toast", "", prep_h7clock, "long:7",
+			T("screen=home toast=Speed_dial_7", "screen=home toast=H"), false);
+	ISS_CHECK(starts == 0, n);
+	bad += iss_flow(n = "Hold 7 stored as Clock: hold 4 is still the ISS", "", prep_h7clock, "long:4", "screen=home banner=none", false);
+	ISS_CHECK(starts == 1 && start_sat == iss, n);
+	{
+		char want[40];
+		snprintf(want, sizeof want, "set%d=%d", UI_SET_HOLD_FIRST + 7, CLOCK_CODE + 1);
+		bad += iss_flow(n = "Settings > Keys: the picker steps over Clock", "ok 7 8 up up up", prep_h7beforeclock, "ok wait:300",
+				want, false);
+		bad += iss_flow(n = "Settings > Keys: a stored Clock steps on to the next tool", "ok 7 8 up up up", prep_h7clock, "ok wait:300",
+				want, false);
+	}
+#endif
 	/* a change in Settings is seen at once: hold 7 set there opens its tool without a restart */
 	bad += iss_flow(n = "Settings > Keys: hold 7 set there opens its tool", "ok 7 8 up up up ok ok long:back long:back ", NULL,
 			"long:7", "screen=gps", false);

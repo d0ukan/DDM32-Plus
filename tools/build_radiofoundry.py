@@ -713,7 +713,7 @@ def main():
         "CONFIG_SPECTRUM_WF="+("y" if args.plus else "n"),
         "CONFIG_MAP_COVERAGE="+("y" if args.plus else "n"),
         "CONFIG_GPS_DASH="+("y" if args.plus else "n"),
-        "CONFIG_CLOCK_TOOLS=n",	# DDM32 Plus 1.0.5: Tools > Clock left out of the build (flash); the source and hooks stay, "y" brings it back
+        "CONFIG_CLOCK_TOOLS=n",	# DDM32 Plus, next version: Tools > Clock left out of the build (flash); the source and hooks stay, "y" brings it back
         "CONFIG_DOTA="+("y" if args.plus else "n"),	# DDM32 Plus DOTA Transfer (docs/dota.md)
         "CONFIG_APRS_MICE="+("y" if args.plus else "n"),	# DDM32 Plus Mic-E beacons (round 14 item 47)
         "CONFIG_APRS_STATION="+("y" if args.plus else "n"),	# DDM32 Plus APRS station page (round 14 item 49)

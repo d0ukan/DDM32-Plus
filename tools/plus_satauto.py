@@ -498,6 +498,15 @@ def prepare_hold_keys(transform):
          '\tHOLD_ROW(0), HOLD_ROW(1), HOLD_ROW(2), HOLD_ROW(3), HOLD_ROW(4), HOLD_ROW(5), HOLD_ROW(6), HOLD_ROW(7),\n'
          '\tHOLD_ROW(8), HOLD_ROW(9),\t// DDM32 Plus hold keys: last, so the rows above keep their places\n'
          '#endif\n};\n'),
+        # Tools > Clock left out of a build (CONFIG_CLOCK_TOOLS=n): its code stays reserved (the other tools keep their
+        # numbers), but the picker steps over it instead of showing a second "None"
+        ('\t\tset_store(s, s->values[(k + 1u) % s->n]);\n',
+         '\t\tk = (uint8_t)((k + 1u) % s->n);\n'
+         '#if CONFIG_SATELLITES && !CONFIG_CLOCK_TOOLS\n'
+         '\t\tif (s->id >= UI_SET_HOLD_FIRST && s->id <= UI_SET_HOLD_LAST && s->values[k] == T_CLOCK + 1)\n'
+         '\t\t\tk = (uint8_t)((k + 1u) % s->n);\t// DDM32 Plus: a tool that is not in this build\n'
+         '#endif\n'
+         '\t\tset_store(s, s->values[k]);\n'),
         ('#if CONFIG_KEY_ASSIGN\n\tif (s->type != ST_ACTION && s->id >= UI_SET_KEY_FIRST && s->id <= UI_SET_KEY_LAST) {\n',
          '#if CONFIG_SATELLITES\n'
          '\tif (s->type != ST_ACTION && s->id >= UI_SET_HOLD_FIRST && s->id <= UI_SET_HOLD_LAST) {\n'
