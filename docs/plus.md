@@ -5227,7 +5227,10 @@ all read hold 4 = ISS (code 40, `SETTINGS_HOLD_ISS`) and the rest none. Firmware
 (it ignores the 12 bytes) and saves its 392 B page: going back to 1.0.4 then returns the defaults. UI ids
 `UI_SET_HOLD_FIRST..LAST` through `ui_svc_setting_get / _set` (a value above 255 or below 0 is refused). The codes are
 the Tools list's own numbers, which "keep their numbers"; a later new tool goes before Battery as ISS did, so a stored
-Battery code would shift (the static assert in `ui_hold.inc` keeps the ISS default honest).
+Battery code would shift (the static assert in `ui_hold.inc` keeps the ISS default honest). `SETTINGS_LAYOUT` stays 1
+(no field moves or changes meaning) and the release manifest's `settings_format` stays 1 as well: a downgrade loses only
+the hold keys (back to the defaults), which does not warrant the programmers' "settings format goes back" warning. No
+PC program parses the settings record (backups are whole flash images), so nothing there knows its size.
 
 **What a hold does** (`ui_hold_tool`, `integration/radiofoundry/sat/ui_hold.inc`, included by `ui_menus.c` after the
 Tools list; hooks in `tools/plus_satauto.py` `prepare_hold_keys`): `ui_home_key` asks it first for a held digit on a

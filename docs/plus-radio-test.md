@@ -967,6 +967,7 @@ Settings only; nothing keyed. Run IK-1 and IK-2 again first: with the default ma
 
 | Row | Do | Expect |
 |---|---|---|
+| IK-0 | Before installing over 1.0.3: note a few settings (language, theme, brightness, Settings > Keys rows, VFO A frequency and mode). After the install, look at them again | every one as before (the settings record only grew at its end); "4 hold" reads ISS, the other nine None |
 | IK-3 | Settings > Keys, scroll to the end: ten rows "0 hold" .. "9 hold"; "4 hold" reads ISS, the others None; set "7 hold" to Pager (OK or Left / Right), power cycle the radio, look again | the rows are last; 4 = ISS, 7 = Pager after the power cycle, the rest None |
 | IK-4 | On a channel, Home idle: look at the bottom row; hold 7 about a second; Back | "OK Menu  * Quick  4 ISS+" (the plus: more than one digit is set); the Pager screen opens; hold 4 still starts the ISS track / Tools > ISS |
 | IK-5 | Set 4 to None and 7 to Satellites: look at Home's bottom row; hold 4; hold 7 | the row reads "* Quick  7 Satellites" (OK Menu gone to make room); hold 4 shows the toast "Speed dial 4 is empty: set it in qdmr"; hold 7 opens Satellites |
