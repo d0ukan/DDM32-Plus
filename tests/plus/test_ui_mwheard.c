@@ -139,6 +139,8 @@ static void start(const char *n)
 {
 	name = n;
 	sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_K);
+	if (getenv("MWHEARD_SHOTS") != NULL)	/* a directory: the "shot:" tokens save the screens there (README pictures) */
+		sim_set_shot_dir(getenv("MWHEARD_SHOTS"), "mwh-");
 	if (large) {
 		ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
 		run("reboot");	/* the setting is read at start */
@@ -226,7 +228,7 @@ static void p25_letter(void)
 	stub_nac = 0x1C8;
 	run("wait:400");
 	if (!large)
-		run("expect:shows=$1C8/456");
+		run("expect:shows=$1C8/456 shot:p25-call");
 	layout();
 	stub_tg = 101;
 	stub_src = 77285;

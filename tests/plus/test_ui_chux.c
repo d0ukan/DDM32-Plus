@@ -185,6 +185,7 @@ static void case_dmr_rows(void)
 	run("up");
 	expect(T("focus=Any:_all_TGs", "focus=T\374m\374:_t\374m_gruplar"));
 	layout();
+	run("shot:rx-list");
 	run("ok");
 	expect(T("screen=channel toast=Any:_every_TG_on_this_slot", "screen=channel toast=T\374m\374:_bu_slottaki"));
 	run("wait:3000");	/* the toast gone */

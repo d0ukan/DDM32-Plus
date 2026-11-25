@@ -112,6 +112,11 @@ static void shot(const char *theme, int page)
 	char path[512];
 	snprintf(path, sizeof path, "%s/tools-%s-%d.png", dir, theme, page);
 	check(sim_save_png(path, 2), "png", path);
+	/* the README pictures: one screen at 1:1, the dark theme's first page and the page with Cross-band */
+	if (strcmp(theme, "dark") == 0 && (page == 0 || page == 1000)) {
+		snprintf(path, sizeof path, "%s/%s.png", dir, page == 0 ? "readme-tools" : "readme-tools-xband");
+		check(sim_save_png(path, 1), "png", path);
+	}
 }
 
 static void walk(const char *theme)
@@ -156,7 +161,7 @@ static void walk(const char *theme)
 		}
 		snprintf(prev, sizeof prev, "%s", label);
 		if (step == 0 || strcmp(label, "Cross-band") == 0 || strcmp(label, "Battery") == 0)
-			shot(theme, step);
+			shot(theme, strcmp(label, "Cross-band") == 0 ? 1000 : step);
 		ncalls = 0;
 		run("down wait:60");
 	}

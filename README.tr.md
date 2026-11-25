@@ -10,7 +10,7 @@
 
 [![Lisans: GPL-3.0-or-later](https://img.shields.io/badge/lisans-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Temel: Open25-DM32](https://img.shields.io/badge/temel-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Sürüm: v1.0.0-beta.6](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.0--beta.6-orange)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.0-beta.6)
+[![Sürüm: v1.0.2](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.2-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.2)
 
 [English README](README.md)
 
@@ -39,12 +39,17 @@
 
 ## Durum
 
-DDM32 Plus **beta** aşamasındadır. En son ön sürüm **[v1.0.0-beta.6](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.0-beta.6)** (2026-11-21); Windows programı
-2.0.0-beta.3 ve yeni çok platformlu programın ilk sürümü 3.0.0-alpha.2 (Windows kurulumu; Linux ve macOS paketleri
-sonra) ile birlikte. Yeni özellikler ve DMR ses ayarları yazarın telsizinde denendi.
+DDM32 Plus **v1.0.0** (2026-11-23) ile **kararlı** sürüm hattındadır. Yayımlanmış en son sürüm
+**[v1.0.2](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.2)** (2026-11-25); Windows programı **2.0.0** ve
+çok platformlu program **3.0.0** ile birlikte (Windows kurulumu; Linux ve macOS paketleri sonra; kaynak
+[`rust/`](rust/) içinde). Daha yeni **v1.0.3 ve v1.0.4 bu ağaçta test sürümleridir, yayımlanmadı**; aşağıda
+"(1.0.3)" veya "(1.0.4)" yazan özellikler bunlara aittir.
+
 Aşağıdaki her özellik yazıldı ve bilgisayarda testlerden geçti (telsizin ekran, radyo çekirdeği ve modemlerinin
-simülatörü), ama **birçok özellik henüz havada denenmedi**. Telsiz test notları:
-[`docs/plus-radio-test.md`](docs/plus-radio-test.md); sürüm değişiklikleri: [CHANGELOG.md](CHANGELOG.md).
+simülatörü), ama **birçok özellik henüz havada denenmedi**: CHANGELOG her sürüm için hangi parçanın telsizde
+çalıştığını, hangisinin yalnızca bilgisayarda test edildiğini söyler (v1.0.2 ve sonrası: yalnızca bilgisayarda test
+edildi). Telsiz test notları: [`docs/plus-radio-test.md`](docs/plus-radio-test.md); sürüm değişiklikleri:
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Nereden geliyor
 
@@ -65,7 +70,7 @@ Upstream'in README'si [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md) için
 | --- | :---: | :---: | --- |
 | FM / AM | ✅ | ✅ FM | AM air band'de ve alıcının izin verdiği diğer frekanslarda; CTCSS/DCS ton bulucu |
 | DMR Tier I/II | ✅ | ✅ | Any renk kodu / slot / talkgroup, roaming, SMS, acil çağrı, Tier III trunk takibi (alma) |
-| P25 Faz 1 | ✅ | ✅ | NAC hem **hex hem desimal**, Any NAC/TG, ayrı RX/TX NAC, acil ve birebir çağrılar, trunk takibi |
+| P25 Faz 1 | ✅ | ✅ | NAC hem **hex hem desimal**, Any NAC/TG, ayrı RX/TX NAC, RX grup listeleri, alınan NAC ana ekranda, acil ve birebir çağrılar, trunk takibi |
 | YSF (C4FM) | ✅ DN + VW | ⚙️ VW (varsayılan kapalı) | başlıktan çağrı işareti |
 | NXDN48 | ✅ | — | |
 | dPMR | ✅ | — | |
@@ -75,39 +80,88 @@ Upstream'in README'si [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md) için
 - **Ana ekranda frekans**: kanalın altında (rölelerde RX/TX), Large text iki kata kadar büyük.
 - **2–6 kanal izleme**: ana ekranda A–F satırları; her harf bir kanal **ya da kendi VFO'su**, her modda.
 - **VFO'da her mod**: frekansı yaz, FM / DMR / P25 / YSF / NXDN / dPMR / AM seç, Any dahil tüm ayarlarıyla.
-- **P25'li zone tarama** (kısa çağrıları yakalar), **öncelikli kanal**, **geçici atlama**.
-- P25 arama, DMR arama, spektrum ve close call, fox hunt.
+- **P25'li zone tarama** (kısa çağrıları yakalar), **öncelikli kanal**, **geçici atlama**. Sessiz kanallar erken
+  bırakılır (**daha hızlı kanal tarama**, v1.0.1; tarama sırasında basılı tutulan `0` eski bekleyişe döner); boş
+  kanalda P25 alıcısının sahte taşıyıcısı tutulmak yerine öğrenilir (1.0.3 / 1.0.4).
+- **P25 RX grup listeleri**: P25 kanalı, codeplug'daki RX grup listelerinden birini seçer (Yok, Tümü ya da bir liste)
+  (1.0.3).
+- **Alınan NAC ana ekranda** `$hex/dec` olarak (örneğin `$1C8/456`): arayan satırında ve çift / çoklu izleme
+  panellerinde, NAC Any kanalda da (1.0.4).
+- P25 arama, DMR arama, tüm dijital arama, spektrum ve close call, fox hunt.
 
 | Çoklu izleme | C'de bir çağrı |
 | :---: | :---: |
 | ![Dört satırlı çoklu izleme](images/ddm32/multiwatch.png) | ![Çoklu izleme, C satırında çağrı](images/ddm32/multiwatch-call.png) |
+
+| İzleme satırında NAC'li P25 çağrısı | P25 RX grup listesi | P25 arama | Tüm dijital arama |
+| :---: | :---: | :---: | :---: |
+| ![Çoklu izleme satırında TG, ID ve NAC'li P25 çağrısı](images/ddm32/home-p25-call.png) | ![P25 kanalı için RX grup listesi seçici](images/ddm32/rx-list.png) | ![Bulunanlar listesiyle P25 arama](images/ddm32/search-p25.png) | ![Bulunanlar listesiyle tüm dijital arama](images/ddm32/search-all.png) |
 
 ### Harita ve konum
 
 - Çevrimdışı **Türkiye haritası**: 81 il, **973 ilçe**, röleler, duyulan APRS istasyonları, yürüdüğünüz iz.
 - **Röleler**: 252 hazır röle (DMR ve FM), il il gruplu, en yakın önce, tek tuşla VFO'ya; **otomatik röle**
   yolculukta daha yakın röleyi önerir.
-- **APRS** alma ve gönderme, mesaj, SOS; GPS, işaretli noktalarla Go-To, güneş ve ay.
-- **Uydular**: geçişler, geçiş alarmı, Doppler düzeltmeli takip.
+- **APRS** alma ve gönderme, mesaj, SOS; GPS, işaretli noktalarla Go-To, **Güneş ve Ay** (doğuş, batış, alaca, ayın
+  evresi).
+- **Uydular**: geçişler, geçiş alarmı, Doppler düzeltmeli takip, geçişin **gökyüzü grafiği**. **Araçlar > ISS**'in kendi
+  sayfası var (geri sayım, AOS / LOS, ses ve APRS iniş frekansları, otomatik takip, "Yörüngeyi göster"); ana ekranda
+  basılı tutulan `4`, geçiş yakınsa ISS takibini başlatır, değilse bu sayfayı açar (bir basılı tutma tuşu, aşağıda
+  Araçlar'a bakın).
 - **Havalimanları** (en yakın önce, AM ile ayar) ve **deniz VHF** tablosu (sadece alma).
 
 | Haritada APRS | İz | Röle seçimi |
 | :---: | :---: | :---: |
 | ![Haritada APRS istasyonu](images/ddm32/map-aprs.png) | ![Haritada iz](images/ddm32/map-track.png) | ![Haritada seçilen röle](images/ddm32/map-repeater.png) |
 
+| ISS sayfası | Gökyüzü grafiği | Güneş ve Ay |
+| :---: | :---: | :---: |
+| ![Araçlar > ISS sayfası](images/ddm32/iss-page.png) | ![ISS geçişinin gökyüzü grafiği](images/ddm32/sky-plot.png) | ![Güneş ve Ay sayfası](images/ddm32/sun-moon.png) |
+
 ### Araçlar
 
 **DOTA Transfer**: kanalları, bölgeleri, tümünü ya da bir veri paketini başka bir DDM32 Plus telsize FM veya DMR ile
-gönderir (beta, henüz iki telsiz arasında denenmedi). Tüm modlarda ve izlenen kanallarda **son çağrılar**, **çapraz
-bant kaydet-ilet** (DMR, yalnızca başındayken), **hava bandı izleme** (bir meydanın frekansları birlikte), **3D
-şelale**, **Mic-E** beacon, Go-To ve haritayla **APRS istasyon sayfası**, **veri paketleri** (RadioID isimleri, hava
-bandı frekansları), kendi aralık ve adımınızla daha hızlı P25 / DMR arama, **kanal silme**. Ton bulucu (CTCSS/DCS), DTMF / SelCall çözücü, CW çözücü ve pratik, pager (POCSAG) ve ACARS, SSTV alma, CW beacon,
-lone worker (ses, DMR acil veya APRS SOS), QSO işaretli çağrı geçmişi, kalan süreli pil grafiği, programlama kablosu
-üzerinden MMDVM hotspot, FM arayan kimliği, sinyal kalitesi.
+gönderir (beta, henüz iki telsiz arasında denenmedi). Tüm modlarda ve izlenen kanallarda **son çağrılar**, **Çapraz
+bant** (aşağıda), **hava bandı izleme** (bir meydanın frekansları birlikte), **3D şelale**, **Mic-E** beacon, Go-To ve
+haritayla **APRS istasyon sayfası**, **veri paketleri** (RadioID isimleri, hava bandı frekansları), kendi aralık ve
+adımınızla daha hızlı P25 / DMR arama, **kanal silme**. Ton bulucu (CTCSS/DCS), DTMF / SelCall çözücü, CW çözücü ve
+pratik, pager (POCSAG) ve ACARS, SSTV alma, CW beacon, lone worker (ses, DMR acil veya APRS SOS), QSO işaretli çağrı
+geçmişi, kalan süreli pil grafiği, programlama kablosu üzerinden MMDVM hotspot, FM arayan kimliği, sinyal kalitesi.
+Araçlar'daki her girişin kendi simgesi var (DOTA Transfer, Çapraz bant, CW çözücü ve SOS tuşu için 1.0.3'te yenilendi).
+Ayarlar > Hakkında ve açılış ekranı "d0ukan, TA2DOU" imzasını taşır (aşağıdaki ekran görüntüleri, upstream'in Hakkında
+sayfasını gösteren bilgisayar simülatöründen).
 
-| Araçlar | Havalimanları | Deniz VHF | Pil |
+**Basılı tutma tuşları** (1.0.4): ana ekranda basılı tutulan `0`-`9` rakamı, **Ayarlar > Tuşlar**'dan seçtiğiniz aracı
+açar ("0 uzun" ... "9 uzun" satırları; Yok ya da Araçlar'daki herhangi bir giriş). `4` varsayılan olarak ISS'tir; ana
+ekranın ipucu satırı ilk ayarlı tuşu söyler ("4 ISS", birden çoksa "+"). VFO'da basılı tutulan rakam yine rakamı yazar.
+
+#### Çapraz bant
+
+**Araçlar > Çapraz bant**, iki frekans arasında yalnız başındayken çalışan bir kaydet-ilet rölesidir; **A ve B farklı
+bantlarda olabilir**: bir tarafta duyulan konuşma bütün olarak kaydedilir, sonra diğer tarafta gönderilir. Her tarafın
+kendi modu vardır; olan çiftler **DMR -> DMR, NXDN -> DMR, DMR / NXDN -> FM ve P25 -> P25** (1.0.3). Her tarafın kendi
+süzgeçleri ve TX değerleri var: DMR **RX CC / TS / TG** (varsayılan Tümü) ve **TX CC / TS / TG**, P25 **RX NAC**
+(varsayılan Tümü) ve **TX NAC** (varsayılan 293; P25 rölesi duyduğu NAC ile değil, tarafın TX NAC'i ile gönderir).
+Telsiz başlamadan sorar, çalışırken kilitlenir, her ekranda **CROSS** işareti gösterir ve CW ile kimlik verir. Amatör
+bantların ve PMR446'nın dışını reddeder; formda `#` uydu, röle ve APRS bölümlerini de serbest bırakır (telsiz
+kapanana kadar; ipucu satırında "# segs: on" yazar). Yalnız DMR olan eski sürüm v1.0.2'dedir; taraf başına modlar ve
+değerler test sürümü özellikleridir (1.0.3), yalnızca bilgisayarda test edildi.
+
+| Form (DMR tarafları) | Form (NXDN / P25 modları) | Bölgeden seçim | Bölümler serbest |
 | :---: | :---: | :---: | :---: |
-| ![Araçlar menüsü](images/ddm32/tools.png) | ![Havalimanı listesi](images/ddm32/airfields.png) | ![Deniz VHF tablosu](images/ddm32/marine.png) | ![Pil grafiği](images/ddm32/battery.png) |
+| ![Çapraz bant formu, DMR taraf değerleri](images/ddm32/xband-dmr-sides.png) | ![Çapraz bant formu, NXDN ve P25 tarafları](images/ddm32/xband-modes.png) | ![Bir bölgeden tarafın kanalını seçme](images/ddm32/xband-pick.png) | ![Çapraz bant formu, bölümler serbest](images/ddm32/xband-free.png) |
+
+| Form (üst) | Soru | A'da dinleme | B'de gönderme |
+| :---: | :---: | :---: | :---: |
+| ![Çapraz bant formu, üst satırlar](images/ddm32/xband-form.png) | ![Yalnız başındayken sorusu](images/ddm32/xband-question.png) | ![Oturum sırasında ana ekran: ipucu satırı Listen A diyor](images/ddm32/xband-home.png) | ![B'de gönderirken ana ekran, CROSS işaretiyle](images/ddm32/xband-sending.png) |
+
+| Araçlar | Araçlar, diğer simgeler | Ayarlar > Tuşlar | Basılı tutma ipucu olan ana ekran |
+| :---: | :---: | :---: | :---: |
+| ![Araçlar menüsü](images/ddm32/tools.png) | ![Araçlar menüsü, DOTA Transfer ve Çapraz bant simgeleri](images/ddm32/tools-more.png) | ![Ayarlar > Tuşlar, basılı tutma tuşları](images/ddm32/keys-hold.png) | ![Basılı tutma tuşlarını söyleyen ana ekran ipucu satırı](images/ddm32/home-holdhint.png) |
+
+| Havalimanları | Deniz VHF | Pil |
+| :---: | :---: | :---: |
+| ![Havalimanı listesi](images/ddm32/airfields.png) | ![Deniz VHF tablosu](images/ddm32/marine.png) | ![Pil grafiği](images/ddm32/battery.png) |
 
 | Son çağrılar | APRS istasyonu | Hakkında: veri paketleri | DOTA frekansı |
 | :---: | :---: | :---: | :---: |
@@ -117,8 +171,8 @@ lone worker (ses, DMR acil veya APRS SOS), QSO işaretli çağrı geçmişi, kal
 | :---: | :---: | :---: |
 | ![P25 arama aralığı düzenleyici](images/ddm32/search-range.png) | ![Kanal silme sorusu](images/ddm32/delete-channel.png) | ![Desimal P25 NAC satırı](images/ddm32/nac-decimal.png) |
 
-*Ekran görüntüleri firmware'in kendi ekran simülatöründen alındı (İngilizce arayüz; telsiz varsayılan olarak
-Türkçe). Gerçek telsiz fotoğrafları eklenecek.*
+*Ekran görüntüleri firmware'in kendi ekran simülatöründen, uydurma verilerle alındı (İngilizce arayüz; telsiz
+varsayılan olarak Türkçe; bilgisayar UI testleri yazar). Gerçek telsiz fotoğrafları eklenecek.*
 
 ### Önce Türkçe
 
@@ -131,9 +185,11 @@ APRS / havalimanları, DOTA, veri paketleri, çapraz bant, tanılama): [`docs/ku
 
 Windows 10/11 için **DDM32 Plus programlayıcı**yı kullanın (başka hiçbir şey kurmanız gerekmez):
 
-1. [Son sürümden](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.0-beta.6) `DDM32Plus-Setup-2.0.0-beta.3.exe` dosyasını indirip çalıştırın. Yalnızca sizin
-   kullanıcınıza kurulur (yönetici izni istemez), Başlat menüsü ve masaüstü kısayolu oluşturur. Windows "bilinmeyen
-   yayıncı" uyarısı verebilir (program henüz kod imzalı değil): **Ek bilgi → Yine de çalıştır**.
+1. [Son sürümden](https://github.com/d0ukan/DDM32-Plus/releases/latest) `DDM32Plus-Setup-<sürüm>.exe` dosyasını
+   indirip çalıştırın (çok platformlu program 3.0.0, C# Windows programı 2.0.0'ın yerini alır ve üzerine kurulur;
+   ikisi de işi görür). Yalnızca sizin kullanıcınıza kurulur (yönetici izni istemez), Başlat menüsü ve masaüstü
+   kısayolu oluşturur. Windows "bilinmeyen yayıncı" uyarısı verebilir (program henüz kod imzalı değil): **Ek bilgi →
+   Yine de çalıştır**.
 2. İlk açılışta **Türkçe** ya da **English** seçin.
 3. Programlama kablosunu (CH340) takın, **Telsizi güncelle** sekmesine geçip adımları izleyin; telsizi ne zaman
    kapatıp açacağınızı program söyler. Yedekleriniz programın `backups` klasöründe durur; güncellemede ve
@@ -142,17 +198,22 @@ Windows 10/11 için **DDM32 Plus programlayıcı**yı kullanın (başka hiçbir 
 Programlayıcı telsizin yedeğini alır (ya da aynı telsizin son yedeğini kullanır), neyin değişeceğini tam olarak
 gösterir, yükler (telsizin kendi codec'iyle stok yazılımdan da), kendi yedeğinizden önceki sürüme veya stok yazılıma
 geri döner, imzalı güncellemeleri denetler, kendini günceller ve kendi indirdiğiniz dosyalardan bilgisayarınızda
-oluşturduğu **veri paketlerini** (RadioID isimleri, hava bandı frekansları) telsize yükler. Rehber:
-[`win/docs/kullanim.md`](win/docs/kullanim.md). Her şey **sizin sorumluluğunuzdadır** (yukarıdaki sorumluluk reddine
-bakın).
+oluşturduğu **veri paketlerini** (RadioID isimleri, hava bandı frekansları) telsize yükler. Telsizin durumu sayfası,
+salt okunur canlı panel, arama günlüğü ve "kanallarım" da vardır. Rehberler: [`win/README.md`](win/README.md) ve
+[`win/docs/kullanim.md`](win/docs/kullanim.md) (Windows, C#), [`rust/README.md`](rust/README.md) (çok platformlu,
+Rust); telsizin kendisi için Türkçe kılavuz [`docs/kullanim-telsiz.md`](docs/kullanim-telsiz.md). Her şey
+**sizin sorumluluğunuzdadır** (yukarıdaki sorumluluk reddine bakın).
 
-Eski Python programı (`DDM32Plus-1.0.0-beta.2.zip`, [`pc/`](pc/)) çalışmaya devam eder; `%LOCALAPPDATA%\DDM32Plus`
-(ya da `DDM25Plus`) içindeki yedekleri yeni program da bulur.
+Eski Python programı ([`pc/`](pc/)) çalışmaya devam eder; `%LOCALAPPDATA%\DDM32Plus` (ya da `DDM25Plus`)
+içindeki yedekleri yeni programlar da bulur.
 
 ## Geliştirilmekte olanlar
 
-- DOTA Transfer'in (kanallar ve veri paketleri) ve DMR çapraz bant kaydet-ilet'in iki telsizle denenmesi.
-- Çok platformlu program 3.0.0-alpha.2: Linux (AppImage, .deb) ve macOS paketleri.
+- DOTA Transfer'in (kanallar ve veri paketleri) ve Çapraz bant'ın iki telsizle denenmesi, ayrıca 1.0.2 - 1.0.4
+  değişikliklerinin telsizde denenmesi (telsiz test satırları [`docs/plus-radio-test.md`](docs/plus-radio-test.md)
+  içinde).
+- 1.0.3 / 1.0.4'ün yayımlanması (şimdilik test sürümü) ve programlayıcı 3.1.0 adayı (CHANGELOG, "v1.1.0 candidate").
+- Çok platformlu programın Linux (AppImage, .deb) ve macOS paketleri.
 
 ## Derleme
 
@@ -160,8 +221,8 @@ Derleme upstream'in [`BUILD.md`](BUILD.md) dosyasını izler (csky-elf araç zin
 DDM32 Plus şunları ekler:
 
 ```sh
-python3 tools/build_radiofoundry.py --plus --stack-check --verify-rebuild           # tam DDM32 Plus
-python3 tools/build_radiofoundry.py --plus --public --stack-check --verify-rebuild  # herkese açık profil (ID veritabanı yok)
+python3 tools/build_radiofoundry.py --plus --stack-check --verify-rebuild           # DDM32 Plus
+python3 tools/build_radiofoundry.py --plus --public --stack-check --verify-rebuild  # aynı imaj (RadioID veritabanı bir veri paketidir)
 make test
 ```
 

@@ -374,6 +374,8 @@ static int iss_flow(const char *name, const char *setup, void (*prep)(void), con
 	fake_reset(true);
 	hold_defaults();	/* every flow starts from the default hold keys (4 = the ISS) */
 	sim_reset(sim_geom_find("240x320i10x5"), iss_map);
+	/* SAT_SHOTS: a directory; the "shot:" tokens save the English, normal-size screens there (README pictures) */
+	sim_set_shot_dir(getenv("SAT_SHOTS") != NULL && !turkish && !large ? getenv("SAT_SHOTS") : NULL, "sat-");
 	if (large) {
 		ui_svc_setting_set(UI_SET_LARGE_TEXT, 1);
 		sim_run("reboot", err, sizeof err);	/* the setting is read at start */
@@ -471,7 +473,7 @@ static int iss_checks(void)
 	const char *n;
 #define ISS_CHECK(c, name) do { if (!(c)) { printf("FAIL %s (%s): %s\n", name, T("en", "tr"), #c); bad++; } } while (0)
 	/* The page: the next pass, AOS / LOS, the downlinks, the rows from Before AOS on, the hint */
-	bad += iss_flow("ISS page", ISSP, NULL, "",
+	bad += iss_flow("ISS page", ISSP, NULL, "shot:iss-page",
 			T("screen=iss shows=AOS_in_5:00__47 shows=AOS_ shows=LOS_ shows=145.800_voice_/_SSTV "
 			  "shows=145.825_APRS shows=Before_AOS shows=Auto_track shows=Every_pass hides=For "
 			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80 shows=Show_orbit hides=2_sky",
@@ -659,7 +661,7 @@ static int iss_checks(void)
 	bad += iss_flow(n = "Hold hint: 7 Satellites alone", "", prep_h4none_h7sat, "wait:300", T("screen=home shows=*_Quick hides=4_ISS", "screen=home shows=*_H hides=4_ISS"), true);
 	ISS_CHECK(strncmp(ui_st.home_hint, TR("* Quick") , strlen(TR("* Quick"))) == 0 && strstr(ui_st.home_hint, "  7 ") != NULL &&
 		  gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2 && strstr(ui_st.home_hint, "+") == NULL, n);
-	bad += iss_flow(n = "Hold hint: 4 ISS and 7 Position: the first, and a plus", "", prep_h7pos, "wait:300",
+	bad += iss_flow(n = "Hold hint: 4 ISS and 7 Position: the first, and a plus", "", prep_h7pos, "wait:300 shot:home-holdhint",
 			T("screen=home shows=OK_Menu shows=*_Quick shows=4_ISS+", "screen=home shows=OK_Men shows=4_ISS+"), true);
 	ISS_CHECK(gfx_text_width(ui_layout.small, ui_st.home_hint) <= gfx_width() - 2, n);
 	bad += iss_flow(n = "Hold hint: 4 ISS and 7 Position with a caller", CALLER, prep_h7pos, "wait:300",
@@ -684,7 +686,7 @@ static int iss_checks(void)
 		snprintf(want, sizeof want, "set%d=2", UI_SET_HOLD_FIRST + 7);
 		bad += iss_flow(n = "Settings > Keys: hold 7 cycled to the second tool", "ok 7 8 up up up ok ok", NULL, "wait:300", want, false);
 		snprintf(want, sizeof want, "set%d=41", UI_SET_HOLD_FIRST + 4);
-		bad += iss_flow(n = "Settings > Keys: hold 4 starts as the ISS and cycles on", "ok 7 8 up up up up up up ok", NULL, "wait:300",
+		bad += iss_flow(n = "Settings > Keys: hold 4 starts as the ISS and cycles on", "ok 7 8 up up up up up up wait:200 shot:keys-hold ok", NULL, "wait:300",
 				want, false);
 		snprintf(want, sizeof want, "set%d=40", UI_SET_HOLD_FIRST + 4);
 		bad += iss_flow(n = "Settings > Keys: hold 4 is the ISS in a new radio", "ok 7 8", NULL, "wait:300", want, false);

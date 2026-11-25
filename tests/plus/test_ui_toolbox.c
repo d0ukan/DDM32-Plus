@@ -115,6 +115,8 @@ static void start(const char *n)
 	tb_sim_clear();
 	tb_sim.gps = true;	/* a GPS without a fix (the simulator's own has a fix and a time) */
 	sim_reset(sim_geom_find("240x320i10x5"), SIM_MAP_M);	/* the DM-32 has Left / Right, * and # (map M) */
+	if (getenv("TOOLBOX_SHOTS") != NULL)	/* a directory: the "shot:" tokens save the screens there (README pictures) */
+		sim_set_shot_dir(getenv("TOOLBOX_SHOTS"), "tb-");
 }
 
 /* --- the screens' content --- */
@@ -624,6 +626,8 @@ static void almanac_rows(bool turkish)
 	ok_run("wait:300");
 	expect("screen=almanac shows=UTC+03:00");
 	layout();
+	if (!turkish)
+		ok_run("shot:sun-moon");
 	for (int k = 0; k < 8; k++) {		/* other UTC offsets */
 		ok_run("right right right");
 		layout();
