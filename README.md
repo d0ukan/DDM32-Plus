@@ -10,7 +10,7 @@ by **d0ukan · TA2DOU**
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Based on Open25-DM32](https://img.shields.io/badge/based%20on-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Release: v1.0.2](https://img.shields.io/badge/release-v1.0.2-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.2)
+[![Release: v1.0.2](https://img.shields.io/badge/release-v1.0.1-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.1)
 
 [Türkçe README](README.tr.md)
 
@@ -38,10 +38,10 @@ by **d0ukan · TA2DOU**
 ## Status
 
 DDM32 Plus has been a **stable** release line since **v1.0.0** (2026-11-23). The latest published release is
-**[v1.0.2](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.2)** (2026-11-25), with the Windows programmer
+**[v1.0.1](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.1)** (2026-11-24), with the Windows programmer
 **2.0.0** and the cross-platform programmer **3.0.0** (Windows setup; Linux and macOS packages follow; source in
-[`rust/`](rust/)). The newer **v1.0.3 and v1.0.4 are test builds in this tree and are not published**; features marked
-"(1.0.3)" or "(1.0.4)" below belong to them.
+[`rust/`](rust/)). The newer **v1.0.2, v1.0.3 and v1.0.4 are test builds in this tree and are not published**;
+features marked "(1.0.2)", "(1.0.3)" or "(1.0.4)" below are in them only, not in the published release.
 
 Every feature below is built and covered by host tests (a simulator of the radio's screens, radio core and modems), but
 **many features have not yet been tried on the air**: the CHANGELOG says, release by release, what has run on a radio
@@ -67,7 +67,7 @@ README is kept in [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
 | --- | :---: | :---: | --- |
 | FM / AM | ✅ | ✅ FM | AM on the air band and (if the receiver allows it) elsewhere; tone finder for CTCSS/DCS |
 | DMR Tier I/II | ✅ | ✅ | Any colour code / timeslot / talkgroup, roaming, SMS, emergency, Tier III trunk following (receive) |
-| P25 Phase 1 | ✅ | ✅ | NAC in hex **and decimal**, Any NAC/TG, split RX/TX NAC, RX group lists, the received NAC shown on Home, emergency and unit-to-unit calls, trunk following |
+| P25 Phase 1 | ✅ | ✅ | NAC in hex **and decimal**, Any NAC/TG, split RX/TX NAC, RX group lists (1.0.3), the received NAC shown on Home, emergency and unit-to-unit calls, trunk following |
 | YSF (C4FM) | ✅ DN + VW | ⚙️ VW (off by default) | callsigns from the header |
 | NXDN48 | ✅ | — | |
 | dPMR | ✅ | — | |
@@ -103,7 +103,7 @@ README is kept in [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
   moon's phase).
 - **Satellites**: passes, pass alarm, Doppler-corrected tracking, a **sky plot** of the pass. **Tools > ISS** has its
   own page (countdown, AOS / LOS, the voice and APRS downlinks, auto track, "Show orbit"); on Home a held `4` starts ISS
-  tracking, or opens that page when no pass is near (a hold key, see Tools below).
+  tracking, or opens that page when no pass is near (1.0.3; a hold key, see Tools below).
 - **Airfields** (nearest first, AM tune) and a **marine VHF** table (receive only).
 
 | APRS on the map | Track | Repeater pick |
@@ -139,7 +139,7 @@ TX values: DMR **RX CC / TS / TG** (default Any) and **TX CC / TS / TG**, P25 **
 (default 293; a P25 relay sends with the side's TX NAC, not the one it heard). The radio asks before it starts,
 locks while it runs, shows **CROSS** on every screen and sends a CW ID. Outside the amateur bands and PMR446 it refuses;
 `#` on the form also frees the satellite, repeater and APRS segments (until the radio is switched off; the hint bar
-shows "# segs: on"). The earlier DMR-only version is in v1.0.2; the per-side modes and values are test-build features
+shows "# segs: on"). The earlier DMR-only version is in the published v1.0.1; the per-side modes and values are test-build features
 (1.0.3), host-tested only.
 
 | Form (DMR sides) | Form (modes P25 / NXDN) | Pick from a zone | Segments free |
@@ -167,12 +167,17 @@ shows "# segs: on"). The earlier DMR-only version is in v1.0.2; the per-side mod
 | ![P25 search range editor](images/ddm32/search-range.png) | ![Delete channel question](images/ddm32/delete-channel.png) | ![P25 NAC row in decimal](images/ddm32/nac-decimal.png) |
 
 *Screenshots come from the firmware's own screen simulator with made-up data (English UI; the radio runs Turkish by
-default; the host UI tests write them). Photos from a real radio will follow.*
+default; the host UI tests write them). Several show test-build features that are not in the published v1.0.1: the RX
+group list, the per-side Cross-band form and the Tools icons (1.0.3), the hold keys and the NAC on watch rows (1.0.4).
+Photos from a real radio will follow.*
 
 ### Turkish first
 
 The whole interface is translated to Turkish (and remains available in English). Technical names (RX, TX, NAC, VFO,
 …) stay as they are.
+
+A short Turkish guide for using the radio (keys, zones and channels, multi-watch, modes, search, map / APRS /
+airfields, DOTA, data packs, cross-band, diagnostics): [`docs/kullanim-telsiz.md`](docs/kullanim-telsiz.md).
 
 ## Installing
 
@@ -203,8 +208,8 @@ The older Python programmer ([`pc/`](pc/)) still works; existing backups in `%LO
 ## In development
 
 - Two-radio tests of DOTA Transfer (channels and data packs) and of Cross-band, and on-the-air runs of the 1.0.2 - 1.0.4
-  changes (the radio test rows are in [`docs/plus-radio-test.md`](docs/plus-radio-test.md)).
-- Publishing 1.0.3 / 1.0.4 (test builds now) and the programmer 3.1.0 candidate (see CHANGELOG, "v1.1.0 candidate").
+  test builds (the radio test rows are in [`docs/plus-radio-test.md`](docs/plus-radio-test.md)).
+- Publishing 1.0.2 - 1.0.4 (test builds now) and the programmer 3.1.0 candidate (see CHANGELOG, "v1.1.0 candidate").
 - Linux (AppImage, .deb) and macOS packages of the cross-platform programmer.
 
 ## Building

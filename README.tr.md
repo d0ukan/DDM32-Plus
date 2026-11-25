@@ -10,7 +10,7 @@
 
 [![Lisans: GPL-3.0-or-later](https://img.shields.io/badge/lisans-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Temel: Open25-DM32](https://img.shields.io/badge/temel-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Sürüm: v1.0.2](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.2-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.2)
+[![Sürüm: v1.0.2](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.0.1-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.1)
 
 [English README](README.md)
 
@@ -40,10 +40,10 @@
 ## Durum
 
 DDM32 Plus **v1.0.0** (2026-11-23) ile **kararlı** sürüm hattındadır. Yayımlanmış en son sürüm
-**[v1.0.2](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.2)** (2026-11-25); Windows programı **2.0.0** ve
+**[v1.0.1](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.1)** (2026-11-24); Windows programı **2.0.0** ve
 çok platformlu program **3.0.0** ile birlikte (Windows kurulumu; Linux ve macOS paketleri sonra; kaynak
-[`rust/`](rust/) içinde). Daha yeni **v1.0.3 ve v1.0.4 bu ağaçta test sürümleridir, yayımlanmadı**; aşağıda
-"(1.0.3)" veya "(1.0.4)" yazan özellikler bunlara aittir.
+[`rust/`](rust/) içinde). Daha yeni **v1.0.2, v1.0.3 ve v1.0.4 bu ağaçta test sürümleridir, yayımlanmadı**; aşağıda
+"(1.0.2)", "(1.0.3)" veya "(1.0.4)" yazan özellikler yalnız bunlardadır, yayımlanmış sürümde yoktur.
 
 Aşağıdaki her özellik yazıldı ve bilgisayarda testlerden geçti (telsizin ekran, radyo çekirdeği ve modemlerinin
 simülatörü), ama **birçok özellik henüz havada denenmedi**: CHANGELOG her sürüm için hangi parçanın telsizde
@@ -70,7 +70,7 @@ Upstream'in README'si [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md) için
 | --- | :---: | :---: | --- |
 | FM / AM | ✅ | ✅ FM | AM air band'de ve alıcının izin verdiği diğer frekanslarda; CTCSS/DCS ton bulucu |
 | DMR Tier I/II | ✅ | ✅ | Any renk kodu / slot / talkgroup, roaming, SMS, acil çağrı, Tier III trunk takibi (alma) |
-| P25 Faz 1 | ✅ | ✅ | NAC hem **hex hem desimal**, Any NAC/TG, ayrı RX/TX NAC, RX grup listeleri, alınan NAC ana ekranda, acil ve birebir çağrılar, trunk takibi |
+| P25 Faz 1 | ✅ | ✅ | NAC hem **hex hem desimal**, Any NAC/TG, ayrı RX/TX NAC, RX grup listeleri (1.0.3), alınan NAC ana ekranda, acil ve birebir çağrılar, trunk takibi |
 | YSF (C4FM) | ✅ DN + VW | ⚙️ VW (varsayılan kapalı) | başlıktan çağrı işareti |
 | NXDN48 | ✅ | — | |
 | dPMR | ✅ | — | |
@@ -106,7 +106,7 @@ Upstream'in README'si [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md) için
   evresi).
 - **Uydular**: geçişler, geçiş alarmı, Doppler düzeltmeli takip, geçişin **gökyüzü grafiği**. **Araçlar > ISS**'in kendi
   sayfası var (geri sayım, AOS / LOS, ses ve APRS iniş frekansları, otomatik takip, "Yörüngeyi göster"); ana ekranda
-  basılı tutulan `4`, geçiş yakınsa ISS takibini başlatır, değilse bu sayfayı açar (bir basılı tutma tuşu, aşağıda
+  basılı tutulan `4`, geçiş yakınsa ISS takibini başlatır, değilse bu sayfayı açar (1.0.3; bir basılı tutma tuşu, aşağıda
   Araçlar'a bakın).
 - **Havalimanları** (en yakın önce, AM ile ayar) ve **deniz VHF** tablosu (sadece alma).
 
@@ -144,7 +144,7 @@ süzgeçleri ve TX değerleri var: DMR **RX CC / TS / TG** (varsayılan Tümü) 
 (varsayılan Tümü) ve **TX NAC** (varsayılan 293; P25 rölesi duyduğu NAC ile değil, tarafın TX NAC'i ile gönderir).
 Telsiz başlamadan sorar, çalışırken kilitlenir, her ekranda **CROSS** işareti gösterir ve CW ile kimlik verir. Amatör
 bantların ve PMR446'nın dışını reddeder; formda `#` uydu, röle ve APRS bölümlerini de serbest bırakır (telsiz
-kapanana kadar; ipucu satırında "# segs: on" yazar). Yalnız DMR olan eski sürüm v1.0.2'dedir; taraf başına modlar ve
+kapanana kadar; ipucu satırında "# segs: on" yazar). Yalnız DMR olan eski sürüm yayımlanmış v1.0.1'dedir; taraf başına modlar ve
 değerler test sürümü özellikleridir (1.0.3), yalnızca bilgisayarda test edildi.
 
 | Form (DMR tarafları) | Form (NXDN / P25 modları) | Bölgeden seçim | Bölümler serbest |
@@ -172,7 +172,9 @@ değerler test sürümü özellikleridir (1.0.3), yalnızca bilgisayarda test ed
 | ![P25 arama aralığı düzenleyici](images/ddm32/search-range.png) | ![Kanal silme sorusu](images/ddm32/delete-channel.png) | ![Desimal P25 NAC satırı](images/ddm32/nac-decimal.png) |
 
 *Ekran görüntüleri firmware'in kendi ekran simülatöründen, uydurma verilerle alındı (İngilizce arayüz; telsiz
-varsayılan olarak Türkçe; bilgisayar UI testleri yazar). Gerçek telsiz fotoğrafları eklenecek.*
+varsayılan olarak Türkçe; bilgisayar UI testleri yazar). Birkaçı yayımlanmış v1.0.1'de olmayan test sürümü
+özelliklerini gösterir: RX grup listesi, taraf başına Çapraz bant formu ve Araçlar simgeleri (1.0.3), basılı tutma
+tuşları ve izleme satırlarındaki NAC (1.0.4). Gerçek telsiz fotoğrafları eklenecek.*
 
 ### Önce Türkçe
 
@@ -210,9 +212,9 @@ içindeki yedekleri yeni programlar da bulur.
 ## Geliştirilmekte olanlar
 
 - DOTA Transfer'in (kanallar ve veri paketleri) ve Çapraz bant'ın iki telsizle denenmesi, ayrıca 1.0.2 - 1.0.4
-  değişikliklerinin telsizde denenmesi (telsiz test satırları [`docs/plus-radio-test.md`](docs/plus-radio-test.md)
+  test sürümlerinin telsizde denenmesi (telsiz test satırları [`docs/plus-radio-test.md`](docs/plus-radio-test.md)
   içinde).
-- 1.0.3 / 1.0.4'ün yayımlanması (şimdilik test sürümü) ve programlayıcı 3.1.0 adayı (CHANGELOG, "v1.1.0 candidate").
+- 1.0.2 - 1.0.4'ün yayımlanması (şimdilik test sürümü) ve programlayıcı 3.1.0 adayı (CHANGELOG, "v1.1.0 candidate").
 - Çok platformlu programın Linux (AppImage, .deb) ve macOS paketleri.
 
 ## Derleme
