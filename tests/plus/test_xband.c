@@ -106,8 +106,11 @@ static void start_modes(size_t mem_bytes, uint8_t ma, uint8_t mb)
 	r->hz[1] = 433500000;
 	r->mode[0] = ma;
 	r->mode[1] = mb;
-	r->cc = 1;
-	r->ts = 1;
+	for (int k = 0; k < 2; k++) {
+		xband_side_t d = { .rx_nac = XB_NAC_ANY, .tx_nac = XB_NAC_DEFAULT, .rx_cc = XB_CC_ANY, .rx_ts = XB_TS_ANY,
+				   .tx_cc = 1, .tx_ts = 1 };
+		r->side[k] = d;
+	}
 	r->power = 1;
 	strcpy(r->call, "TA2DOU");
 	CHECK(xband_start() && xband_on() && f.req_posts == 1, "starts");
@@ -639,6 +642,70 @@ static void test_segs_free(void)
 	CHECK(!xband_on() && xband_set_segs_free(false) && !xband_segs_free(), "after the end: # works again");
 }
 
+/* A side's filters and TX values (owner, 2026-11-25): the defaults; a DMR side's RX TG records only that talkgroup's
+ * overs; a P25 side's RX NAC passes only that NAC (xband_nac_ok, the radio core drops the rest); an over sent to a side
+ * with a TX TG goes there as a group call, else to the talkgroup (or unit) heard */
+static void test_sides(void)
+{
+	const xband_req_t *d = xband_req();
+	CHECK(d->side[1].rx_cc == XB_CC_ANY && d->side[1].rx_ts == XB_TS_ANY && d->side[1].rx_tg == 0 &&
+	      d->side[1].rx_nac == XB_NAC_ANY && d->side[1].tx_nac == 0x293 && d->side[1].tx_tg == 0 &&
+	      d->side[1].tx_cc == 1 && d->side[1].tx_ts == 1, "defaults: any heard, TX CC 1 TS 1, NAC 293, TG as heard");
+	/* RX TG 2862 on A: an over to 91 is not recorded, one to 2862 is, sent on B to 2862 (as heard) */
+	start(17104);
+	xband_req()->side[0].rx_tg = 2862;
+	to_side(0);
+	over(100, 91, true);
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(v.phase == XB_P_LISTEN && v.frames == 0 && f.keys == 0, "TG 91 filtered out: nothing recorded");
+	to_side(0);
+	over(100, 2862, true);
+	xband_view(&v);
+	CHECK(v.phase == XB_P_RECORD && v.frames == 100, "TG 2862 recorded");
+	poll_ms(25);
+	CHECK(f.keys == 1 && f.keyed_side == 1 && f.key_dst == 2862 && f.key_group, "sent on B to 2862");
+	bool order;
+	drain(NULL, NULL, &order);
+	poll_ms(200);
+	xband_stop();
+	poll_ms(25);
+	xband_release();
+	/* TX TG 101 on B: a private call heard on A goes to TG 101 as a group call */
+	start(17104);
+	xband_req()->side[1].tx_tg = 101;
+	to_side(0);
+	over(100, 3101234, false);
+	poll_ms(25);
+	CHECK(f.keys == 1 && f.keyed_side == 1 && f.key_dst == 101 && f.key_group, "sent on B to TG 101: %u",
+	      (unsigned)f.key_dst);
+	drain(NULL, NULL, &order);
+	poll_ms(200);
+	xband_stop();
+	poll_ms(25);
+	xband_release();
+	/* P25: RX NAC 659 on A passes 659 only; an RX TG left over from DMR is not a P25 filter */
+	start_modes(17104, XB_MODE_P25, XB_MODE_P25);
+	xband_req()->side[0].rx_nac = 0x659;
+	xband_req()->side[0].rx_tg = 5;
+	to_side(0);
+	CHECK(xband_nac_ok(0x659) && !xband_nac_ok(0x293) && !xband_nac_ok(0xF7E), "NAC 659 only on A");
+	xband_req()->side[0].rx_nac = XB_NAC_ANY;
+	CHECK(xband_nac_ok(0x293) && xband_nac_ok(0x659), "any NAC");
+	in.rx = true;
+	xband_rx_begin(3101234, 655, true, false);
+	uint8_t fr[XB_P25_FRAME_BYTES] = { 1 };
+	for (int k = 0; k < 50; k++)
+		xband_rx_frame(fr);
+	in.rx = false;
+	xband_view(&v);
+	CHECK(v.phase == XB_P_RECORD && v.frames == 50, "P25: TG 655 recorded whatever the RX TG field holds");
+	xband_stop();
+	poll_ms(25);
+	xband_release();
+	xband_req()->side[0].rx_tg = 0;
+}
+
 int main(void)
 {
 	test_rules();
@@ -650,6 +717,7 @@ int main(void)
 	test_p25();
 	test_id_wait();
 	test_segs_free();
+	test_sides();
 	free(mem);
 	printf("cross-band engine: %s\n", fails ? "FAILED" : "ok");
 	return fails != 0;

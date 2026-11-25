@@ -100,9 +100,10 @@ int p25_lab_xb_put(const uint8_t frame[P25_LAB_XB_BYTES])
 	memcpy(xr_sent_fr[xr_put_n++], frame, P25_LAB_XB_BYTES);
 	return 1;
 }
+static uint16_t xr_heard_nac = 0x293;
 void p25_lab_xb_heard(uint16_t *nac, uint16_t *tg, uint32_t *src)
 {
-	*nac = 0x293;
+	*nac = xr_heard_nac;
 	*tg = 655;
 	*src = 3101234;
 }
@@ -174,6 +175,7 @@ static void xr_reset(void)
 	xr_heard_n = xr_heard_taken = xr_put_n = xr_taken_n = 0;
 	xr_send = xr_eof = xr_was_sent = false;
 	xr_cancels = 0;
+	xr_heard_nac = 0x293;
 	xr_call_nac = xr_call_tg = 0;
 	xr_call_id = 0;
 	xr_lent_p25 = false;
@@ -189,8 +191,11 @@ static void xr_req(uint32_t a, uint32_t b)
 	r->hz[0] = a;
 	r->hz[1] = b;
 	r->mode[0] = r->mode[1] = XB_MODE_DMR;
-	r->cc = 1;
-	r->ts = 1;
+	for (int k = 0; k < 2; k++) {
+		xband_side_t d = { .rx_nac = XB_NAC_ANY, .tx_nac = XB_NAC_DEFAULT, .rx_cc = 1, .rx_ts = 1, .tx_cc = 1,
+				   .tx_ts = 1 };
+		r->side[k] = d;
+	}
 	r->power = 1;
 	strcpy(r->call, "TA2DOU");
 }
@@ -225,24 +230,29 @@ static void xr_voice(uint8_t index, uint8_t cc, const uint8_t *lc, uint8_t n)
 	sim_rx(&b);
 }
 
-/* A group call on the session's colour code: three headers, superframes of voice (bursts numbered from 0), the end */
-static unsigned xr_call(uint32_t dst, uint32_t src, int superframes)
+/* A group call on colour code cc: three headers, superframes of voice (bursts numbered from 0), the end */
+static unsigned xr_call_cc(uint8_t cc, uint32_t dst, uint32_t src, int superframes)
 {
 	uint8_t lc[9];
 	mk_lc(lc, true, dst, src);
 	for (int h = 0; h < 3; h++) {
-		burst_lc(lc, 1, false);
+		burst_lc(lc, cc, false);
 		run(60);
 	}
 	unsigned n = 0;
 	for (int sf = 0; sf < superframes; sf++) {
 		for (int i = 0; i < 6; i++) {
-			xr_voice((uint8_t)i, 1, i == 5 ? lc : NULL, (uint8_t)n++);
+			xr_voice((uint8_t)i, cc, i == 5 ? lc : NULL, (uint8_t)n++);
 			run(60);
 		}
 	}
-	burst_lc(lc, 1, true);
+	burst_lc(lc, cc, true);
 	return n;
+}
+/* ... on the session's colour code 1 */
+static unsigned xr_call(uint32_t dst, uint32_t src, int superframes)
+{
+	return xr_call_cc(1, dst, src, superframes);
 }
 
 /* The user's place as the radio core holds it */
@@ -358,6 +368,63 @@ static void test_xband_relay(void)
 	CHECK(sm.view.channel_number == 2);	/* requests work again */
 	printf("Plus cross-band radio core: %u bursts heard on A, %u voice bursts sent on B, the CW ID, channel 1 back\n",
 	       bursts, voice);
+}
+
+/* A side's filters and TX values (owner, 2026-11-25): A heard on CC 2 only (the channel's and the modem's colour code),
+ * a call on CC 1 not recorded; one on CC 2 sent on B on its TX CC 3, slot 2, to its TX TG 101 as a group call; then B
+ * heard on its own RX colour code again */
+static void test_xband_sides(void)
+{
+	setup_codeplug();
+	codec_present = true;
+	start();
+	xr_reset();
+	run(200);
+	xr_req(145500000, 433500000);
+	xband_side_t *a = &xband_req()->side[0], *b = &xband_req()->side[1];
+	a->rx_cc = 2;
+	b->tx_cc = 3;
+	b->tx_ts = 2;
+	b->tx_tg = 101;
+	CHECK(xband_start());
+	run(100);
+	CHECK(xr_on(145500000));
+	CHECK(sm.view.ch.color_code == 2 && sm.view.ch.timeslot == 1 && sim.cfg.cc == 2);
+	/* CC 1 on A: filtered out */
+	xr_call_cc(1, 2862, 3105555, 2);
+	run(300);
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(v.phase == XB_P_LISTEN && v.frames == 0 && v.relayed == 0 && sm.view.state != RS_TX);
+	/* CC 2 on A: recorded, sent on B on CC 3 slot 2 to TG 101 */
+	CHECK(xr_on(145500000));
+	unsigned air0 = sim.air_count;
+	unsigned bursts = xr_call_cc(2, 2862, 3105555, 3);
+	xband_view(&v);
+	CHECK(v.phase == XB_P_RECORD && v.frames == 3u * bursts);
+	run(200);
+	CHECK(sm.view.state == RS_TX && hw.tx_hz == 433500000 && sm.view.ch.color_code == 3 && sm.view.ch.timeslot == 2 &&
+	      sim.cfg.cc == 3 && sim.last_ts == 2);
+	for (int i = 0; i < 400 && sm.view.state == RS_TX; i++)
+		run(25);
+	unsigned first = air0;
+	while (first < sim.air_count && sim.air[first].kind != DMR_BURST_VOICE_LC_HEADER)
+		first++;
+	CHECK(first < sim.air_count);
+	dmr_lc_t l;
+	air_lc(first, &l);
+	CHECK(l.dst == 101 && l.src == own_dmr_id && l.flco == DMR_FLCO_GROUP_VOICE);
+	xband_view(&v);
+	CHECK(v.relayed == 1);
+	/* the CW ID, then B heard on its RX colour code 1 */
+	for (int i = 0; i < 800 && (xband_view(&v), v.phase != XB_P_LISTEN || hw_mode != RADIO_MODE_DMR); i++)
+		run(25);
+	CHECK(v.phase == XB_P_LISTEN && sm.view.ch.color_code == 1 && sm.view.ch.timeslot == 1);
+	xband_stop();
+	run(100);
+	CHECK(!xband_owns_radio() && xr_gives == 1 && hw.rx_hz == 146520000);
+	printf("Plus cross-band sides: CC 1 filtered on A, CC 2 relayed on B as CC %u TS %d to TG %u\n", 3u, (int)sim.last_ts,
+	       (unsigned)l.dst);
 }
 
 /* The board won't key on B: the over dropped (nothing on the air), an error beep, no ID; the session listens on */
@@ -542,6 +609,7 @@ static void test_xband_p25(void)
 	CHECK(sm.view.ch.mode == RADIO_MODE_FM && hw.rx_hz == 146520000);
 	xr_req(145500000, 433500000);
 	xband_req()->mode[0] = xband_req()->mode[1] = XB_MODE_P25;
+	xband_req()->side[1].tx_nac = 0x1C8;	/* B's TX NAC (the over was heard on 293) */
 	CHECK(xband_start());
 	xr_native_run(300);
 	xband_view_t v;
@@ -575,13 +643,14 @@ static void test_xband_p25(void)
 	xband_view(&v);
 	CHECK(v.phase == XB_P_RECORD && v.frames == 300 && xr_heard_taken == 300);
 	classic_receiving = false;
-	/* sent on B: the heard NAC, the talkgroup heard, our ID; the frames in order, the native transmitter on B */
+	/* sent on B: B's TX NAC, the talkgroup heard (B's TX TG as heard), our ID; the frames in order, the native
+	 * transmitter on B */
 	bool keyed = false;
 	for (int i = 0; i < 200 && !keyed; i++) {
 		xr_native_tick();
 		keyed = classic_busy && classic_live->config.mode == NT_TRANSMIT;
 	}
-	CHECK(keyed && classic_live->config.frequency_hz == 433500000 && xr_call_nac == 0x293 && xr_call_tg == 655 &&
+	CHECK(keyed && classic_live->config.frequency_hz == 433500000 && xr_call_nac == 0x1C8 && xr_call_tg == 655 &&
 	      xr_call_id == own_dmr_id && sm.view.state == RS_TX);
 	for (int i = 0; i < 800 && (xband_view(&v), v.phase == XB_P_SEND); i++)
 		xr_native_tick();
@@ -631,6 +700,70 @@ static void test_xband_p25(void)
 	       (unsigned)xr_call_tg, (unsigned)xr_call_nac);
 }
 
+/* P25 sides (owner, 2026-11-25): A heard on NAC 659 only (the channel's NAC; frames of NAC 293 dropped, not recorded),
+ * B sent with its TX NAC 293 to its TX TG 101 */
+static void test_xband_p25_sides(void)
+{
+	setup_codeplug();
+	codec_present = true;
+	start();
+	native_lab_init();
+	fake_power.switch_on = classic_on;
+	fake_power.battery_mv = classic_battery;
+	classic_busy = classic_stop = classic_receiving = false;
+	xr_reset();
+	xr_native_run(500);
+	xr_req(145500000, 433500000);
+	xband_req()->mode[0] = xband_req()->mode[1] = XB_MODE_P25;
+	xband_req()->side[0].rx_nac = 0x659;
+	xband_req()->side[1].tx_tg = 101;
+	CHECK(xband_start());
+	xr_native_run(300);
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(xband_owns_radio() && v.phase == XB_P_LISTEN && sm.view.ch.mode == RADIO_MODE_P25 && sm.view.ch.p25_nac == 0x659);
+	for (int i = 0; i < 100 && classic_live->config.frequency_hz != 145500000; i++)
+		xr_native_tick();
+	/* NAC 293 heard: taken from the ring, not recorded */
+	classic_receiving = true;
+	for (unsigned k = 0; k < 90; k++) {
+		memset(xr_heard[xr_heard_n++], (int)k, P25_LAB_XB_BYTES);
+		if (k % 9 == 8)
+			xr_native_run(175);
+	}
+	xr_native_run(100);
+	xband_view(&v);
+	CHECK(xr_heard_taken == 90 && v.phase == XB_P_LISTEN && v.frames == 0);
+	/* NAC 659: recorded, sent on B to TG 101 with B's TX NAC (default 293) */
+	xr_heard_nac = 0x659;
+	for (int i = 0; i < 100 && classic_live->config.frequency_hz != 145500000; i++)
+		xr_native_tick();
+	for (unsigned k = 0; k < 90; k++) {
+		memset(xr_heard[xr_heard_n++], (int)k, P25_LAB_XB_BYTES);
+		if (k % 9 == 8)
+			xr_native_run(175);
+	}
+	xr_native_run(100);
+	xband_view(&v);
+	CHECK(v.phase == XB_P_RECORD && v.frames == 90);
+	classic_receiving = false;
+	bool keyed = false;
+	for (int i = 0; i < 200 && !keyed; i++) {
+		xr_native_tick();
+		keyed = classic_busy && classic_live->config.mode == NT_TRANSMIT;
+	}
+	CHECK(keyed && classic_live->config.frequency_hz == 433500000 && xr_call_nac == 0x293 && xr_call_tg == 101);
+	for (int i = 0; i < 800 && (xband_view(&v), v.phase == XB_P_SEND); i++)
+		xr_native_tick();
+	xband_stop();
+	for (int i = 0; i < 800 && (xband_owns_radio() || xr_lent || native_lab_owns()); i++)
+		xr_native_tick();
+	xr_native_run(200);
+	CHECK(!xband_on() && !xr_lent && !native_lab_owns() && sm.view.ch.mode == RADIO_MODE_FM && hw.rx_hz == 146520000);
+	printf("Plus cross-band P25 sides: NAC 293 dropped on A (NAC 659 only), sent on B to TG %u NAC %03X\n",
+	       (unsigned)xr_call_tg, (unsigned)xr_call_nac);
+}
+
 int main(void)
 {
 	int prior = classic_radio_main();
@@ -640,6 +773,8 @@ int main(void)
 	test_xband_no_memory();
 	test_xband_fm();
 	test_xband_p25();
+	test_xband_p25_sides();
+	test_xband_sides();
 	printf("Plus cross-band in the radio core: %d failures (upstream's and Classic's suites with it built in: %s)\n",
 	       failures - before, prior ? "FAILED" : "passed");
 	return prior != 0 || failures != before;

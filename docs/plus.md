@@ -3859,6 +3859,45 @@ CW ID and every TX time-out.
   repeater channel still refused; # again: refused again; # during a session changes nothing). Radio row XB-14.
 - Cost: FLASH 894,664 B (about +500 B; 6,456 B left of 901,120).
 
+### A side's filters and TX values (2026-11-25, branch `xbfree`)
+
+Owner request (2026-11-25, through the coordinator): per side, what is recorded there and what is sent there. Each side
+of the request (`xband_side_t`, `xband_req()->side[0/1]`) has RX filters and TX values; RAM only like the rest of the
+request (frequencies and modes are not saved either). The old single colour code / slot pair (`cc`, `ts`, used for
+both sides and both directions) is gone.
+
+| Side mode | Rows (under B mode, A's first, then B's) | Default | Where it acts |
+|---|---|---|---|
+| DMR | RX CC: 0-15 or Any | Any | the session channel's colour code (`CODEPLUG_CC_ANY`: the call stack hears every colour code, `CONFIG_DMR_ANY`) |
+| | RX TS: 1, 2 or Any | Any | the channel's slot (`CODEPLUG_TS_ANY`: either, the first heard holds the call) |
+| | RX TG: a number or Any (0) | Any | the engine: `xband_rx_begin` records an over only to that talkgroup (or unit) |
+| | TX CC 0-15, TX TS 1-2 | 1, 1 | `xb_key_dmr` sets them on the channel before `ptt_down` (so `radio_sm_tx_check` never sees Any) |
+| | TX TG: a number or As heard (0) | As heard | the engine passes it to `io->key` as a group call; As heard: the talkgroup (or unit) heard, group or private as heard |
+| P25 | RX NAC: 000-F7D or Any (F7E) | Any | the channel's NAC for the native receiver, and the radio core drops ring frames of another NAC (`xband_nac_ok`) |
+| | TX NAC 000-F7D | 293 | `xb_key_p25`: the over goes out with it (before: the NAC heard) |
+| | TX TG 1-65535 or As heard | As heard | the engine, as for DMR |
+
+FM and NXDN sides have no rows (FM is sent only, NXDN heard only and its RAN is any). Editing: Left / Right (and the
+knob) step and wrap (Any after 15 / 2 / F7D); digits type a number (talkgroup 8 digits, colour code 2, NAC 3 digits
+read as hex: 0-9 typed, A-F reached with Left / Right); a value out of range is refused with "Out of range" ("Aralık
+dışı") and the old one stays. A mode change that leaves a P25 side with a DMR-sized TX TG puts it back to As heard. A
+channel picked from a zone brings its TX values: DMR its colour code, slot and its group talk contact
+(`codeplug_channel_talk_contact`); P25 its TX NAC (`codeplug_p25_tx_nac`); the RX filters stay as they are.
+Labels are the usual abbreviations ("A RX CC", "B TX NAC"), values "Any" / "As heard" ("Tümü" / "Duyulan").
+Every TX guard stays: the band plan, the question, the lock, the CW ID, `ptt_down` / the native PTT path (TX inhibit,
+battery, band, time-out), `xb_key_p25`'s NAC and talkgroup range checks.
+
+Host tests: `tests/plus/test_xband.c` `test_sides` (the defaults; RX TG 2862: an over to 91 not recorded, one to 2862
+recorded and sent; TX TG 101: a private call heard goes out to TG 101 as a group call; RX NAC 659 passes 659 only, Any
+passes all; a P25 side ignores an RX TG field), `tests/plus/test_xband_radio.inc` `test_xband_sides` (the real radio
+core and call stack: A on CC 2, the modem's colour code 2; a call on CC 1 not recorded; one on CC 2 sent on B on CC 3,
+slot 2, the header to TG 101 from our ID; B heard on its RX colour code after) and `test_xband_p25_sides` (the real
+native receiver: A's channel NAC 659, 90 frames of NAC 293 taken and dropped, 90 of NAC 659 recorded and sent with B's
+TX NAC to TG 101), `test_xband_p25` now sends with B's TX NAC 1C8, `tests/plus/test_ui_xband.c` (the rows for DMR, P25,
+NXDN sides, Left / Right and typed values, out of range refused, EN + TR, the layout). Radio row XB-15.
+Cost: FLASH 895,924 B (+1,260 over the # step; **5,196 B left** of 901,120), static RAM 205,072 B (+48); zero warnings,
+forced rebuild identical. **Host-tested only; nothing of it has been on the air.**
+
 ## DMR receive audio diagnostics (`CONFIG_DMR_AUDIO_DIAG`, ours; branch `fix-dmr-audio`)
 
 Owner's report on v1.0.0-beta.3 (public build): received DMR audio sounds crackly / scratchy and artificial; our

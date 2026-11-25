@@ -6347,6 +6347,15 @@ msgstr "Çapraz bant kapalı: reddedildi"
 msgid "Segments free"
 msgstr "Bölümler serbest"
 
+# DDM32 Plus: Tools > Cross-band, a side's TX talkgroup left to the over heard; a number typed too large
+#: core/ui/ui_xband.c
+msgid "As heard"
+msgstr "Duyulan"
+
+#: core/ui/ui_xband.c
+msgid "Out of range"
+msgstr "Aralık dışı"
+
 #: core/ui/ui_xband.c
 msgid "{OK pick  <> change  # segs: on|OK pick  <>  # segs: on|OK  <>  # segs: on}"
 msgstr "{OK seç  <> değiştir  # bölüm: açık|OK seç  <>  # bölüm: açık|OK  <>  # bölüm: açık}"

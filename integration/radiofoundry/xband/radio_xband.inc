@@ -157,15 +157,22 @@ static bool xb_native_free(radio_sm_t *sm)
 
 /* The session channel in side's mode on its frequency. FM is a placeholder too: while a P25 session's native receiver
  * must let go (its CW ID, its end) */
+_Static_assert(XB_CC_ANY == CODEPLUG_CC_ANY && XB_TS_ANY == CODEPLUG_TS_ANY, "the side's filters are the channel's");
+
 static void xb_channel(radio_sm_t *sm, uint8_t side, uint8_t mode)
 {
 	channel_t *ch = &sm->view.ch;
+	const xband_side_t *sd = &xband_req()->side[side & 1u];
 	ch->rx_hz = ch->tx_hz = xband_req()->hz[side & 1u];
+	/* DMR: heard on the side's colour code and slot (or any: the call stack filters, CONFIG_DMR_ANY); the over is sent
+	 * on its TX ones (xb_key_dmr) */
+	ch->color_code = sd->rx_cc;
+	ch->timeslot = sd->rx_ts;
 	ch->mode = mode == XB_MODE_DMR ? RADIO_MODE_DMR : mode == XB_MODE_P25 ? RADIO_MODE_P25 :
 		   mode == XB_MODE_NXDN ? RADIO_MODE_NXDN : RADIO_MODE_FM;
 	ch->rx_only = mode == XB_MODE_NXDN;	/* (an NXDN channel is receive only: codeplug_p25_valid) */
-	/* P25: any NAC and talkgroup heard; the over's own talkgroup and NAC are set when it is keyed (xb_key) */
-	ch->p25_nac = 0xF7Eu;
+	/* P25: the side's NAC (or any) and any talkgroup heard; the over's own talkgroup and NAC are set when it is keyed */
+	ch->p25_nac = sd->rx_nac;
 	ch->p25_tg = mode == XB_MODE_P25 ? 1u : 0u;	/* (any RAN for NXDN) */
 	ch->p25_tx_nac_override = 0;
 	ch->p25_squelch = 0;
@@ -188,11 +195,14 @@ static void xb_tune(uint8_t side)
 		set_hear_all_latch(sm, true);
 }
 
-/* DMR: as a PTT would, to the talkgroup (or unit) the over was heard for */
-static bool xb_key_dmr(radio_sm_t *sm, uint32_t dst, bool group)
+/* DMR: as a PTT would, on the side's TX colour code and slot, to dst (the side's TX talkgroup, else the one heard) */
+static bool xb_key_dmr(radio_sm_t *sm, uint8_t side, uint32_t dst, bool group)
 {
+	const xband_side_t *sd = &xband_req()->side[side & 1u];
 	if (!sm->dmr_running || dst == 0)
 		return false;
+	sm->view.ch.color_code = sd->tx_cc & 15u;
+	sm->view.ch.timeslot = sd->tx_ts == 2 ? 2 : 1;
 	sm->manual = true;	/* a target for now: the channel's (none) comes back with dmr_end */
 	sm->manual_vfo = sm->view.vfo;
 	sm->manual_ch = sm->view.channel_number;
@@ -235,12 +245,12 @@ static bool xb_key_fm(radio_sm_t *sm)
 	return true;
 }
 
-/* P25: the heard NAC, the talkgroup heard, our ID as the unit ID; the worker's ring as its microphone */
-static bool xb_key_p25(radio_sm_t *sm, uint32_t dst)
+/* P25: the side's TX NAC, dst (its TX talkgroup, else the one heard), our ID as the unit ID; the worker's ring as its
+ * microphone */
+static bool xb_key_p25(radio_sm_t *sm, uint8_t side, uint32_t dst)
 {
-	uint16_t nac, tg;
-	uint32_t src, id = sm->view.dmr.own_id;
-	p25_lab_xb_heard(&nac, &tg, &src);
+	uint16_t nac = xband_req()->side[side & 1u].tx_nac;
+	uint32_t id = sm->view.dmr.own_id;
 	if (dst == 0 || dst > 0xFFFFu || id == 0 || id > 0xFFFFFEu || nac >= 0xF7Eu)
 		return false;
 	channel_t *ch = &sm->view.ch;
@@ -263,8 +273,8 @@ static bool xb_key(uint8_t side, uint32_t dst, bool group)
 {
 	radio_sm_t *sm = xb_sm;
 	uint8_t mode = xband_req()->mode[side & 1u];
-	bool ok = mode == XB_MODE_DMR ? xb_key_dmr(sm, dst, group) : mode == XB_MODE_FM ? xb_key_fm(sm) :
-		  mode == XB_MODE_P25 ? xb_key_p25(sm, dst) : false;	/* (NXDN: never) */
+	bool ok = mode == XB_MODE_DMR ? xb_key_dmr(sm, side, dst, group) : mode == XB_MODE_FM ? xb_key_fm(sm) :
+		  mode == XB_MODE_P25 ? xb_key_p25(sm, side, dst) : false;	/* (NXDN: never) */
 	xb.keyed = ok && mode != XB_MODE_DMR;
 	xb.eof = xb.held = false;
 	xb.txmode = mode & 3u;
@@ -421,8 +431,6 @@ static void xb_take(radio_sm_t *sm, uint32_t now_ms)
 	ch->bw = RADIO_BW_12K5;
 	ch->power = CODEPLUG_POWER_DEFAULT;
 	ch->dmo = true;
-	ch->color_code = (uint8_t)(r->cc & 15u);
-	ch->timeslot = r->ts == 2 ? 2 : 1;
 #if CONFIG_DMR_PRIVACY
 	sm->privacy_type = DMR_PRIVACY_OFF;
 #endif
@@ -559,6 +567,8 @@ static void xb_rf_poll(radio_sm_t *sm, uint32_t now_ms)
 			uint16_t nac, tg;
 			uint32_t src;
 			p25_lab_xb_heard(&nac, &tg, &src);
+			if (!xband_nac_ok(nac))
+				continue;	/* another NAC than the side's: not recorded */
 			xband_rx_begin(src, tg, true, false);	/* (only clear voice reaches the ring) */
 			xband_rx_frame(fr);
 		}
