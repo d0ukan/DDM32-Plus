@@ -15,7 +15,9 @@ a build (python3 tools/test_fastscan.py [engine|suites|upstream|model]):
 - model: the radio core's zone scan on a model of the receiver, classic -> fast (tests/plus/test_fastscan_radio.inc),
   the table printed for docs/plus.md and its checks;
 - zones (v1.0.2): a zone made on the radio against the stored "All channels" on the same model, with the codeplug's
-  channel reads counted and charged a time on the radio task (tests/plus/test_zonescan_radio.inc)."""
+  channel reads counted and charged a time on the radio task (tests/plus/test_zonescan_radio.inc); v1.0.3: the same
+  model with the receiver's false carrier after a retune longer than 15 ms, built as v1.0.2 (before) and with the fix
+  (after)."""
 import os
 import re
 import shlex
@@ -99,6 +101,9 @@ UPSTREAM_TIMING = {
     # is on the DMR channel again (classic, at 150 ms a stop, is still elsewhere)
     'sm.view.zone_pos != 5 && !sim.started',
     'sm.view.zone_pos != 5',
+    # v1.0.3: "PTT while still searching", 300 ms into the scan: fast has gone round the zone (four 50 ms stops and
+    # the DMR one, which after a switch into DMR now takes classic's 150 ms) and is on the start channel at that moment
+    'sm.view.zone_pos != 0',
 }
 
 
@@ -148,15 +153,22 @@ ZONE_READS = (
     'bool codeplug_channel(uint16_t n, channel_t *out)\n{\n',
     # the reads counted, each charged zn_cost_us on the clock (the radio task blocked while it reads)
     'static unsigned zn_reads;\nstatic uint32_t zn_cost_us, zn_us;\n'
+    # v1.0.3 (the owner's radio: steps into or out of DMR took 167-169 ms): a mode switch charged zn_mode_ms
+    'static uint32_t zn_mode_ms;\n'
+    'static void zn_mode_cost(radio_mode_t from, radio_mode_t to)\n{\n\tif (from != to)\n\t\tnow += zn_mode_ms;\n}\n'
     'bool codeplug_channel(uint16_t n, channel_t *out)\n{\n\tzn_reads++;\n'
     '\tfor (zn_us += zn_cost_us; zn_us >= 1000u; zn_us -= 1000u)\n\t\tnow++;\n')
+ZONE_MODE = (
+    'static void r_set_mode(radio_mode_t m) { hw_mode = m; hw.set_mode_calls++;',
+    'static void zn_mode_cost(radio_mode_t from, radio_mode_t to);\n'
+    'static void r_set_mode(radio_mode_t m) { zn_mode_cost(hw_mode, m); hw_mode = m; hw.set_mode_calls++;')
 
 
 def zones(ROOT, APP, OUT, host):
     """v1.0.2: a zone made on the radio against All channels (tests/plus/test_zonescan_radio.inc), on the model"""
     wrapper = OUT / 'radioCoreZonescan.c'
     fix = fixture(host)
-    for old, new in (('#define NCH 8\n', '#define NCH 96\n'), ZONE_READS):
+    for old, new in (('#define NCH 8\n', '#define NCH 96\n'), ZONE_READS, ZONE_MODE):
         assert fix.count(old) == 1, old
         fix = fix.replace(old, new)
     wrapper.write_text('#include <stdlib.h>\n' + HEAD + '#include "radio/scanprio.h"\n' + fix +
@@ -164,9 +176,13 @@ def zones(ROOT, APP, OUT, host):
                        '"\n#undef main\n#define main fastscan_model_main\n#include "' +
                        str(ROOT / 'tests/plus/test_fastscan_radio.inc') + '"\n#undef main\n#include "' +
                        str(ROOT / 'tests/plus/test_zonescan_radio.inc') + '"\n')
-    argv = radio_argv(ROOT, APP, OUT, host, wrapper, 'test_radio_zonescan')
-    run([*argv, '-DCONFIG_SCAN_PRIO=1', '-lm'], cwd=host)
-    run([OUT / 'test_radio_zonescan'], cwd=host)
+    # v1.0.3 (docs/scan-slow-2026-11-25.md): first v1.0.2's scan (FS_DIP_GUARD 0, the dip rows only: before), then the
+    # fix (after) with every check
+    for guard in (0, 1):
+        name = f'test_radio_zonescan_{guard}'
+        argv = radio_argv(ROOT, APP, OUT, host, wrapper, name)
+        run([*argv, '-DCONFIG_SCAN_PRIO=1', f'-DFS_DIP_GUARD={guard}', '-lm'], cwd=host)
+        run([OUT / name], cwd=host)
 
 
 def main(ROOT, APP, OUT, flags, host, only=None):

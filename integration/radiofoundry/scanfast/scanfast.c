@@ -59,6 +59,7 @@ static void restart(uint32_t now_ms)
 	st.on = true;
 	st.fast = fast;
 	st.slow_mode = st.fb_mode = FS_MODES;	/* none yet */
+	st.step_from = st.step_to = FS_MODES;
 	last_band = FS_BANDS;
 	st.start_ms = st.mark_ms = now_ms;
 	have_stop = have_pass = false;
@@ -190,6 +191,35 @@ void fs_radio_cost(uint32_t gap_ms, uint32_t step_ms)
 	s = step_ms > s ? step_ms : s;
 	if (s > cur_step)
 		cur_step = (uint8_t)(s > 255u ? 255u : s);
+}
+
+void fs_dip(void)
+{
+	st.dips++;
+}
+
+void fs_dip_hold(void)
+{
+	st.dip_holds++;
+}
+
+void fs_p25_learned(void)
+{
+	st.p25_learned++;
+}
+
+void fs_p25_masked(void)
+{
+	st.p25_masked++;
+}
+
+void fs_step_modes(uint8_t from, uint8_t to, uint32_t ms)
+{
+	if (ms > st.step_any_ms) {
+		st.step_any_ms = (uint16_t)(ms > 0xFFFFu ? 0xFFFFu : ms);
+		st.step_from = from;
+		st.step_to = to;
+	}
 }
 
 void fs_view(uint32_t now_ms, fs_stats_t *out)

@@ -15,8 +15,9 @@
  *   the squelch line (the noise 44..67 at random each ms); DMR direct mode one slot on air 27.5 ms of every 60 at
  *   -60 dBm (a radio in the same room), its gaps at the floor or (leak) 40 dB under the burst; DMR -95 dBm; P25 -95 dBm
  *   with the noise reading deaf to it (only the strength rises: upstream gotchas 17.3);
- * - no DMR burst reaches the call stack and no P25 frame the native receiver: a DMR stop with a carrier is probed and
- *   left, a P25 one held, handed to the native receiver and given back. What is compared is whether the scan noticed
+ * - no DMR burst reaches the call stack and (before v1.0.3) no P25 frame the native receiver: a DMR stop with a carrier
+ *   is probed and left, a P25 one held, handed to the native receiver and given back. Since v1.0.3 the table's P25 rows
+ *   let the signal's frames reach the native receiver (fx_frames), so its takes are not learned as a false strength. What is compared is whether the scan noticed
  *   the over (probed or held its channel while it was on the air) and how soon.
  * Zones: 16, 32 and 80 channels, every 4th DMR and every 8th (from 5) P25, the rest FM; "all FM" too. */
 #include <math.h>
@@ -24,6 +25,17 @@
 
 enum { FX_NONE, FX_FM, FX_FM_EDGE, FX_DMR, FX_P25 };
 enum { FX_DIP_MS = 15, FX_FLOOR_DBM = -125, FX_OVERS = 96 };
+/* The dip's length (tests/plus/test_zonescan_radio.inc tries others), and (not 0) its length after a retune of more than
+ * 100 MHz (a VHF / UHF jump) */
+static uint32_t fx_dip_ms = FX_DIP_MS, fx_dip_band_ms;
+static uint32_t fx_last_hz;	/* the frequency before the last retune */
+static bool fx_jumped;		/* the last retune was a VHF / UHF jump */
+/* v1.0.3 (the owner's radio on 1.0.2): every channel P25, and the strength reading this many dB high (the noise
+ * reading not: -125 dBm + 53 = the -72 dBm the radio read on a quiet P25 zone) */
+static bool fx_all_p25;
+static int fx_rssi_bias;
+static bool fx_frames;	/* the P25 signal's frames reach the native receiver while it has the signal's channel */
+static const uint8_t *fx_mode_list;	/* not NULL: each channel's mode (the signal's channel still gets its kind's) */
 #define FX_BASE_HZ	446006250u
 #define FX_STEP_HZ	12500u
 
@@ -68,6 +80,10 @@ static uint8_t fx_mode_at(uint16_t i)
 {
 	if (fx.all_fm)
 		return RADIO_MODE_FM;
+	if (fx_all_p25)
+		return RADIO_MODE_P25;
+	if (fx_mode_list != NULL)
+		return fx_mode_list[i];
 	return i % 4 == 3 ? RADIO_MODE_DMR : i % 8 == 5 ? RADIO_MODE_P25 : RADIO_MODE_FM;
 }
 
@@ -117,12 +133,13 @@ static void fx_status(void)
 		noise = 120 - (int)fx_rand(6);			/* deaf: the noise stays at its idle value */
 	if (here && fx.kind == FX_FM_EDGE)
 		noise = 44 + (int)fx_rand(24);			/* around the squelch line */
-	if (now - fx.tuned_at < FX_DIP_MS)
+	if (now - fx.tuned_at < (fx_jumped && fx_dip_band_ms != 0 ? fx_dip_band_ms : fx_dip_ms))
 		noise = 30;
 	else if (fx.njit != 0)
 		noise += (int)fx_rand(2u * fx.njit + 1u) - fx.njit;
 	hw.st.noise = (uint8_t)(noise < 8 ? 8 : noise > 120 ? 120 : noise);
-	hw.st.rssi_dbm = (int16_t)lround(r);
+	/* the bias on the FM path only: on the radio the DMR stops read quiet strengths while the P25 ones read -62/-72 */
+	hw.st.rssi_dbm = (int16_t)(lround(r) + (hw_mode != RADIO_MODE_DMR ? fx_rssi_bias : 0));
 	hw.st.tone_ok = true;
 }
 
@@ -135,6 +152,8 @@ static void fx_ms(void)
 	if (hw.rx_calls != fx.rx_calls) {
 		fx.rx_calls = hw.rx_calls;
 		fx.tuned_at = now;
+		fx_jumped = (hw.rx_hz > fx_last_hz ? hw.rx_hz - fx_last_hz : fx_last_hz - hw.rx_hz) > 100000000u;
+		fx_last_hz = hw.rx_hz;
 	}
 	double target = FX_FLOOR_DBM - 2 + (double)fx_rand(5);
 	int k = fx_over_now();
@@ -153,10 +172,14 @@ static void fx_ms(void)
 	}
 	fx.reading = fx.tau <= 0 ? target : fx.reading + (target - fx.reading) * (1.0 - exp(-1.0 / fx.tau));
 	bool native = native_lab_owns();
+	if (fx_frames && native && fx.kind == FX_P25 && k >= 0 && hw.rx_hz == fx_hz(fx.pos))
+		zs_sync_ms = now;
 	/* radio_task.c: the tick and the poll on their own grids (10 / 25 ms), the tick first when both are due; one in
 	 * ten runs 1..3 ms late (the task busy elsewhere), the next on the grid again */
 	if ((int32_t)(now - fx.next_tick - fx.tick_late) >= 0) {
 		fx.next_tick += RADIO_TICK_MS;
+		if ((int32_t)(now - fx.next_tick) >= 0)
+			fx.next_tick = now + RADIO_TICK_MS;	/* radio_task.c: fell behind (a long step), no catching up */
 		fx.tick_late = fx_rand(10) == 0 ? 1u + fx_rand(3) : 0u;
 		if (!native) {
 			fx_status();
@@ -165,6 +188,8 @@ static void fx_ms(void)
 	}
 	if ((int32_t)(now - fx.next_poll - fx.poll_late) >= 0) {
 		fx.next_poll += RADIO_POLL_MS;
+		if ((int32_t)(now - fx.next_poll) >= 0)
+			fx.next_poll = now + RADIO_POLL_MS;
 		fx.poll_late = fx_rand(10) == 0 ? 1u + fx_rand(3) : 0u;
 		fx_status();
 		if (native)
@@ -220,6 +245,8 @@ static void fx_begin_scan(void)
 	req(RREQ_SCAN, RSCAN_ZONE);
 	fx.rx_calls = hw.rx_calls;
 	fx.tuned_at = now;
+	fx_last_hz = hw.rx_hz;
+	fx_jumped = false;
 	fx.next_tick = now + 1u + fx_rand(RADIO_TICK_MS);
 	fx.next_poll = now + RADIO_POLL_MS;
 	fx.tick_late = fx.poll_late = 0;
@@ -465,7 +492,11 @@ static int test_fastscan_table(void)
 						fx_setup(sizes[si], row->all_fm, row->kind, (uint16_t)(sizes[si] / 2u + seed % 3u),
 							 row->dbm, row->leak, taus[ti]);
 						fx.njit = row->njit;
+						/* v1.0.3: a P25 signal's frames reach the native receiver (a real P25 user; without them
+						 * it is a foreign carrier, which the learned P25 strength hides by design) */
+						fx_frames = row->kind == FX_P25;
 						fx_res_t r = fx_run(a == 1, seed * 7919u + ri * 31u + si, row->kind == FX_NONE ? 20000 : 120000);
+						fx_frames = false;
 						sum[a].overs += r.overs;
 						sum[a].caught += r.caught;
 						sum[a].missed += r.missed;

@@ -3,6 +3,32 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased (v1.0.3 candidate)
+
+Firmware. Host-tested only; not yet run on the radio.
+
+- Channel scan, from the owner's `scanst` readings on 1.0.2 (docs/scan-slow-2026-11-25.md section 5):
+  - A zone of P25 channels took 1.9 s a channel with nothing on the air: the radio reads -62 / -72 dBm there (no board
+    correction for the strength on the DM-32), every P25 stop counted it as a carrier and the P25 receiver took it.
+    Now a P25 channel whose take heard no frame twice at about the same strength learns it; for two minutes a strength
+    under it + 10 dB is no carrier there (the noise reading and a stronger signal still are). A reading with no carrier
+    by strength or a take that hears frames forgets it, so a real P25 carrier is not hidden. Model (60 s, learning
+    included): 1,900 ms a stop -> 73 ms fast, 204 ms classic; a real P25 signal in overs noticed 13 of 18 (before 10).
+  - A DMR call was never caught in a zone that mixes DMR with FM / P25: a step into or out of DMR takes about 168 ms on
+    the radio, and the stop's dwell counted from the step's start, so it had no listening time left. A step of 20 ms
+    or more now starts the dwell when the retune is done. Model with a 168 ms switch: fast 0 -> 18 of 18 overs,
+    classic 18 of 18 (on the radio classic missed too: unproven there until row SS-6).
+  - `scanst.cost` gains P25_LEARNED and P25_MASKED; a new `scanst.step` line names the longest step and the modes it
+    switched between (what the 168 ms is spent on is not known yet).
+- Channel scan "extremely slow", the first theory (the radio's readings did not show it; kept as a guard): not a
+  regression from 1.0.1 in the code. On the host model
+  the scan holds every quiet channel for the 2 s resume delay when the receiver's false carrier right after a retune
+  lasts 25 ms or more (unmeasured on the radio); longer after a VHF / UHF jump, a zone that mixes bands gets much slower
+  than All channels. Zone and VFO scans, fast and classic, now cope with up to 50 ms of it: the squelch waits up to
+  50 ms after a retune, the fast rule tolerates early readings, and a hold on such an early squelch that heard no
+  carrier moves on without the resume delay. Model: 152 ms a stop classic, 53-94 ms fast with a 25-45 ms dip (before
+  600-2000 ms); unchanged with a short dip. `scanst.cost` gains DIPS and DIP_HOLDS. See docs/scan-slow-2026-11-25.md.
+
 ## v1.0.2 (2026-11-25)
 
 Firmware. Host-tested only (simulator flows in English and Turkish, normal and Large text); not yet run on the radio.

@@ -1149,6 +1149,20 @@ read time), every other suite passes.
 
 Cost (`--plus --stack-check --verify-rebuild`): zero warnings, forced rebuild identical, every task's stack fits; FLASH 883,076 -> 884,576 B (+1,500, 98.16 %; on `ddm25` ff007ef, VFO step key merged), static RAM +64 B (1,944 -> 1,880 B free; the 1,500 B floor kept; the second round's band, reason and step fields 8 B of it): the counters and the retune note.
 
+### Scan held on the receiver's false carrier after a retune (branch `scanslow`, v1.0.3 candidate)
+
+Owner's report on 1.0.2: "channel scan is extremely, extremely slow". Finding in
+[scan-slow-2026-11-25.md](scan-slow-2026-11-25.md): no regression from 1.0.1 in the code (1.0.2 reads fewer channels a
+stop; `ddm25` head adds nothing per quiet stop). On the host model the scan, 1.0.1 and 1.0.2 alike, holds every quiet
+channel for the 2 s resume delay once the noise reading's false carrier after a retune lasts 25 ms or more (the model
+assumed 15 ms; the radio's was never measured); with a longer dip after a VHF / UHF jump a made zone that mixes bands is
+far slower than All channels, as in the 1.0.1 report. `FS_DIP_GUARD` (zone / VFO scans, both algorithms): the
+squelch guard up to 50 ms (cut to the dwell less two polls), the fast rule tolerates not-quiet readings younger than
+50 ms (then four quiet readings from 50 ms), and a hold on a squelch opened that early that heard no carrier moves on
+without the resume delay. Model: dips of 25-45 ms 152 ms a stop classic, 53-94 ms fast (before 600-2000 ms); a 15 ms
+dip unchanged. `scanst.cost` gains DIPS and DIP_HOLDS. Host-tested only; radio rows SS-1..SS-3 in
+[plus-radio-test.md](plus-radio-test.md).
+
 ### Airband AM and broadcast FM
 
 The DM-32 glue exists upstream but is unverified on the radio (hardware-dm32.md 8.7): AM is the

@@ -25,12 +25,16 @@ typedef struct {
 } zn_res_t;
 
 static bool zn_vhf;	/* every other channel on 2 m (the band counter's case) */
+static bool zn_split;	/* channels 9-16 on 2 m: All channels jumps band twice a pass, Mine at 8 of its 12 stops */
+static uint16_t zn_dwell;	/* not 0: the scan dwell setting for zn_run */
 
 /* fx_codeplug's 16 channels (zone 0, renamed "All channels"), then zone 1 "Mine" */
 static void zn_codeplug(void)
 {
 	fx_codeplug();
 	for (uint16_t n = 2; zn_vhf && n <= 16; n += 2)
+		chans[n].rx_hz = chans[n].tx_hz = 145000000u + 12500u * n;
+	for (uint16_t n = 9; zn_split && n <= 16; n++)
 		chans[n].rx_hz = chans[n].tx_hz = 145000000u + 12500u * n;
 	strcpy(zones[0].name, "All channels");
 	memset(&zones[1], 0, sizeof zones[1]);
@@ -58,6 +62,8 @@ static zn_res_t zn_run(bool fast, uint16_t zone, uint32_t prio, uint32_t cost_us
 	if (zone != 0)
 		req(RREQ_ZONE, zone);
 	CHECK(sm.view.zone_index == zone);
+	if (zn_dwell != 0)
+		sm.set.scan_dwell_ms = zn_dwell;
 	radio_scan_prio_set(prio);
 	zn_cost_us = cost_us;
 	fx_begin_scan();
@@ -250,9 +256,238 @@ static void test_zonescan_short_dwell(void)
 	CHECK(caught == overs);
 }
 
+/* v1.0.3 (docs/scan-slow-2026-11-25.md): the receiver's false carrier right after a retune (the noise reading's dip)
+ * longer than the model's 15 ms; nobody has measured it on the radio. Built twice by tools/test_fastscan.py zones:
+ * FS_DIP_GUARD 0 is v1.0.2's scan (the "before" rows, and their check that a dip of 25 ms or more holds quiet
+ * channels), 1 the fix (the "after" rows: quick, nothing held). Each row prints ms a stop, holds and scanst's DIPS */
+static zn_res_t zn_dip_run(bool fast, uint16_t zone, uint32_t dip, uint32_t band_dip, uint32_t cost_us, uint16_t dwell)
+{
+	fx_dip_ms = dip;
+	fx_dip_band_ms = band_dip;
+	zn_dwell = dwell;
+	fx_setup(16, true, FX_NONE, 0, 0, 0, 0);
+	zn_res_t r = zn_run(fast, zone, 0, cost_us, 5, 20000);
+	fx_dip_ms = FX_DIP_MS;
+	fx_dip_band_ms = 0;
+	zn_dwell = 0;
+	return r;
+}
+
+static void zn_dip_print(const char *what, bool fast, const zn_res_t *r)
+{
+	printf("Dip %s, %s (FS_DIP_GUARD %d): %.1f ms a stop, %u stops, held %u, fall-back %u, dips %u\n", what,
+	       fast ? "fast" : "classic", FS_DIP_GUARD, r->ms_per_stop, r->stops, (unsigned)r->st.held,
+	       (unsigned)r->st.fallback, (unsigned)r->st.dips);
+}
+
+static void test_zonescan_dip(void)
+{
+	static const uint32_t dips[] = { 15, 25, 35, 45 };
+	char what[64];
+	/* A quiet zone (Mine, 12 FM channels in one band), the dip the same after every retune, a read 0 or 3 ms */
+	for (unsigned d = 0; d < 4; d++)
+		for (unsigned c = 0; c < 2; c++)
+			for (unsigned f = 0; f < 2; f++) {
+				zn_res_t r = zn_dip_run(f != 0, 1, dips[d], 0, c * 3000u, 0);
+				snprintf(what, sizeof what, "%u ms, channel read %u ms", (unsigned)dips[d], c * 3u);
+				zn_dip_print(what, f != 0, &r);
+				CHECK(r.stops > 5);
+				if (FS_DIP_GUARD) {
+					CHECK(r.st.held == 0 && r.st.noticed == 0);
+					/* classic: its dwell; fast: three readings from 30 ms (no dip seen), or from FS_DIP_MS after
+					 * the retune (a slow read shifts that onto the next 10 ms tick) */
+					CHECK(f ? r.ms_per_stop <= (dips[d] < 30 ? 56.0 + c * 3.0 : 86.0 + c * 10.0) :
+						  r.ms_per_stop <= 156.0);
+					if (dips[d] >= 35)
+						CHECK(!f || r.st.dips + 2u >= r.stops);
+				} else if (dips[d] >= 25) {
+					CHECK(r.st.held > 0 && r.ms_per_stop > 500.0);	/* v1.0.2: quiet channels held */
+				}
+			}
+	/* A short dwell (75 ms: the guard window is 25 ms) and a 35 ms dip: the squelch the dip opens holds the stop until
+	 * it closes, then the scan moves on without the resume delay */
+	{
+		zn_res_t r = zn_dip_run(false, 1, 35, 0, 0, 75);
+		zn_dip_print("35 ms, scan dwell 75 ms", false, &r);
+		printf("  ... holds ended without the resume delay: %u\n", (unsigned)r.st.dip_holds);
+		if (FS_DIP_GUARD)
+			CHECK(r.ms_per_stop <= 135.0 && r.st.dip_holds + 2u >= r.st.held);
+		else
+			CHECK(r.ms_per_stop > 1000.0);
+	}
+	/* The owner's v1.0.1 report on the model: a dip of 15 ms in one band and 40 ms on a VHF / UHF jump; All
+	 * channels (1-8 UHF, 9-16 VHF) jumps twice a pass, Mine at 8 of its 12 stops */
+	zn_split = true;
+	for (unsigned f = 0; f < 2; f++) {
+		zn_res_t all = zn_dip_run(f != 0, 0, 15, 40, 0, 0);
+		zn_res_t mine = zn_dip_run(f != 0, 1, 15, 40, 0, 0);
+		zn_dip_print("15 ms, 40 ms on a band jump, All channels", f != 0, &all);
+		zn_dip_print("15 ms, 40 ms on a band jump, Mine", f != 0, &mine);
+		if (FS_DIP_GUARD) {
+			CHECK(all.st.held == 0 && mine.st.held == 0);
+			CHECK(mine.ms_per_stop <= (f ? 75.0 : 156.0) && all.ms_per_stop <= (f ? 62.0 : 156.0));
+		} else {
+			CHECK(mine.ms_per_stop > 3.0 * all.ms_per_stop);	/* v1.0.2: the made zone far slower */
+		}
+	}
+	zn_split = false;
+	/* An FM station 3 dB over the squelch line in overs, the dip 35 ms: found as with the 15 ms dip, and the fast rule
+	 * ends no stop on it while it is on the air */
+	if (FS_DIP_GUARD) {
+		for (unsigned f = 0; f < 2; f++) {
+			unsigned overs = 0, caught = 0, missed = 0, quiet = 0;
+			for (uint32_t seed = 1; seed <= 4; seed++) {
+				fx_setup(16, true, FX_FM, 8, -105, 0, 0);
+				fx_dip_ms = 35;
+				fx_res_t r = fx_run(f != 0, seed, 40000);
+				fx_dip_ms = FX_DIP_MS;
+				overs += r.overs;
+				caught += r.caught;
+				missed += r.missed;
+				quiet += r.holds_quiet;
+			}
+			printf("Dip 35 ms, FM -105 dBm in overs, %s: %u of %u overs caught, false quiet %u\n",
+			       f ? "fast" : "classic", caught, overs, missed);
+			CHECK(missed == 0 && caught * 10u >= overs * 9u);
+		}
+	}
+	/* Verifier: a slow step (a channel read of 55 ms: a zone with many scan-skipped or P25 channels read in a step) and
+	 * a scan dwell of 100 ms. The guard counts from the end of the retune, the dwell from the step's start: the
+	 * longer guard must still end before the last poll of the dwell, or an FM station without a tone (no probe) that
+	 * opens the squelch at once is stepped past. Both builds catch every over */
+	for (unsigned f = 0; f < 2; f++) {
+		unsigned overs = 0, caught = 0;
+		for (uint32_t seed = 1; seed <= 4; seed++) {
+			fx_setup(16, true, FX_FM, 8, -105, 0, 0);
+			fx.rand = seed * 7919u;
+			zn_codeplug();
+			start();
+			native_lab_init();
+			fake_power.switch_on = classic_on;
+			fake_power.battery_mv = classic_battery;
+			classic_busy = classic_stop = classic_receiving = false;
+			fs_set_fast(f != 0);
+			req(RREQ_ZONE, 1);
+			sm.set.scan_dwell_ms = 100;
+			fx.overs = 0;
+			for (uint32_t t = 1500u; fx.overs < 4; t += 6000u) {
+				fx.t0[fx.overs] = now + t + fx_rand(1000);
+				fx.len[fx.overs++] = 2000u;
+			}
+			bool got[4] = { false };
+			fx_begin_scan();
+			zn_cost_us = 55000u;
+			CHECK(sm.scan.cfg.dwell_ms == 100);
+			while ((int32_t)(now - fx.t0[3] - 2500u) < 0) {
+				fx_ms();
+				int k = fx_over_now();
+				if (k >= 0 && hw.rx_hz == fx_hz(8) &&
+				    (sm.scan.phase == SCAN_PH_HOLD || sm.scan.phase == SCAN_PH_PROBE))
+					got[k] = true;
+			}
+			zn_cost_us = 0;
+			for (int k = 0; k < 4; k++) {
+				overs++;
+				caught += got[k];
+			}
+			req(RREQ_SCAN, RSCAN_STOP);
+			fs_set_fast(true);
+		}
+		printf("Slow step 55 ms, scan dwell 100 ms, %s (FS_DIP_GUARD %d): %u of %u overs caught\n",
+		       f ? "fast" : "classic", FS_DIP_GUARD, caught, overs);
+		CHECK(caught == overs);
+	}
+}
+
+/* v1.0.3, the owner's radio on 1.0.2 (scanst read on the radio): a zone of five P25 channels, nothing on the air, the
+ * strength read -72 dBm at every stop (noise 94, the line 60), every stop a carrier by strength, the native receiver
+ * took each one, heard no frame, gave it back: 1.9 s a stop, cooled 0. The model: five P25 channels, the strength
+ * reading 53 dB high (the noise reading not). A no-frame take learns the channel's strength (fsc_floor): after the first
+ * pass the stops are quick. Then a real P25 signal (-95 dBm, read as -42) in overs on one of them, its frames reaching
+ * the native receiver: every over still noticed, and its take learns nothing */
+static void test_zonescan_p25_strength(void)
+{
+	fx_all_p25 = true;
+	fx_rssi_bias = 53;
+	for (unsigned f = 0; f < 2; f++) {
+		fx_setup(5, false, FX_NONE, 0, 0, 0, 0);
+		fx_res_t r = fx_run(f != 0, 3, 60000);
+		fs_stats_t st;
+		fs_view(now, &st);
+		printf("P25 zone, 5 channels, strength read 53 dB high, %s: %.1f ms a stop over 60 s (%u stops), learned %u, "
+		       "masked %u, held %u\n", f ? "fast" : "classic", r.ms_per_stop, r.stops, (unsigned)st.p25_learned,
+		       (unsigned)st.p25_masked, (unsigned)st.held);
+		if (FS_P25_FLOOR) {
+			CHECK(st.p25_learned >= 5u && st.p25_learned <= 7u);
+			CHECK(st.p25_masked > 50u);
+			/* the first two passes 5 x about 1.9 s (noted, then confirmed), then quick stops */
+			CHECK(r.ms_per_stop < (f ? 120.0 : 260.0));
+		} else {
+			CHECK(r.ms_per_stop > 1000.0);	/* v1.0.2: every stop taken, as on the radio */
+		}
+	}
+	fx_frames = true;
+	for (unsigned f = 0; f < 2; f++) {
+		unsigned overs = 0, caught = 0;
+		uint16_t learned = 0;
+		for (uint32_t seed = 1; seed <= 3; seed++) {
+			fx_setup(5, false, FX_P25, 2, -95, 0, 0);
+			fx_res_t r = fx_run(f != 0, seed, 60000);
+			fs_stats_t st;
+			fs_view(now, &st);
+			overs += r.overs;
+			caught += r.caught;
+			learned = (uint16_t)(learned + st.p25_learned);
+		}
+		printf("P25 zone, strength 53 dB high, P25 -95 dBm in overs with frames, %s (FS_P25_FLOOR %d): %u of %u overs "
+		       "noticed, learned %u\n", f ? "fast" : "classic", FS_P25_FLOOR, caught, overs, (unsigned)learned);
+		/* v1.0.2: 10 of 18 (every stop held 1.9 s on the false strength); with the learned level 13 of 18: the first two
+		 * passes (noted, then confirmed: about 19 s of 1.9 s stops) still miss the overs of that time */
+		CHECK(overs > 6u && (!FS_P25_FLOOR || caught * 10u >= overs * 7u));
+	}
+	fx_frames = false;
+	fx_all_p25 = false;
+	fx_rssi_bias = 0;
+}
+
+/* v1.0.3, the owner's radio on 1.0.2: a zone of three, ch 1 DMR, ch 2 P25, ch 3 FM; every step that switches the
+ * receiver between FM and DMR took 167-169 ms (scanst.cost); a DMR over from his other radio on ch 1 was never caught,
+ * fast or classic. The model: the same zone, a mode switch charged 168 ms on the radio task, the P25 strength 53 dB high,
+ * DMR direct mode -60 dBm on ch 1 in overs (no burst reaches the call stack: only the strength shows it). Before, the stop's
+ * dwell counted from the step's start and was over when the step returned; now from the end of the retune */
+static void test_zonescan_dmr_switch(void)
+{
+	static const uint8_t modes[3] = { RADIO_MODE_DMR, RADIO_MODE_P25, RADIO_MODE_FM };
+	fx_mode_list = modes;
+	fx_rssi_bias = 53;
+	zn_mode_ms = 168;
+	for (unsigned f = 0; f < 2; f++) {
+		unsigned overs = 0, caught = 0;
+		for (uint32_t seed = 1; seed <= 3; seed++) {
+			fx_setup(3, false, FX_DMR, 0, -60, 0, 0);
+			fx_res_t r = fx_run(f != 0, seed, 60000);
+			overs += r.overs;
+			caught += r.caught;
+		}
+		printf("Zone DMR / P25 / FM, mode switch 168 ms, DMR -60 dBm in overs on ch 1, %s (FS_DIP_GUARD %d): %u of %u "
+		       "overs noticed\n", f ? "fast" : "classic", FS_DIP_GUARD, caught, overs);
+		CHECK(overs > 6u && (!FS_DIP_GUARD || caught == overs));
+	}
+	zn_mode_ms = 0;
+	fx_rssi_bias = 0;
+	fx_mode_list = NULL;
+}
+
 int main(void)
 {
 	int before = failures;
+	test_zonescan_dip();
+	test_zonescan_p25_strength();
+	test_zonescan_dmr_switch();
+	if (!FS_DIP_GUARD) {	/* the "before" build: v1.0.2's rows only */
+		printf("Zone scan dip rows, v1.0.2 (FS_DIP_GUARD 0): %d checks, %d failures\n", checks, failures - before);
+		return failures != before;
+	}
 	test_zonescan_same();
 	test_zonescan_priority();
 	test_zonescan_figures();

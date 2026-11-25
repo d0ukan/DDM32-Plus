@@ -43,6 +43,39 @@
 				 * held back could be the last before the dwell's end (an FM channel without a tone that
 				 * opens the squelch at once could be stepped past on its first open) */
 #define FS_TICK_MS	10u	/* the radio task's tick (RADIO_TICK_MS): a tick gap over it is the task's time elsewhere */
+/* v1.0.3 (docs/scan-slow-2026-11-25.md): the receiver's false carrier right after a retune (the noise reading's dip) may
+ * last longer than the 20-25 ms the guards above allow (unmeasured; a VHF / UHF jump may take longer than a step in one
+ * band). On the host model a dip of 25 ms or more opened the squelch at a quiet stop's first poll and the scan held
+ * every quiet channel for its 2 s resume delay, classic and fast. With FS_DIP_GUARD (0: v1.0.2's behaviour, for the
+ * host test's before / after) the scan copes with a dip up to FS_DIP_MS:
+ *  - the squelch doesn't open until the retune is FS_DIP_MS old (at most the dwell less two polls, at least the
+ *    guards above);
+ *  - a hold whose squelch opened anyway while the retune was that young (a short dwell's shorter guard) and that heard
+ *    no carrier after the settle ends without the resume delay once the squelch closes (scanst.cost DIP_HOLDS);
+ *  - the fast rule: a reading that is not quiet while the retune is younger than FS_DIP_MS restarts the quiet span and
+ *    the span then counts only readings from FS_DIP_MS on; a reading that is not quiet after that hands the stop to the
+ *    classic rules as before (scanst.cost DIPS counts the stops this happened at) */
+#ifndef FS_DIP_GUARD
+#define FS_DIP_GUARD	1
+#endif
+#define FS_DIP_MS	50u	/* SCAN_SETTLE_MS: the classic scan ignores readings this young anyway */
+#define FS_P25_FLOORS	8u	/* v1.0.3: P25 channels whose no-frame take's strength is remembered (radio_scanfast.inc
+				 * fsc_floor; the oldest replaced) */
+#define FS_P25_FLOOR_DB	10	/* ... a strength less than this over it is no carrier on that channel */
+#define FS_P25_FLOOR_SAME_DB 6	/* ... a no-frame take within this of the noted strength confirms it */
+#define FS_P25_FLOOR_TAKES 2u	/* ... in force after this many no-frame takes at about the same strength */
+#define FS_P25_FLOOR_MS	120000u	/* ... for this long (from the last take), then learned again */
+#define FS_STEP_SLOW_MS	20u	/* v1.0.3: a step this long or longer (a mode switch: 167-169 ms on the owner's radio)
+				 * starts its stop's dwell at the end of the retune (radio_scanfast.inc fsc_now) */
+#ifndef FS_DMR_FRESH
+#define FS_DMR_FRESH	0	/* v1.0.3: 1 = the fast rule never ends a stop that has just switched into DMR (radio_scanfast.inc
+				 * fsc_tick); off: with the dwell counted from the retune the fast rule's strength readings catch
+				 * a DMR signal on the host model (test_zonescan_dmr_switch), and it cost ~70 ms a DMR stop */
+#endif
+#ifndef FS_P25_FLOOR
+#define FS_P25_FLOOR	FS_DIP_GUARD	/* v1.0.3: the learned P25 strength (fsc_floor); 0: v1.0.2 */
+#endif
+#define FS_SPAN_DIP_MS	30u	/* the quiet span after a dip reading (FM and the native modes): four readings 50-80 ms */
 
 enum { FS_M_FM, FS_M_DMR, FS_M_P25, FS_M_OTHER, FS_MODES };	/* P25 counts YSF (the native receiver's modes) */
 enum { FS_WAIT, FS_QUIET, FS_CLASSIC };				/* fs_feed's verdict */
@@ -89,6 +122,20 @@ typedef struct {
 	 * the tick's own step) */
 	uint16_t bands, am_stops;
 	uint8_t fb_why, slow_step;
+	/* v1.0.3: stops whose first readings were not quiet while the retune was younger than FS_DIP_MS (the dip, or a
+	 * carrier: the readings after it tell which). About every stop with nothing on the air: this radio's dip is longer
+	 * than FS_SETTLE_RETUNE_MS */
+	uint16_t dips;
+	/* ... and holds that began with a squelch opened while the retune was younger than FS_DIP_MS and heard no carrier
+	 * after the settle: the scan moved on without the resume delay (the false carrier after a retune) */
+	uint16_t dip_holds;
+	/* v1.0.3: P25 stops given back by the native receiver with no frame heard whose strength was learned, and readings
+	 * whose strength was under such a learned level (no carrier by strength: the radio's false strength on P25) */
+	uint16_t p25_learned, p25_masked;
+	/* v1.0.3: the longest step of any kind (the tick's, the poll's, a request's: reading the channel, switching the mode,
+	 * retuning; ms) and the modes it went from and to (FS_M_*; FS_MODES: none) */
+	uint16_t step_any_ms;
+	uint8_t step_from, step_to;
 } fs_stats_t;
 
 /* FS_WHY_* bits; bits 4-6 the fall-back's FS_FB_* reason */
@@ -125,6 +172,13 @@ void fs_fallback_reading(uint8_t mode, uint8_t why, uint8_t noise, uint8_t line,
 /* The radio task's timing: the gap since its last tick, the time a step on the tick took (ms); both counted to the
  * current stop's step time too */
 void fs_radio_cost(uint32_t gap_ms, uint32_t step_ms);
+/* v1.0.3: the current stop's first not-quiet reading came while the retune was younger than FS_DIP_MS (counted once a
+ * stop) */
+void fs_dip(void);
+void fs_dip_hold(void);				/* v1.0.3: a hold on the false carrier, its resume delay skipped */
+void fs_p25_learned(void);			/* v1.0.3: a P25 channel's no-frame strength learned */
+void fs_p25_masked(void);			/* v1.0.3: a strength under a learned level */
+void fs_step_modes(uint8_t from, uint8_t to, uint32_t ms);	/* v1.0.3: a step's time and its modes (FS_M_*) */
 
 /* The PC (the debug link task): a copy of the counters (running: mark_ms = now) */
 void fs_view(uint32_t now_ms, fs_stats_t *out);
