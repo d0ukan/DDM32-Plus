@@ -130,6 +130,18 @@ static bool checks(void)
 	return true;
 }
 
+/* An FM side not heard (owner, 2026-11-26): FM carries no talkgroup, so FM -> DMR needs the DMR side's TX talkgroup
+ * (xband_listens); with "As heard" the pair runs one way, DMR -> FM. Started all the same, and told on Start */
+static bool fm_side_deaf(void)
+{
+	const xband_req_t *r = xband_req();
+	uint8_t heard = xband_listens(r);
+	for (uint8_t k = 0; k < 2; k++)
+		if (r->mode[k] == XB_MODE_FM && r->mode[1u - k] == XB_MODE_DMR && !(heard & (1u << k)))
+			return true;
+	return false;
+}
+
 static void go(void)
 {
 #if CONFIG_DUAL_WATCH
@@ -142,7 +154,8 @@ static void go(void)
 	}
 	was_on = 1;
 	ui_go_home();
-	ui_toast(TR("Cross-band on: Back stops"));
+	/* (Home's bottom line says Back stops it all the same) */
+	ui_toast(fm_side_deaf() ? TR("FM->DMR off: set a DMR TX TG") : TR("Cross-band on: Back stops"));
 }
 
 /* --- The form --- */

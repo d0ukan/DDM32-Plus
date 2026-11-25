@@ -143,8 +143,31 @@ static bool xa_start(const uint8_t *t, uint16_t n, uint16_t baud, uint16_t mark,
 	CHECK(false);	/* never tones */
 	return false;
 }
+/* The board's DCS turn-off tail (hal_radio.h tx_tail), faked: started only with a DCS TX tone, as the DM-32's */
+static struct { int starts, cancels; bool on; } xt;
+static bool xt_tail(bool on)
+{
+	if (on) {
+		if (hw.tx_tone.type != TONE_DCS && hw.tx_tone.type != TONE_DCS_INV)
+			return false;
+		xt.starts++;
+	} else if (xt.on) {
+		xt.cancels++;
+	}
+	xt.on = on;
+	return true;
+}
 static bool xa_busy(void) { return xa.busy; }
-static void xa_stop(void) { xa.busy = false; xa.gen = NULL; xa.stops++; }
+/* tx_stop is the board's route(false): on the DM-32 it unmutes the codec (the microphone). Never while the carrier is up */
+static int xa_stops_on_air;
+static void xa_stop(void)
+{
+	if (sm.view.state == RS_TX || xt.on)
+		xa_stops_on_air++;
+	xa.busy = false;
+	xa.gen = NULL;
+	xa.stops++;
+}
 static bool xa_pcm(uint16_t (*gen)(int16_t *out, uint16_t max, int16_t amp), uint8_t level)
 {
 	if (xa.refuse || xa.busy || sm.view.state != RS_TX || hw_mode != RADIO_MODE_FM)
@@ -184,11 +207,39 @@ static void xa_tick(void)
 		xa.busy = false;
 }
 
+/* What the (fake) AMBE+2 encoder was handed, 20 ms blocks (the fixture's v_encode calls this, tools/test_classic.py):
+ * the FM receive ring's samples (1000..1047, rising: xa_rx_read), the fake microphone (xr_mic, one non-zero value), or
+ * silence. The classes survive the mic gain scaling (a positive factor) */
+static struct { unsigned blocks, ring, mic, silence, other; } xe;
+static void xr_encoded(const int16_t *pcm)
+{
+	bool zero = true, same = true, rising = true;
+	for (int i = 0; i < VOCODER_FRAME_SAMPLES; i++) {
+		zero = zero && pcm[i] == 0;
+		same = same && pcm[i] == pcm[0];
+		rising = rising && pcm[i] > 0;	/* (all positive, not one value: the ring's ramp) */
+	}
+	xe.blocks++;
+	if (zero)
+		xe.silence++;
+	else if (same)
+		xe.mic++;
+	else if (rising)
+		xe.ring++;
+	else
+		xe.other++;
+}
+
 static void xr_reset(void)
 {
 	memset(xr_beeps, 0, sizeof xr_beeps);
 	memset(&xa, 0, sizeof xa);
 	memset(&xa_rx, 0, sizeof xa_rx);
+	memset(&xt, 0, sizeof xt);
+	memset(&xe, 0, sizeof xe);
+	memset(xr_mic, 0, sizeof xr_mic);
+	xa_stops_on_air = 0;
+	fake_radio.tx_tail = NULL;
 	xr_heard_n = xr_heard_taken = xr_put_n = xr_taken_n = 0;
 	xr_send = xr_eof = xr_was_sent = false;
 	xr_cancels = 0;
@@ -840,12 +891,19 @@ static void test_xband_fm_to_dmr(void)
 	signal(120, true);
 	run(400);
 	unsigned air0 = sim.air_count;
+	for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++)
+		xr_mic[i] = 700;			/* the microphone: never what is encoded while the over is captured */
+	memset(&xe, 0, sizeof xe);
 	signal(8, true);				/* a carrier with the tone (no RX tone set: tone_ok is ignored) */
 	run(1500);					/* the over: the encoder runs on the FM audio every 20 ms */
 	xband_view_t v;
 	xband_view(&v);
 	CHECK(xa_rx.starts >= 1 && xa_rx.reads > 0);	/* the FM receive audio path ran */
 	CHECK(v.frames > 25 || v.phase == XB_P_SEND || v.relayed == 1);	/* an over of frames recorded */
+	/* the encoder was handed the FM receive ring's samples, never the microphone (silence only on an underrun) */
+	CHECK(xe.ring > 25 && xe.mic == 0 && xe.other == 0 && xe.silence <= 3);
+	if (!(xe.ring > 25 && xe.mic == 0 && xe.other == 0 && xe.silence <= 3))
+		printf("  (encoded: %u ring, %u mic, %u silence, %u other)\n", xe.ring, xe.mic, xe.silence, xe.other);
 	signal(120, true);				/* the carrier gone: the over ends, it is sent on B */
 	for (int i = 0; i < 400 && sm.view.state != RS_TX && (xband_view(&v), v.relayed == 0); i++)
 		run(25);
@@ -876,11 +934,15 @@ static void test_xband_fm_to_dmr(void)
 static void test_xband_fm_rx_tone(void)
 {
 	setup_codeplug();
+	/* the user's own channel carries its own tones: they come back after the session's */
+	chans[1].tx_tone = (subtone_t){ TONE_CTCSS, 1230 };
+	chans[1].rx_tone = (subtone_t){ TONE_DCS, 023 };
 	codec_present = true;
 	start();
 	xr_reset();
 	aud.feed = true;
 	run(500);
+	CHECK(sm.view.channel_number == 1 && sm.view.ch.rx_tone.type == TONE_DCS && hw.rx_tone.type == TONE_DCS);
 	xr_req(145500000, 433500000);
 	xband_req()->mode[0] = XB_MODE_FM;
 	xband_req()->side[0].rx_tone_type = TONE_CTCSS;		/* only a carrier with 100.0 Hz is relayed */
@@ -899,14 +961,197 @@ static void test_xband_fm_rx_tone(void)
 	xband_view_t v;
 	xband_view(&v);
 	CHECK(v.frames == 0 && v.phase == XB_P_LISTEN && sim.air_count == air0);	/* a carrier without the RX tone: nothing relayed */
+	CHECK(xr_on(145500000) && hw.rx_tone.type == TONE_CTCSS && hw.rx_tone.value == 1000);	/* the receiver decodes A's tone */
 	signal(120, false);
 	run(200);
+	/* a carrier WITH the tone (tone_ok true): captured and relayed on B as DMR to TG 101 */
+	CHECK(xr_on(145500000));
+	signal(8, true);
+	run(1500);
+	signal(120, false);
+	for (int i = 0; i < 400 && sm.view.state != RS_TX && (xband_view(&v), v.relayed == 0); i++)
+		run(25);
+	for (int i = 0; i < 600 && sm.view.state == RS_TX; i++)
+		run(25);
+	unsigned first = air0;
+	while (first < sim.air_count && sim.air[first].kind != DMR_BURST_VOICE_LC_HEADER)
+		first++;
+	CHECK(first < sim.air_count);
+	if (first < sim.air_count) {
+		dmr_lc_t l;
+		air_lc(first, &l);
+		CHECK(l.dst == 101 && l.src == own_dmr_id);
+	}
+	xband_view(&v);
+	CHECK(v.relayed == 1);
 	xband_stop();
 	for (int i = 0; i < 200 && xband_owns_radio(); i++)
 		run(25);
 	CHECK(!xband_owns_radio() && hw.rx_hz == 146520000);
+	/* the user's channel tones back, on the channel and in the receiver */
+	CHECK(sm.view.ch.tx_tone.type == TONE_CTCSS && sm.view.ch.tx_tone.value == 1230);
+	CHECK(sm.view.ch.rx_tone.type == TONE_DCS && sm.view.ch.rx_tone.value == 023);
+	CHECK(hw.rx_tone.type == TONE_DCS && hw.rx_tone.value == 023);
+	chans[1].tx_tone = chans[1].rx_tone = (subtone_t){ TONE_NONE, 0 };
 	aud.feed = false;
-	printf("Plus cross-band FM -> DMR: a carrier without the RX tone is not relayed (tone gating)\n");
+	printf("Plus cross-band FM -> DMR: a carrier without the RX tone is not relayed, one with it is (tone gating); the "
+	       "user's tones back\n");
+}
+
+/* DMR -> FM with a DCS TX tone: the board's turn-off tail holds the carrier RADIO_SUBTONE_TAIL_MS after the over, and
+ * the tone path's route (the microphone muted on the DM-32) is held through it: no room audio on the air. A stop while
+ * the tail runs cuts it cleanly (the board's tail off, the carrier off, then the route) */
+static void test_xband_fm_dcs_tail(void)
+{
+	setup_codeplug();
+	codec_present = true;
+	start();
+	xr_reset();
+	fake_radio.tx_tail = xt_tail;
+	aud.feed = true;
+	run(500);
+	xr_req(145500000, 433500000);
+	xband_req()->mode[1] = XB_MODE_FM;
+	xband_req()->side[1].tx_tone_type = TONE_DCS;	/* DCS 023 on B's carrier */
+	xband_req()->side[1].tx_tone_value = 023;
+	CHECK(xband_start());
+	run(100);
+	CHECK(xr_on(145500000));
+	xr_call(2862, 3105555, 2);
+	run(200);
+	CHECK(sm.view.state == RS_TX && hw_mode == RADIO_MODE_FM && hw.tx_tone.type == TONE_DCS && xa.starts == 1);
+	unsigned tail_polls = 0, stopped_in_tail = 0;
+	for (int i = 0; i < 400 && (sm.view.state == RS_TX || xa.stops == 0); i++) {
+		xr_run_fm(20);
+		if (xt.on) {
+			tail_polls++;
+			stopped_in_tail += xa.stops != 0;
+		}
+	}
+	/* the tail ran (300 ms), the route held all through it, let go only once the carrier was off */
+	CHECK(xt.starts == 1 && tail_polls >= 10 && stopped_in_tail == 0 && xa.stops == 1 && xa_stops_on_air == 0);
+	CHECK(sm.view.state != RS_TX && !xt.on);
+	xband_view_t v;
+	xband_view(&v);
+	CHECK(v.relayed == 1);
+	/* the CW ID, then A again; a second over, stopped while its tail runs */
+	for (int i = 0; i < 800 && (xband_view(&v), v.phase != XB_P_LISTEN || hw_mode != RADIO_MODE_DMR); i++)
+		run(25);
+	CHECK(xr_on(145500000));
+	xr_call(2862, 3105555, 2);
+	run(200);
+	CHECK(sm.view.state == RS_TX && xa.starts == 2);
+	for (int i = 0; i < 400 && !xt.on; i++)
+		xr_run_fm(20);
+	CHECK(xt.on && xt.starts == 2 && sm.view.state == RS_TX && xa.stops == 1);
+	int off0 = hw.tx_off_calls;
+	xband_stop();
+	run(100);
+	CHECK(!xband_owns_radio() && !xt.on && xt.cancels == 2 && sm.view.state != RS_TX && hw.tx_off_calls > off0);
+	CHECK(xa.stops == 2 && xa_stops_on_air == 0 && xr_gives == 1 && hw.rx_hz == 146520000 && hw_mode == RADIO_MODE_FM);
+	fake_radio.tx_tail = NULL;
+	aud.feed = false;
+	printf("Plus cross-band DMR -> FM with DCS: the microphone muted through the turn-off tail (%u polls), a stop in the "
+	       "tail cut it cleanly\n", tail_polls);
+}
+
+/* Battery saving on: it sleeps the receiver on the user's idle FM channel, never on a session's FM receive side */
+static int xr_sleeps;
+static void xr_rx_sleep(bool on)
+{
+	xr_sleeps += on;
+}
+static void test_xband_fm_eco(void)
+{
+	setup_codeplug();
+	codec_present = true;
+	start();
+	xr_reset();
+	fake_radio.rx_sleep = xr_rx_sleep;
+	sm.set.rx_save = 1;
+	sm.set.rx_save_idle_s = 0;
+	xr_sleeps = 0;
+	run(3000);
+	CHECK(xr_sleeps > 0);			/* (the user's FM channel: it does sleep) */
+	xr_req(145500000, 433500000);
+	xband_req()->mode[0] = XB_MODE_FM;
+	xband_req()->side[1].tx_tg = 101;
+	CHECK(xband_start());
+	run(100);
+	CHECK(xband_owns_radio() && sm.view.ch.mode == RADIO_MODE_FM && sm.view.ch.no_eco);
+	xr_sleeps = 0;
+	run(5000);
+	CHECK(xr_sleeps == 0 && !sm.view.rx_sleeping);	/* (the dwell goes between A, FM, and B, DMR: never asleep) */
+	CHECK(xr_on(145500000) && sm.view.ch.mode == RADIO_MODE_FM);
+	run(3000);
+	CHECK(xr_sleeps == 0 && !sm.view.rx_sleeping);
+	sm.view.ch.no_eco = false;	/* control: the session channel without no_eco (as before the fix) does sleep */
+	run(5000);
+	CHECK(xr_sleeps > 0);
+	xband_stop();
+	for (int i = 0; i < 200 && xband_owns_radio(); i++)
+		run(25);
+	CHECK(!xband_owns_radio() && hw.rx_hz == 146520000);
+	fake_radio.rx_sleep = NULL;
+	sm.set.rx_save = 0;
+	printf("Plus cross-band FM -> DMR: battery saving never sleeps the receiver on the FM side\n");
+}
+
+/* An FM -> DMR capture cut short (the stop, as Back does: ui_xband.c; a critical battery): the encoder's microphone hook
+ * is given back, so a later DMR PTT on the user's own DMR channel encodes the microphone, not the FM ring */
+static void test_xband_fm_abnormal_end(void)
+{
+	for (int way = 0; way < 2; way++) {
+		setup_codeplug();
+		codec_present = true;
+		start();
+		xr_reset();
+		fake_power.battery_mv = NULL;	/* (the level as set here) */
+		aud.feed = true;
+		run(500);
+		xr_req(145500000, 433500000);
+		xband_req()->mode[0] = XB_MODE_FM;
+		xband_req()->side[1].tx_tg = 101;
+		CHECK(xband_start());
+		run(100);
+		CHECK(xband_owns_radio() && xr_on(145500000));
+		signal(120, true);
+		run(400);
+		for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++)
+			xr_mic[i] = 700;
+		memset(&xe, 0, sizeof xe);
+		signal(8, true);
+		run(600);
+		xband_view_t v;
+		xband_view(&v);
+		CHECK(v.phase == XB_P_RECORD && xe.ring > 10 && xe.mic == 0);	/* mid-capture */
+		if (way == 0)
+			xband_stop();
+		else
+			sm.batt.level = BATT_CRITICAL;
+		for (int i = 0; i < 200 && xband_owns_radio(); i++)
+			run(25);
+		xband_view(&v);
+		CHECK(!xband_owns_radio() && v.ended == (way == 0 ? XB_E_STOPPED : XB_E_BATTERY));
+		sm.batt.level = BATT_OK;
+		signal(120, true);
+		/* the user's DMR channel, PTT: the microphone is encoded */
+		req(RREQ_ZONE_POS, 3);
+		run(100);
+		CHECK(sm.view.ch.mode == RADIO_MODE_DMR);
+		memset(&xe, 0, sizeof xe);
+		req(RREQ_PTT, 1);
+		run(600);
+		req(RREQ_PTT, 0);
+		for (int i = 0; i < 100 && sm.view.state == RS_TX; i++)
+			run(25);
+		CHECK(xe.mic > 10 && xe.ring == 0 && xe.other == 0);
+		if (!(xe.mic > 10 && xe.ring == 0 && xe.other == 0))
+			printf("  (way %d encoded: %u ring, %u mic, %u silence, %u other)\n", way, xe.ring, xe.mic, xe.silence,
+			       xe.other);
+		aud.feed = false;
+	}
+	printf("Plus cross-band FM -> DMR: after a stop or a critical battery mid-capture, DMR PTT encodes the microphone\n");
 }
 
 int main(void)
@@ -920,6 +1165,9 @@ int main(void)
 	test_xband_fm_tx_tone();
 	test_xband_fm_to_dmr();
 	test_xband_fm_rx_tone();
+	test_xband_fm_dcs_tail();
+	test_xband_fm_eco();
+	test_xband_fm_abnormal_end();
 	test_xband_p25();
 	test_xband_p25_sides();
 	test_xband_sides();

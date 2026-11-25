@@ -41,6 +41,20 @@ def main(ROOT, APP, OUT, flags, host):
          '-DCONFIG_MULTI_WATCH=1', '-DCONFIG_FM_ID=1', '-DCONFIG_LANG_TR=1', str(ui / 'lastcall.c'),
          str(ui / 'ui_lastcall.c')], cwd=host)
     run([OUT / 'test_ui_lastcall'], cwd=host)
+    # Cross-band: the board's FM receive ring is the session's while it runs (FM -> DMR captures from it). FM caller ID,
+    # the pager and APRS receive poll before the session in the same pass and let go with it unwanted; their blocks are
+    # built only with CONFIG_APRS, which the radio core suites leave out, so the transformed radio_sm.c is checked here:
+    # each condition gains the session's exclusion right before its poll, under CONFIG_XBAND
+    sm_c = (APP / 'core/radio/radio_sm.c').read_text()
+    aprs = sm_c.find('\tr.fm_rx = sm->aprs_phase == APRS_RF_OFF')
+    for cond, poll, start in (('fmid = fmid && !xband_on();', '\t\tif (radio_fmid_poll(fmid, ', 0),
+                              ('msg = msg && !xband_on();', '\t\tif (radio_msg_poll(!msg ? 0 :', 0),
+                              ('r.fm_rx = r.fm_rx && !xband_on();', '\tr.rx_hz = sm->view.ch.rx_hz;\n', aprs)):
+        at = sm_c.find(poll, start) if start >= 0 else -1
+        line = sm_c.rfind('#if CONFIG_XBAND\n', 0, at)
+        head = sm_c[line:at]
+        if at < 0 or line < 0 or cond not in head or head.count('\n') != 3 or not head.endswith('#endif\n'):
+            raise SystemExit('radio_sm.c: the cross-band exclusion is missing before ' + poll.strip())
     # Cross-band store and forward (item 46): the rules and the engine on a fake radio core
     run(['clang', *flags, '-DCONFIG_XBAND=1', tp / 'test_xband.c', APP / 'core/radio/xband.c', '-o',
          OUT / 'test_xband'], cwd=ROOT)

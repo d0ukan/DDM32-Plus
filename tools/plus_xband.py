@@ -192,6 +192,19 @@ def prepare_crossband(transform, install):
         # a P25 session's channel: the native receiver owns the radio and the poll is not run; the session goes on
         ('\tbeep_service(p25_lab_busy());\n#endif\n}\n',
          '\tbeep_service(p25_lab_busy());\n#endif\n' + XB_ON + '\txb_native_poll(sm, now_ms);\t// DDM32 Plus cross-band\n#endif\n}\n'),
+        # The board's FM receive ring (board.afsk rx: one owner, hrc_fm_rx_start refuses a second) is the session's while
+        # it runs (FM -> DMR captures from it): FM caller ID, the pager and APRS receive stay off it. They poll before
+        # the session in the same pass and let go there (radio_fmid_poll / radio_msg_poll / aprs_tick with it unwanted)
+        ('\t\tif (radio_fmid_poll(fmid, sm->view.ch.rx_hz, now_ms))\n',
+         XB_ON + '\t\tfmid = fmid && !xband_on();\t// DDM32 Plus cross-band: the session owns the FM receive ring\n#endif\n'
+         '\t\tif (radio_fmid_poll(fmid, sm->view.ch.rx_hz, now_ms))\n'),
+        ('\t\tif (radio_msg_poll(!msg ? 0 :',
+         XB_ON + '\t\tmsg = msg && !xband_on();\t// DDM32 Plus cross-band: the session owns the FM receive ring\n#endif\n'
+         '\t\tif (radio_msg_poll(!msg ? 0 :'),
+        ('\t\t  sm->view.state != RS_TX;\n\tr.rx_hz = sm->view.ch.rx_hz;\n',
+         '\t\t  sm->view.state != RS_TX;\n' + XB_ON +
+         '\tr.fm_rx = r.fm_rx && !xband_on();\t// DDM32 Plus cross-band: the session owns the FM receive ring\n#endif\n'
+         '\tr.rx_hz = sm->view.ch.rx_hz;\n'),
         # The cross-band CW ID is over (or cut): back to the session's channel (the engine retunes after)
         ('#if CONFIG_CW_BEACON\n\tif (beacon.keying) {\n',
          XB_ON + '\tif (xb_cw_on) {\n\t\txb_cw_on = false;\t// DDM32 Plus cross-band: its ID is over (or cut)\n'

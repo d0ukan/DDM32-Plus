@@ -581,12 +581,62 @@ static void segs_free(void)
 	check(!xband_on() && xband_segs_free(), "kept while the radio runs");
 }
 
+/* FM paired with DMR and the DMR side's TX talkgroup "As heard" (owner, 2026-11-26): FM carries no talkgroup, so the FM
+ * side is not heard; Start still starts (a valid one-way DMR -> FM session, which relays), with a warning toast in place
+ * of "Cross-band on: Back stops" */
+static void fm_dmr_warn(void)
+{
+	start("FM -> DMR without a TX TG");
+	pair(145500000, 433500000);
+	xband_req()->mode[0] = XB_MODE_FM;
+	xband_req()->side[1].tx_tg = 0;
+	press_start();
+	expect(T("shows=Attended", "shows=Yaln"));
+	ok_run("ok wait:200");
+	expect("screen=home shows=CROSS");
+	expect_tr("toast", "FM->DMR off: set a DMR TX TG");
+	layout();
+	ok_run("shot:xband-fm-dmr-off");
+	check(xband_on() && req_on == 1, "started anyway");
+	/* DMR -> FM relays: an over heard on B (DMR) sent on A (FM) */
+	engine_take(true);
+	engine_poll();
+	engine_to_side(1);
+	xband_view_t v;
+	xband_view(&v);
+	check(v.phase == XB_P_LISTEN && v.side == 1, "listening on B (DMR) only");
+	xband_rx_begin(3101234, 91, true, false);
+	for (int i = 0; i < 100; i++)
+		xband_rx_frame((const uint8_t[XB_FRAME_BYTES]){ 1 });
+	xband_rx_end();
+	engine_poll();
+	ok_run("wait:300");
+	check(keys == 1 && tuned == 0, "DMR -> FM: sent on A");
+	ok_run("back wait:100");
+	engine_poll();
+	check(!xband_on(), "stopped");
+}
+
+/* ... with the DMR side's TX talkgroup set: FM -> DMR is on, no warning */
+static void fm_dmr_tg(void)
+{
+	start("FM -> DMR with a TX TG");
+	pair(145500000, 433500000);
+	xband_req()->mode[0] = XB_MODE_FM;
+	xband_req()->side[1].tx_tg = 101;
+	press_start();
+	ok_run("ok wait:200");
+	expect("screen=home shows=CROSS");
+	expect_tr("toast", "Cross-band on: Back stops");
+	check(xband_on() && req_on == 1, "started");
+}
+
 typedef void (*case_fn)(void);
 
 int main(void)
 {
 	static const case_fn all[] = { form, fm_tones, refusals, picker, owner_pair, question_and_run, ended_itself,
-				       segs_free };
+				       segs_free, fm_dmr_warn, fm_dmr_tg };
 	int bad = 0, run = 0;
 	for (int lang = 0; lang < 2; lang++) {
 		for (unsigned i = 0; i < sizeof all / sizeof all[0]; i++) {

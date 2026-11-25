@@ -22,13 +22,17 @@ Firmware. Host-tested only; not yet run on the radio.
   "FM -> DMR and FM sub-tones"). FM is now a receive source paired with DMR: the FM receive audio is encoded by the
   stock AMBE+2 codec and sent on the DMR side to that side's TX talkgroup. FM carries no talkgroup, so the FM side is
   heard only when the DMR side has a TX talkgroup set; with "As heard" a DMR / FM pair stays one-way DMR -> FM as
-  before (no dwell to the FM side). An FM side of the form has an **RX Tone** and a **TX Tone** row:
+  before (no dwell to the FM side); Start still starts such a session, with the toast "FM->DMR off: set a DMR TX TG"
+  in place of "Cross-band on: Back stops". An FM side of the form has an **RX Tone** and a **TX Tone** row:
   the RX tone gates an FM -> DMR receive side (only a carrier with it is relayed; none: carrier squelch), and the TX
   tone goes on a DMR / NXDN -> FM carrier so tone-gated radios and repeaters open. The sub-tones reuse the radio's own
   path (`ch->rx_tone` / `ch->tx_tone`, `board.radio->tx()`), so no new transmit code and no new TX or band limit; the
   FM receive side only receives. **FM -> DMR is HARDWARE-UNVERIFIED** - the stock encoder and the FM receive audio
   level are radio-only and have never run on the owner's unit (the engine relay and the capture / tone plumbing are
-  host-tested with a fake codec). Cost: FLASH +1,204 B (6,016 B free), RAM +352 B; zero warnings, forced rebuild
+  host-tested with a fake codec). With a DCS TX tone the microphone stays muted through the turn-off tail (the tone
+  path's route is held until the carrier is off); FM caller ID, the pager and APRS receive keep off the FM receive ring
+  while a session runs; battery saving never sleeps an FM receive side. Known limit: squelch 0 with no RX tone keeps an
+  FM receive side recording noise (docs/plus.md). Cost: FLASH +1,204 B, then +312 B for the review fixes and the toast (5,052 B free), RAM +352 B; zero warnings, forced rebuild
   identical. Radio test rows XB-16..XB-18 in docs/plus-radio-test.md.
 
 ## v1.0.5 (2026-11-25, with programmer 3.1.0)

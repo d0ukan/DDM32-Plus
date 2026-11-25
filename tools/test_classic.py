@@ -858,11 +858,20 @@ def main():
     # a refused transmission, the P25 worker's memory not lent; DMR -> FM through the voice bridge and a fake tone path;
     # P25 -> P25 through the real native receiver / transmitter and a fake worker (tests/plus/test_xband_radio.inc)
     xbrad=OUT/'radioCoreXband.c'
-    xbrad.write_text('#include "native_modem/native_lab.h"\nextern const nt_ops classic_ops;\n'+
-                     # (the fake board gains a fake tone path: an FM over plays through it)
-                     fixture.replace('const board_t board = {\n\t.native_modem=&classic_ops,',
-                                     'extern const hal_afsk_t xb_afsk;\nconst board_t board = {\n'
-                                     '\t.native_modem=&classic_ops,\n\t.afsk=&xb_afsk,')+
+    # (the fake board gains a fake tone path: an FM over plays through it; the fake encoder reports the samples it is
+    # handed and the fake microphone can be set, so FM -> DMR's microphone hook is seen: xr_encoded, xr_mic)
+    xbfix=fixture.replace('const board_t board = {\n\t.native_modem=&classic_ops,',
+                          'extern const hal_afsk_t xb_afsk;\nconst board_t board = {\n'
+                          '\t.native_modem=&classic_ops,\n\t.afsk=&xb_afsk,')
+    for old,new in (('static void v_encode(const int16_t *pcm, uint8_t *bits) { (void)pcm; memset(bits, 0, VOCODER_BITS); }',
+                     'static void xr_encoded(const int16_t *pcm);\n'
+                     'static void v_encode(const int16_t *pcm, uint8_t *bits) { xr_encoded(pcm); memset(bits, 0, VOCODER_BITS); }'),
+                    ('static bool codec_present;\n','static int16_t xr_mic[AUDIO_BLOCK_SAMPLES];\nstatic bool codec_present;\n'),
+                    ('\t\t\tstatic const int16_t mic[AUDIO_BLOCK_SAMPLES];\n','\t\t\tconst int16_t *mic = xr_mic;\n')):
+        if xbfix.count(old)!=1:
+            raise SystemExit('radioCoreXband: the fixture changed: '+old.strip())
+        xbfix=xbfix.replace(old,new)
+    xbrad.write_text('#include "native_modem/native_lab.h"\nextern const nt_ops classic_ops;\n'+xbfix+
                      '\n#define main classic_radio_main\n#include "'+str(ROOT/'tests/classic/test_radio.inc')+'"\n#undef main\n'
                      '#include "'+str(ROOT/'tests/plus/test_xband_radio.inc')+'"\n')
     argv_xb=list(argv_cw)

@@ -41,6 +41,7 @@ static struct {
 	bool fm_open : 1;	/* an FM over's frames go to the voice bridge (its begin was called) */
 	bool fm_rx : 1;		/* FM -> DMR: an FM over is being captured and encoded now (between begin and end) */
 	bool fm_rx_on : 1;	/* ... the board's FM receive audio path (board.afsk rx) is running */
+	bool fm_tail : 1;	/* an FM over let go: the tone path's route (the microphone muted) held until the carrier is off */
 	uint8_t cw_side : 1;
 	uint8_t txmode : 2;	/* XB_MODE_* being sent in (FM, P25) */
 	uint8_t waits : 7;	/* polls the P25 worker took to let go of its memory so far */
@@ -59,6 +60,7 @@ static uint8_t xb_hold[P25_LAB_XB_BYTES];
 static int16_t (*xb_pcm)[VOCODER_FRAME_SAMPLES];	/* in the lent memory (a session with an FM side) */
 static volatile uint8_t xb_pcm_w, xb_pcm_r, xb_pcm_pos;
 static volatile bool xb_pcm_eof;
+static volatile bool xb_pcm_cut;	/* the over let go: the interrupt reads no more blocks (the route stays: xb_let_go) */
 
 /* The voice bridge's mixer while an FM over is keyed (the audio task, every 20 ms block): the decoded block kept until
  * the last frame played (xb_pcm_eof), a block dropped when the tone path is behind; the beeps mixed as always */
@@ -76,6 +78,8 @@ static bool xb_mix(int16_t *spk)
 static uint16_t xb_gen(int16_t *out, uint16_t max, int16_t amp)
 {
 	uint16_t n = 0;
+	if (xb_pcm_cut)
+		return 0;
 	while (n < max) {
 		if (xb_pcm_r == xb_pcm_w) {
 			if (xb_pcm_eof)
@@ -102,7 +106,10 @@ static uint16_t xb_gen(int16_t *out, uint16_t max, int16_t amp)
  * codec runs only on the radio, so this path is host-tested with a fake encoder and the afsk receive path faked; the
  * audio level into the encoder and the de-emphasis are unverified on the owner's unit (docs/plus-radio-test.md). */
 #define XB_RX_SAMPLES	(XB_PCM_SLOTS * VOCODER_FRAME_SAMPLES)	/* 1280 samples = 160 ms at 8 kHz (shares xb_pcm) */
-static volatile uint32_t xb_rx_w, xb_rx_r;	/* sample indices, reset each over (an over is <= 3 min: never wraps) */
+/* Sample indices, reset each over (an over is <= 3 min: never wraps). xb_rx_w is the radio task's, xb_rx_r the audio
+ * task's; each publishes its index with a release store after its samples moved, and reads the other's with an acquire
+ * load, so a sample is never read before it is written nor overwritten before it is read */
+static volatile uint32_t xb_rx_w, xb_rx_r;
 
 /* The audio task's microphone while an FM -> DMR over is captured: a 20 ms block of the FM receive ring, silence on an
  * underrun (the over keeps its 20 ms timing). Single consumer (the audio task) */
@@ -110,31 +117,38 @@ static const int16_t *xb_fm_mic(void)
 {
 	static int16_t blk[VOCODER_FRAME_SAMPLES];
 	const int16_t *buf = (const int16_t *)xb_pcm;
-	if (xb_pcm == NULL || xb_rx_w - xb_rx_r < (uint32_t)VOCODER_FRAME_SAMPLES) {
+	uint32_t r = xb_rx_r;
+	if (buf == NULL || __atomic_load_n(&xb_rx_w, __ATOMIC_ACQUIRE) - r < (uint32_t)VOCODER_FRAME_SAMPLES) {
 		memset(blk, 0, sizeof blk);
 		return blk;
 	}
 	for (uint16_t i = 0; i < VOCODER_FRAME_SAMPLES; i++)
-		blk[i] = buf[(xb_rx_r + i) % XB_RX_SAMPLES];
-	xb_rx_r += VOCODER_FRAME_SAMPLES;
+		blk[i] = buf[(r + i) % XB_RX_SAMPLES];
+	__atomic_store_n(&xb_rx_r, r + VOCODER_FRAME_SAMPLES, __ATOMIC_RELEASE);
 	return blk;
 }
 
-/* The radio task: the FM receive audio board.afsk has, into the ring, until the ring is full (the rest stays in the
- * board's buffer for the next poll) or the board has no more (rx_read returns 0). Bounded by the ring's capacity */
-static void xb_fm_fill(void)
+/* The radio task: the FM receive audio board.afsk has, into the ring, until the ring is full (no more is read: the
+ * rest stays in the board's buffer for the next poll) or the board has no more (rx_read returns 0). Out of line: its
+ * buffer stays off the radio task's deepest path through xb_rf_poll (tools/stack_check.py) */
+static __attribute__((noinline)) void xb_fm_fill(void)
 {
 	const hal_afsk_t *a = board.afsk;
 	int16_t *buf = (int16_t *)xb_pcm;
 	int16_t tmp[64];
 	if (xb_pcm == NULL || a == NULL || a->rx_read == NULL)
 		return;
-	while (xb_rx_w - xb_rx_r < (uint32_t)XB_RX_SAMPLES) {
-		uint16_t n = a->rx_read(tmp, (uint16_t)(sizeof tmp / sizeof tmp[0]));
+	uint32_t w = xb_rx_w;
+	for (;;) {
+		uint32_t room = (uint32_t)XB_RX_SAMPLES - (w - __atomic_load_n(&xb_rx_r, __ATOMIC_ACQUIRE));
+		if (room == 0)
+			break;
+		uint16_t n = a->rx_read(tmp, (uint16_t)(room < sizeof tmp / sizeof tmp[0] ? room : sizeof tmp / sizeof tmp[0]));
 		if (n == 0)
 			break;
-		for (uint16_t i = 0; i < n && xb_rx_w - xb_rx_r < (uint32_t)XB_RX_SAMPLES; i++)
-			buf[xb_rx_w++ % XB_RX_SAMPLES] = tmp[i];
+		for (uint16_t i = 0; i < n; i++)
+			buf[w++ % XB_RX_SAMPLES] = tmp[i];
+		__atomic_store_n(&xb_rx_w, w, __ATOMIC_RELEASE);	/* the samples first, then the index */
 	}
 }
 
@@ -161,8 +175,9 @@ static void xb_fm_rx_off(void)
 static void xb_fm_rx_poll(radio_sm_t *sm)
 {
 	const hal_afsk_t *a = board.afsk;
-	bool on_fm = xb.owned && !xb.p25 && !xb.keyed && !xb.cw_wait && sm->cw_phase == CW_OFF &&
-		     sm->view.ch.mode == RADIO_MODE_FM && board.vocoder != NULL && board.vocoder->present();
+	bool on_fm = xb.owned && !xb.p25 && !xb.keyed && !xb.fm_tail && !xb.cw_wait && sm->cw_phase == CW_OFF &&
+		     sm->view.state != RS_TX && sm->view.ch.mode == RADIO_MODE_FM && board.vocoder != NULL &&
+		     board.vocoder->present();
 	if (!on_fm || xb_pcm == NULL || a == NULL || a->rx_read == NULL) {
 		xb_fm_rx_off();
 		return;
@@ -336,7 +351,8 @@ static bool xb_key_dmr(radio_sm_t *sm, uint8_t side, uint32_t dst, bool group)
 	return true;
 }
 
-/* FM: as a PTT would (the carrier, no tone), then the decoded over through the tone path in place of the microphone */
+/* FM: as a PTT would (the carrier with the side's TX sub-tone, if set: xb_channel), then the decoded over through the
+ * tone path in place of the microphone (the board mutes the microphone while the tone path is routed) */
 static bool xb_key_fm(radio_sm_t *sm)
 {
 	const hal_afsk_t *a = board.afsk;
@@ -344,7 +360,7 @@ static bool xb_key_fm(radio_sm_t *sm)
 	    a->tx_busy == NULL || a->tx_stop == NULL)
 		return false;
 	xb_pcm_w = xb_pcm_r = xb_pcm_pos = 0;
-	xb_pcm_eof = false;
+	xb_pcm_eof = xb_pcm_cut = false;
 	ptt_down(sm, xb_now);
 	if (sm->view.state != RS_TX) {
 		ptt_release(sm, false, xb_now);		/* refused (TX inhibit, the battery, the band) */
@@ -414,6 +430,18 @@ static void xb_unkey(void)
 		p25_lab_xb_send(0);
 }
 
+/* An FM over's tone path let go once the carrier is off. While it is routed the board keeps the microphone muted
+ * (hrc_afsk.c route -> the DM-32's afsk_tx_route -> hrc7000_codec_mute), so it outlives the transmission: with a DCS TX
+ * tone ptt_release holds the carrier RADIO_SUBTONE_TAIL_MS for the turn-off code, and no room audio may reach the
+ * modulator meanwhile (an unattended relay). Every poll while it waits (xb_send_poll) */
+static void xb_fm_route_off(radio_sm_t *sm)
+{
+	if (xb.fm_tail && sm->view.state != RS_TX) {
+		board.afsk->tx_stop();
+		xb.fm_tail = false;
+	}
+}
+
 /* An FM or P25 over off the air (its end, the radio's time-out, a refusal, the stop) */
 static void xb_let_go(radio_sm_t *sm)
 {
@@ -421,14 +449,16 @@ static void xb_let_go(radio_sm_t *sm)
 		return;
 	xb.keyed = false;
 	if (xb.txmode == XB_MODE_FM) {
-		board.afsk->tx_stop();	/* the tone path first (its interrupt stops reading the blocks) */
+		xb_pcm_cut = true;	/* the tone path's interrupt reads no more blocks; its route (the mic muted) stays */
 		xb_pcm_eof = true;
 		ambeVoiceSetMixer(beep_mix);
 		const dmr_voice_sink_t *sink = ambeVoiceSink();
 		if (xb.fm_open && sink->end != NULL)
 			sink->end(sink->ctx);
 		xb.fm_open = false;
-		ptt_release(sm, false, xb_now);
+		ptt_release(sm, false, xb_now);	/* (a DCS TX tone: the turn-off tail starts, the carrier stays up) */
+		xb.fm_tail = true;
+		xb_fm_route_off(sm);		/* now, unless the tail holds the carrier */
 	} else {
 		xb_native_ptt(sm, false);	/* (the worker ends with the terminator: the ring says no more) */
 		p25_lab_xb_send(-1);
@@ -438,6 +468,7 @@ static void xb_let_go(radio_sm_t *sm)
 /* Every poll while an FM or P25 over is keyed: the next frames decoded or handed to the worker, the end */
 static void xb_send_poll(radio_sm_t *sm, uint32_t now_ms)
 {
+	xb_fm_route_off(sm);	/* an FM over's turn-off tail ended: the tone path's route let go */
 	if (!xb.keyed)
 		return;
 	if (xb.txmode == XB_MODE_FM) {
@@ -549,6 +580,7 @@ static void xb_take(radio_sm_t *sm, uint32_t now_ms)
 	ch->bw = RADIO_BW_12K5;
 	ch->power = CODEPLUG_POWER_DEFAULT;
 	ch->dmo = true;
+	ch->no_eco = true;	/* battery saving never sleeps the receiver on an FM receive side (save_allowed) */
 #if CONFIG_DMR_PRIVACY
 	sm->privacy_type = DMR_PRIVACY_OFF;
 #endif
@@ -573,6 +605,17 @@ static void xb_restore(radio_sm_t *sm, uint32_t now_ms)
 {
 	xb_fm_rx_off();		/* FM -> DMR: the receive audio path and the encoder let go before the memory goes back */
 	xb_let_go(sm);
+	if (xb.fm_tail) {
+		/* an FM over's DCS turn-off tail still on the air: cut short cleanly (the board's tail off, the carrier off),
+		 * then the tone path's route; never the microphone on the air */
+#if CONFIG_SUBTONE
+		tail_cancel(sm);
+#endif
+		if (sm->view.state == RS_TX)
+			fm_tx_end(sm, false, now_ms);
+		board.afsk->tx_stop();
+		xb.fm_tail = false;
+	}
 	xb.owned = xb.ending = xb.cw_wait = xband_held = false;
 	if (sm->cw_phase != CW_OFF) {
 		board.radio->tx_tone(0);

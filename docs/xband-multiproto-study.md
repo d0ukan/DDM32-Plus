@@ -192,7 +192,9 @@ approval, rule 1).
    (this also settles the open NXDN / dPMR audio question).
 4. **FM -> DMR** (stock AMBE encode of FM audio while recording). ~1.5-2 KB. **Built 2026-11-25 (branch `xbandfm`,
    +1,204 B flash with the FM sub-tones), host-tested, HARDWARE-UNVERIFIED**; still wants a read-only measurement of
-   FM audio levels into the encoder before it is trusted on the air. FM CTCSS / DCS sub-tones were added with it (RX
+   FM audio levels into the encoder before it is trusted on the air. **Order on the radio:** that read-only check
+   first (the FM receive audio level through `board.afsk` into the encoder, nothing transmitted), and only once it
+   looks sane the on-air FM -> DMR rows (docs/plus-radio-test.md XB-16, XB-17). FM CTCSS / DCS sub-tones were added with it (RX
    gate, TX tone), reusing the radio's own `ch->rx_tone` / `ch->tx_tone` path (no new TX code).
 5. **YSF legs** (DN -> DMR, VW <-> P25). ~0.5-1 KB, but nothing YSF is proven on the radio and YSF TX needs the owner's
    approval; wait until a YSF source exists.

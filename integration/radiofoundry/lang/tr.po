@@ -6307,6 +6307,10 @@ msgid "Cross-band on: Back stops"
 msgstr "Çapraz bant açık: Geri durdurur"
 
 #: core/ui/ui_xband.c
+msgid "FM->DMR off: set a DMR TX TG"
+msgstr "FM->DMR kapalı: DMR TX TG girin"
+
+#: core/ui/ui_xband.c
 msgid "Start"
 msgstr "Başlat"
 
