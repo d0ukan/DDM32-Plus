@@ -75,6 +75,17 @@
 #ifndef FS_P25_FLOOR
 #define FS_P25_FLOOR	FS_DIP_GUARD	/* v1.0.3: the learned P25 strength (fsc_floor); 0: v1.0.2 */
 #endif
+/* v1.0.4 (docs/scan-slow-2026-11-25.md section 6; the owner's radio on 1.0.3: a P25 zone "starts slow, then speeds up"):
+ * the learned P25 strength without the slow start. 0: v1.0.3 (the host test's before / after)
+ *  - one no-frame take is enough when the strength is still there, as high, once the native receiver has given the
+ *    channel back (the first reading on the FM path again), and the noise reading says quiet then: the false strength
+ *    stays, a call's tail (the case that made v1.0.3 confirm twice) is gone by then. Else noted, confirmed as before;
+ *  - a reading under the learned level and not more than FS_P25_FLOOR_SAME_DB over it keeps the level for another
+ *    FS_P25_FLOOR_MS (no re-learning every two minutes while the false strength stays);
+ *  - the learned levels are kept when a scan of the same zone starts again (the expiry and the drop rules still hold) */
+#ifndef FS_P25_SEED
+#define FS_P25_SEED	FS_P25_FLOOR
+#endif
 #define FS_SPAN_DIP_MS	30u	/* the quiet span after a dip reading (FM and the native modes): four readings 50-80 ms */
 
 enum { FS_M_FM, FS_M_DMR, FS_M_P25, FS_M_OTHER, FS_MODES };	/* P25 counts YSF (the native receiver's modes) */

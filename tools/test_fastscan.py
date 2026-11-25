@@ -17,7 +17,7 @@ a build (python3 tools/test_fastscan.py [engine|suites|upstream|model]):
 - zones (v1.0.2): a zone made on the radio against the stored "All channels" on the same model, with the codeplug's
   channel reads counted and charged a time on the radio task (tests/plus/test_zonescan_radio.inc); v1.0.3: the same
   model with the receiver's false carrier after a retune longer than 15 ms, built as v1.0.2 (before) and with the fix
-  (after)."""
+  (after); v1.0.4: the learned P25 strength's start, built as v1.0.3 (FS_P25_SEED 0) and as now."""
 import os
 import re
 import shlex
@@ -178,10 +178,11 @@ def zones(ROOT, APP, OUT, host):
                        str(ROOT / 'tests/plus/test_zonescan_radio.inc') + '"\n')
     # v1.0.3 (docs/scan-slow-2026-11-25.md): first v1.0.2's scan (FS_DIP_GUARD 0, the dip rows only: before), then the
     # fix (after) with every check
-    for guard in (0, 1):
-        name = f'test_radio_zonescan_{guard}'
+    # v1.0.4 (section 6 there): between them v1.0.3's learned P25 strength (FS_P25_SEED 0, the seed rows only: before)
+    for guard, seed in ((0, 0), (1, 0), (1, 1)):
+        name = f'test_radio_zonescan_{guard}{seed}'
         argv = radio_argv(ROOT, APP, OUT, host, wrapper, name)
-        run([*argv, '-DCONFIG_SCAN_PRIO=1', f'-DFS_DIP_GUARD={guard}', '-lm'], cwd=host)
+        run([*argv, '-DCONFIG_SCAN_PRIO=1', f'-DFS_DIP_GUARD={guard}', f'-DFS_P25_SEED={seed}', '-lm'], cwd=host)
         run([OUT / name], cwd=host)
 
 

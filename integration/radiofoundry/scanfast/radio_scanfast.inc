@@ -84,6 +84,10 @@ typedef struct {
 static fsc_floor_t fsc_floor[FS_P25_FLOORS];
 static uint32_t fsc_p25_stop = 0xFFFFFFFFu;	// the stop (scan_t.steps) whose strongest strength is fsc_p25_dbm
 static int16_t fsc_p25_dbm;
+#if FS_P25_SEED
+static uint16_t fsc_floor_zone = 0xFFFFu;	// v1.0.4: the zone fsc_floor was learned in (kept for its next scan)
+static uint32_t fsc_floor_serial;		// ... and codeplug_serial() then (an edit may move the zone's positions)
+#endif
 
 static fsc_floor_t *fsc_floor_find(uint16_t key, uint32_t now_ms)
 {
@@ -103,8 +107,26 @@ static bool fsc_p25_masked(const radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
 {
 	if (!fsc_p25_here(sm) || dbm == 0)
 		return false;
-	const fsc_floor_t *f = fsc_floor_find(native_lab_scan_key(sm), now_ms);
-	return f != NULL && f->takes >= FS_P25_FLOOR_TAKES && dbm < f->dbm + (int16_t)FS_P25_FLOOR_DB;
+	fsc_floor_t *f = fsc_floor_find(native_lab_scan_key(sm), now_ms);
+#if FS_P25_SEED
+	// v1.0.4: a strength well under the level: the level is not this channel's steady false strength (a call's tail
+	// learned on a stale reading, a level of another channel at this zone position): dropped, so the next carrier there
+	// is taken. Without this the false strength itself would keep such a level alive below (the drop on no strength
+	// never comes on a channel whose false strength stays over the line)
+	if (f != NULL && dbm < f->dbm - (int16_t)FS_P25_FLOOR_SAME_DB) {
+		f->until_ms = 0;
+		return false;
+	}
+#endif
+	if (f == NULL || f->takes < FS_P25_FLOOR_TAKES || dbm >= f->dbm + (int16_t)FS_P25_FLOOR_DB)
+		return false;
+#if FS_P25_SEED
+	// v1.0.4: the false strength is still there, about as high: the level holds for another FS_P25_FLOOR_MS (a reading
+	// further over it, still under the mask, doesn't: a weak signal never keeps the level alive)
+	if (dbm <= f->dbm + (int16_t)FS_P25_FLOOR_SAME_DB)
+		f->until_ms = (now_ms + FS_P25_FLOOR_MS) | 1u;
+#endif
+	return true;
 }
 
 // A reading of this P25 stop with no carrier by strength: what was noted for it goes
@@ -143,10 +165,22 @@ static bool fsc_p25_strong(radio_sm_t *sm, bool strong, int16_t dbm, uint32_t no
 // scan_service's P25 rule: the native receiver has given the stop back with a cooldown and the scan moves on. A take
 // that heard no frame at all notes the strength it was taken on (a second one at about the same strength confirms it);
 // one that heard frames drops the note
-static void fsc_p25_given_back(radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
+// v1.0.4 (FS_P25_SEED): st is the first reading on the FM path after the give back. The strength still there, within
+// FS_P25_FLOOR_SAME_DB of the stop's strongest, and the noise reading quiet: the false strength (it stays; a call's tail
+// that the take came too late for has gone by then, and a carrier the noise reading follows is not learned at once):
+// this one take puts the level in force
+static void fsc_p25_given_back(radio_sm_t *sm, const radio_status_t *st, uint32_t now_ms)
 {
 	if (!fsc_p25_here(sm))
 		return;
+	int16_t dbm = st->rssi_dbm;
+#if FS_P25_SEED
+	uint8_t add = dbm != 0 && dmr_strength_heard(sm, dbm) && !carrier_heard(sm, st->noise) &&
+		      fsc_p25_stop == sm->scan.steps && dbm >= fsc_p25_dbm - (int16_t)FS_P25_FLOOR_SAME_DB ?
+		      FS_P25_FLOOR_TAKES : 1u;
+#else
+	const uint8_t add = 1u;
+#endif
 	uint16_t key = native_lab_scan_key(sm);
 	fsc_floor_t *f = fsc_floor_find(key, now_ms);
 	int16_t level = fsc_p25_stop == sm->scan.steps && fsc_p25_dbm > dbm ? fsc_p25_dbm : dbm;
@@ -160,8 +194,7 @@ static void fsc_p25_given_back(radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
 	if (level <= -200 || level == 0)
 		return;
 	if (same) {
-		if (f->takes < FS_P25_FLOOR_TAKES)
-			f->takes++;
+		f->takes = (uint8_t)(f->takes + add > FS_P25_FLOOR_TAKES ? FS_P25_FLOOR_TAKES : f->takes + add);
 		if (level > f->dbm)
 			f->dbm = level;
 	} else if (f != NULL && level > f->dbm) {
@@ -179,7 +212,7 @@ static void fsc_p25_given_back(radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
 			f = old;
 		f->key = key;
 		f->dbm = level;
-		f->takes = 1;
+		f->takes = add;
 	}
 	f->until_ms = (now_ms + FS_P25_FLOOR_MS) | 1u;	// never 0 (unused)
 	if (f->takes >= FS_P25_FLOOR_TAKES)
@@ -195,10 +228,10 @@ static bool fsc_p25_strong(radio_sm_t *sm, bool strong, int16_t dbm, uint32_t no
 	return strong;
 }
 
-static void fsc_p25_given_back(radio_sm_t *sm, int16_t dbm, uint32_t now_ms)
+static void fsc_p25_given_back(radio_sm_t *sm, const radio_status_t *st, uint32_t now_ms)
 {
 	(void)sm;
-	(void)dbm;
+	(void)st;
 	(void)now_ms;
 }
 #endif
@@ -249,7 +282,21 @@ static void fsc_begin(radio_sm_t *sm, uint32_t now_ms)
 	fsc_zone = sm->view.zone_index;
 	fsc_tick_listen = false;
 #if CONFIG_P25_SCAN && CONFIG_DMR && FS_P25_FLOOR
+#if FS_P25_SEED
+	// v1.0.4: keyed by zone position: kept for the next scan of the same zone (each level still expires, and a reading
+	// with no strength or a take with frames still drops it), learned again in another zone. A level due later than
+	// FS_P25_FLOOR_MS from now belongs to another clock (the host tests start theirs again): dropped too. A codeplug
+	// change since (a zone edited: other channels at these positions) drops them all
+	uint32_t serial = codeplug_serial();
+	for (unsigned i = 0; i < FS_P25_FLOORS; i++)
+		if (fsc_floor_zone != fsc_zone || fsc_floor_serial != serial ||
+		    (int32_t)(fsc_floor[i].until_ms - now_ms) > (int32_t)FS_P25_FLOOR_MS)
+			fsc_floor[i].until_ms = 0;
+	fsc_floor_zone = fsc_zone;
+	fsc_floor_serial = serial;
+#else
 	memset(fsc_floor, 0, sizeof fsc_floor);	// keyed by zone position: learned again in each scan
+#endif
 	fsc_p25_stop = 0xFFFFFFFFu;
 #endif
 }
