@@ -78,7 +78,8 @@ def prepare_toolbox(transform, install):
         ('i != T_SOS &&',
          'i != T_SOS && (i != T_HEARD || CONFIG_HEARD) && (i != T_GPSDASH || CONFIG_GPS_DASH) && '
          '(i != T_CLOCK || CONFIG_CLOCK_TOOLS) &&'),
-        ('TRN("SOS key"), TRN("CW decoder"),', 'TRN("SOS key"), TRN("Heard list"), "GPS", TRN("Clock"), TRN("CW decoder"),'),
+        ('TRN("SOS key"), TRN("CW decoder"),', 'TRN("SOS key"), TRN("Heard list"), "GPS", CONFIG_CLOCK_TOOLS ? TRN("Clock") : TRN("None"), '
+         'TRN("CW decoder"),'),
         ('\tcase T_CW: ui_push(SCR_CW, 0); break;\n',
          '#if CONFIG_HEARD\n\tcase T_HEARD: ui_push(SCR_HEARD, 0); break;\n#endif\n'
          '#if CONFIG_GPS_DASH\n\tcase T_GPSDASH: ui_push(SCR_GPSDASH, 0); break;\n#endif\n'

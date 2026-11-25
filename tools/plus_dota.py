@@ -249,7 +249,7 @@ def prepare_dota(transform, install):
         ('T_SELCALL, T_SOS, T_HEARD, T_GPSDASH, T_CLOCK, T_CW, T_BATTERY,',
          'T_SELCALL, T_SOS, T_HEARD, T_GPSDASH, T_CLOCK, T_DOTA, T_CW, T_BATTERY,'),
         ('(i != T_CLOCK || CONFIG_CLOCK_TOOLS) &&', '(i != T_CLOCK || CONFIG_CLOCK_TOOLS) && (i != T_DOTA || CONFIG_DOTA) &&'),
-        ('TRN("Clock"), TRN("CW decoder"),', 'TRN("Clock"), TRN("DOTA Transfer"), TRN("CW decoder"),'),
+        (': TRN("None"), TRN("CW decoder"),', ': TRN("None"), TRN("DOTA Transfer"), TRN("CW decoder"),'),
         ('#if CONFIG_CLOCK_TOOLS\n\tcase T_CLOCK: ui_push(SCR_CLOCK, 0); break;\n#endif\n',
          '#if CONFIG_CLOCK_TOOLS\n\tcase T_CLOCK: ui_push(SCR_CLOCK, 0); break;\n#endif\n'
          + ON + '\tcase T_DOTA: ui_push(SCR_DOTA, 0); break;\n#endif\n'),

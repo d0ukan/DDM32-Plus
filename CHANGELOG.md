@@ -3,6 +3,14 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased
+
+- Tools > Clock (stopwatch, countdown, alarm, UTC offset) is left out of the Plus build to free program flash (the
+  image was 1,964 B under the limit). The owner never used it. The source and its guarded hooks stay
+  (`CONFIG_CLOCK_TOOLS`, now `n` in `tools/build_radiofoundry.py`), so it can come back. The Tools list loses the row; the other
+  tools keep their numbers, so stored hold-key codes still mean the same tools. A hold key that was set to Clock on 1.0.4
+  now does nothing (the "is empty: Settings > Keys" toast), and its Settings > Keys row reads "None".
+
 ## v1.0.4 (2026-11-25, with programmer 3.1.0)
 
 Firmware. Host-tested only; not yet run on the radio. Published on the owner's word before the radio test. The release

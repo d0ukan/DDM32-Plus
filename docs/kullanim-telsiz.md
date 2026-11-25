@@ -156,7 +156,7 @@ NXDN gönderme, FM dinleme, YSF yok). Kurallar (telsiz uygular):
 
 - **Araçlar > Tanılama**: tuş ve radyo durumu, DMR alım sesi sayaçları (sorun bildirirken ekran görüntüsü işe yarar).
 - **Duyulanlar**, **Son çağrılar** (OK 3; **\*** bir QSO'yu işaretler), **Pil** (grafik ve kalan süre),
-  **Saat**, **Fox hunt**, **CW beacon / CW çözücü**, **Pager**, **ACARS**, **SSTV**, **DTMF / SelCall**,
+  **Fox hunt**, **CW beacon / CW çözücü**, **Pager**, **ACARS**, **SSTV**, **DTMF / SelCall**,
   **Lone worker**, **SOS tuşu**, **Hotspot** (programlama kablosu üzerinden MMDVM).
 - **Ayarlar > Hakkında**: sürüm, röle verisi ve veri paketleri.
 

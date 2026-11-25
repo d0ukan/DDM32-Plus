@@ -3269,7 +3269,7 @@ plus-radio-test.md):
   point adds the straight way there (integer equirectangular distance), so standing still adds nothing; a step
   faster than 400 km/h is a jump (not counted, counting goes on from there); a GPS speed above 300 km/h is not the
   top speed. RAM only. RAM: 24 B (the trip meter 20, the poll time 4).
-- [built] Clock tools (`CONFIG_CLOCK_TOOLS`, item 34). Tools > **Clock** ("Saat"), four rows (Up / Down): **Stopwatch**
+- [built, **removed from the Plus build in 1.0.5**: `CONFIG_CLOCK_TOOLS=n` in `build_radiofoundry.py`, to free program flash (the 1.0.4 image was 1,964 B under the limit; measured: 2,716 B flash, 96 B RAM); the owner never used it; the source and hooks stay, `y` brings it back. Tools numbers do not shift (T_CLOCK keeps its index); a stored hold code for Clock fails `tool_shown` in `hold_load` and acts as None, and its Settings > Keys row shows "None"] Clock tools (`CONFIG_CLOCK_TOOLS`, item 34). Tools > **Clock** ("Saat"), four rows (Up / Down): **Stopwatch**
   (OK start / stop, # a lap while it runs: the newest three laps with their own times; # while stopped: reset);
   **Countdown** (Left / Right or the knob set it while stopped, a minute a step, 10 s under a minute, held five steps,
   up to 99 min; OK start / stop); **Alarm** at a time of day, local (Left / Right a minute, held 10; OK on / off;
