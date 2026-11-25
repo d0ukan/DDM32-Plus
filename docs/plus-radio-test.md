@@ -951,6 +951,13 @@ Receive only: nothing is transmitted. English menus. SK2 is the lower of the two
 | VS-3 | Set a step with SK2 (say 5 kHz), then press Up three times; then Settings > Talk > VFO step; then switch the radio off and on, back to the VFO | Up moves the frequency 5 kHz a press; the menu row shows 5 kHz; after the power cycle the step is still 5 kHz |
 | VS-4 | On a channel (not the VFO): look at the bottom row; press SK2 briefly; then press SK2 held | no "SK2 step"; short SK2 starts dual watch as before (Back ends it); held SK2 as before |
 | VS-5 | VFO on Home: hold SK2 (dual watch starts, the VFO is a letter); press SK2 briefly twice; Back; in the VFO type "4 3 3" and press SK2; start a scan (SK2 is not the scan key: use the scan key) and press SK2 | in dual watch short SK2 selects the other letter, the step does not change; typing and scanning: SK2 does not step |
+
+## ISS key on Home (branch `issk`, docs/plus.md "ISS key on Home", v1.0.3 candidate)
+
+Receive only; nothing keyed.
+
+| Row | Do | Expect |
+|---|---|---|
 | IK-1 | On a channel (not the VFO), Home idle: look at the bottom row; hold 4 about a second with no ISS pass within 10 min (needs GPS time and TLEs) | the row reads "OK Menu  * Quick  4 ISS" (Turkish "OK Menü  * Hızlı  4 ISS"; with a caller heard "* Quick  # name  4 ISS", the name cut with an ellipsis; in dual watch "# more  4 ISS  Back stop"); the hold opens Tools > ISS with the next pass time |
 | IK-2 | Within 10 min of an ISS AOS (or during a pass), Home on a channel: hold 4; then any key | the radio goes to 145.800 receive-only, banner "ISS tracking, max NN" once the radio holds (or a toast "Can't track: ..."); any key ends it, the radio back as before; a short 4 still opens Find; in the VFO a held 4 types the digit |
 
@@ -972,3 +979,17 @@ is a failure (photo it).
 | FB-5 | Let the backlight time out / the screen sleep, wait a minute, press a key; also the power-save sleep if used | the screen comes back whole: no stripes or old content at the edges, the edges in the current theme's color |
 | FB-6 | Pop-ups: open and close quick settings, the lock (long Quick 5), a message banner | banners and pop-ups draw whole |
 | FB-7 | Only if the owner uses the debug link screenshot (`rfoundry_debug.py screenshot`): take one of Home | a whole 240 x 320 picture (the packed form now answers "unavailable", so the tool reads the slower RGB565 form; the picture is the same) |
+
+## v1.0.3 candidate: rows the other branches did not have (hole hunt 2026-11-25, docs/holehunt-1.0.3.md)
+
+Receive only; nothing keyed. The soft probe's rows are SP-1..SP-4 in docs/p25-soft-probe-design.md (run them only
+after choosing "fast + soft probe" with held 0 on the P25 search screen; off by default).
+
+| Row | Do | Expect |
+|---|---|---|
+| RG-1 | A P25 channel (NAC 659, TG 101), channel editor: the "RX list" row; pick a codeplug list holding group contacts 102 and 103; save. The other radio talks on TG 101, then 102, then 104 | 101 and 102 play, 104 does not; power off and on: the list is still picked |
+| RG-2 | Same channel, RX list Any; then None (the channel's own squelch as before) | Any: 104 plays too; None: as 1.0.2 (Selective: only 101; Normal: every group) |
+| RG-3 | Zone scan over a zone of P25 channels where one has a list of 32 contacts, nothing on the air, fast; `--scan-stats` | the pass is not visibly slower than the same zone without the list (the list is read at each take) |
+| RN-1 | A P25 channel on NAC Any; the other radio on NAC 659, TG 101 | Home's caller line ends " $659" after TG and ID (with BER when it fits); on a channel with its own NAC 659 the line is as 1.0.2 |
+| RN-2 | Same, the other radio sends an emergency call (if it can) | "EMERGENCY TG101 ID... $659" or a shorter form; never cut at the edge |
+| UI-1 | Tools menu; Tools > Sun & Moon (English and Turkish); Tools > P25 search and DMR search with a few finds | own icons for DOTA Transfer, Cross-band, CW decoder, SOS key; no label over the time columns; every search line inside the screen (no clipped edge) |

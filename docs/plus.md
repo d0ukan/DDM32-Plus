@@ -5168,7 +5168,7 @@ the new step, a step set in the menu going on from there (and one outside the li
 a channel, dual watch's selection, a scan and a typed frequency leaving the step alone, SK2 reassigned hiding the hint.
 Host-tested only; not run on the radio (docs/plus-radio-test.md, VS-1 to VS-5).
 
-## ISS key on Home (branch `issk`, v1.0.2 candidate)
+## ISS key on Home (branch `issk`, v1.0.3 candidate)
 
 Owner request 2026-11-24: one key on Home that starts ISS tracking, named in Home's hint row.
 
