@@ -3,9 +3,10 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## v1.0.4 (test build, not published)
+## v1.0.4 (2026-11-25, with programmer 3.1.0)
 
-Firmware. Host-tested only; not yet run on the radio.
+Firmware. Host-tested only; not yet run on the radio. Published on the owner's word before the radio test. The release
+carries the Rust programmer 3.1.0 only (the C# programmer 2.0.0 is retired; it can still install this firmware).
 
 - Channel scan, the owner's 1.0.3 radio run: a P25 zone "starts slow, then speeds up" (docs/scan-slow-2026-11-25.md
   section 6). 1.0.3 needed two no-frame takes (about 1.9 s each) per P25 channel before its false strength was masked,
@@ -42,9 +43,9 @@ Firmware. Host-tested only; not yet run on the radio.
   (+1,820; 1,964 B left), static RAM 205,216 -> 205,560 B (+344). Stack free: start 348 -> 312 B, host 576 -> 564 B
   (the settings record is 12 B bigger), ui 184 and radio 316 B unchanged.
 
-## v1.0.3 (test build, not published)
+## v1.0.3 (test build, published inside v1.0.4)
 
-Firmware. Host-tested only; not yet run on the radio.
+Firmware. Host-tested; on the owner's radio the ISS hold key, the search screen fix and Sun & Moon were seen working.
 
 - Channel scan, from the owner's `scanst` readings on 1.0.2 (docs/scan-slow-2026-11-25.md section 5):
   - A zone of P25 channels took 1.9 s a channel with nothing on the air: the radio reads -62 / -72 dBm there (no board

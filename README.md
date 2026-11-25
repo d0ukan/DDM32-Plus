@@ -10,7 +10,7 @@ by **d0ukan · TA2DOU**
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Based on Open25-DM32](https://img.shields.io/badge/based%20on-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Release: v1.0.2](https://img.shields.io/badge/release-v1.0.1-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.1)
+[![Release: v1.0.4](https://img.shields.io/badge/release-v1.0.4-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.4)
 
 [Türkçe README](README.tr.md)
 
@@ -38,10 +38,11 @@ by **d0ukan · TA2DOU**
 ## Status
 
 DDM32 Plus has been a **stable** release line since **v1.0.0** (2026-11-23). The latest published release is
-**[v1.0.1](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.1)** (2026-11-24), with the Windows programmer
-**2.0.0** and the cross-platform programmer **3.0.0** (Windows setup; Linux and macOS packages follow; source in
-[`rust/`](rust/)). The newer **v1.0.2, v1.0.3 and v1.0.4 are test builds in this tree and are not published**;
-features marked "(1.0.2)", "(1.0.3)" or "(1.0.4)" below are in them only, not in the published release.
+**[v1.0.4](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.0.4)** (2026-11-25), with the programmer **3.1.0**
+(Rust, Windows setup; Linux and macOS packages follow; source in [`rust/`](rust/)). The C# Windows programmer 2.0.0
+is retired. Features marked "(1.0.2)", "(1.0.3)" or "(1.0.4)" below came with that version; **1.0.2 - 1.0.4 were
+published before a full radio test** (from 1.0.3 the ISS hold key, the search screen and Sun & Moon were seen working on
+the radio; the rest is host-tested only).
 
 Every feature below is built and covered by host tests (a simulator of the radio's screens, radio core and modems), but
 **many features have not yet been tried on the air**: the CHANGELOG says, release by release, what has run on a radio
@@ -139,8 +140,7 @@ TX values: DMR **RX CC / TS / TG** (default Any) and **TX CC / TS / TG**, P25 **
 (default 293; a P25 relay sends with the side's TX NAC, not the one it heard). The radio asks before it starts,
 locks while it runs, shows **CROSS** on every screen and sends a CW ID. Outside the amateur bands and PMR446 it refuses;
 `#` on the form also frees the satellite, repeater and APRS segments (until the radio is switched off; the hint bar
-shows "# segs: on"). The earlier DMR-only version is in the published v1.0.1; the per-side modes and values are test-build features
-(1.0.3), host-tested only.
+shows "# segs: on"). The per-side modes and values came with 1.0.3 (before it, DMR only) and are host-tested only.
 
 | Form (DMR sides) | Form (modes P25 / NXDN) | Pick from a zone | Segments free |
 | :---: | :---: | :---: | :---: |
@@ -167,9 +167,7 @@ shows "# segs: on"). The earlier DMR-only version is in the published v1.0.1; th
 | ![P25 search range editor](images/ddm32/search-range.png) | ![Delete channel question](images/ddm32/delete-channel.png) | ![P25 NAC row in decimal](images/ddm32/nac-decimal.png) |
 
 *Screenshots come from the firmware's own screen simulator with made-up data (English UI; the radio runs Turkish by
-default; the host UI tests write them). Several show test-build features that are not in the published v1.0.1: the RX
-group list, the per-side Cross-band form and the Tools icons (1.0.3), the hold keys and the NAC on watch rows (1.0.4).
-Photos from a real radio will follow.*
+default; the host UI tests write them). Photos from a real radio will follow.*
 
 ### Turkish first
 
@@ -183,9 +181,8 @@ airfields, DOTA, data packs, cross-band, diagnostics): [`docs/kullanim-telsiz.md
 
 Use the **DDM32 Plus programmer** for Windows 10/11 (nothing else to install):
 
-1. Download `DDM32Plus-Setup-<version>.exe` from the [latest release](https://github.com/d0ukan/DDM32-Plus/releases/latest)
-   (the cross-platform programmer 3.0.0 replaces the C# Windows programmer 2.0.0 and installs over it; either one
-   does the job) and run it. It installs for your user only (no administrator prompt), with a Start menu and desktop
+1. Download **only** `DDM32Plus-Setup-<version>.exe` from the [latest release](https://github.com/d0ukan/DDM32-Plus/releases/latest)
+   (the other files there are for the program itself; it installs over the retired C# programmer 2.0.0) and run it. It installs for your user only (no administrator prompt), with a Start menu and desktop
    shortcut. Windows may warn about an unknown publisher (the program is not code-signed yet): **More info → Run
    anyway**.
 2. On first start pick **Türkçe** or **English**.
@@ -207,9 +204,8 @@ The older Python programmer ([`pc/`](pc/)) still works; existing backups in `%LO
 
 ## In development
 
-- Two-radio tests of DOTA Transfer (channels and data packs) and of Cross-band, and on-the-air runs of the 1.0.2 - 1.0.4
-  test builds (the radio test rows are in [`docs/plus-radio-test.md`](docs/plus-radio-test.md)).
-- Publishing 1.0.2 - 1.0.4 (test builds now) and the programmer 3.1.0 candidate (see CHANGELOG, "v1.1.0 candidate").
+- Two-radio tests of DOTA Transfer (channels and data packs) and of Cross-band, and on-the-air runs of 1.0.2 - 1.0.4
+  (the radio test rows are in [`docs/plus-radio-test.md`](docs/plus-radio-test.md)).
 - Linux (AppImage, .deb) and macOS packages of the cross-platform programmer.
 
 ## Building
