@@ -19,7 +19,14 @@
  * The stations are upstream's heard list (no copy): a dot each, the callsign from zoom 3 (no two labels overlap).
  *
  * Zoom 0..8. Province names from zoom 2, district dots from zoom 3 and their names from zoom 4; no two labels overlap
- * (map_occ_t: the first drawn wins, provinces first, then stations). */
+ * (map_occ_t: the first drawn wins, provinces first, then stations).
+ *
+ * Since 1.1 the provinces, districts and repeaters come from the map pack on the data chip (storage/ref_pack.h): no
+ * pack, "No map data" in the map area (our position, track, stations and waypoints still draw). Reading the whole
+ * country from the chip takes ~40 ms, so the map layer is drawn again only when something drawn inside the map
+ * rectangle changed (the map key, docs/mappack-design.md C.4): a frame for a radio view or battery change alone
+ * repaints only the top strip and the lines under the map, from what the last full frame computed. Anything new
+ * drawn inside the map rectangle must join layer_key(). */
 #include "config.h"
 #if CONFIG_MAP
 #include <stdlib.h>
@@ -35,6 +42,9 @@
 #include "ui/map.h"
 #include "ui/mapnav.h"
 #include "ui/nav.h"
+#include "ui_app.h"
+#include "storage/datapack.h"
+#include "storage/ref_pack.h"
 #if CONFIG_NAV_FOLLOW
 #include "ui/follow.h"
 #endif
@@ -70,6 +80,14 @@ static bool cov_on;		/* * : the track coloured by signal */
 #define CENTRE_ZOOM	6u		/* a few districts */
 static bool centre_pick;	/* the next draw centres the view on the picked station (ui_map_show_station) */
 #endif
+/* The map key of the last full frame and what it computed for the lines under the map (cheap frames reuse them) */
+static struct {
+	uint32_t key, draws;	/* draws: the UI core's frame count at the last map frame */
+	bool valid, overlay;	/* overlay: a banner or toast was up on the last frame */
+	color_t c;
+	char line[48];
+} last;
+static char name_a[MAP_NAME_MAX], name_b[MAP_NAME_MAX];	/* province / district names being drawn */
 
 typedef struct {
 	int8_t hi;		/* province drawn brighter (the one we are in), MAP_NONE for none */
@@ -245,13 +263,13 @@ static void __attribute__((noinline)) draw_names(void)
 			int x, y;
 			if (!map_label(&view, i, &x, &y))
 				continue;
-			const char *name = map_province_name(i);
-			label(&occ, ui_layout.tiny, x - gfx_text_width(ui_layout.tiny, name) / 2, y, name, c);
+			map_province_name(i, name_a, sizeof name_a);
+			label(&occ, ui_layout.tiny, x - gfx_text_width(ui_layout.tiny, name_a) / 2, y, name_a, c);
 		}
 	}
 	if (view.zoom >= ZOOM_STATION_LABELS)
 		station_labels(&occ);
-	if (view.zoom >= ZOOM_DISTRICTS) {
+	if (view.zoom >= ZOOM_DISTRICTS && map_ok()) {
 		/* CC BY 4.0: the source of the district points, in the view's bottom right corner (a name: not translated) */
 		const font_t *t = ui_layout.tiny;
 		label(&occ, t, view.x + view.w - gfx_text_width(t, "GeoNames") - 1, view.y + view.h - t->h, "GeoNames",
@@ -307,32 +325,33 @@ static int cov_legend(int y, int x_end)
 /* The built-in repeaters with a position: a triangle each, the picked one larger with its callsign */
 static void __attribute__((noinline)) draw_repeaters(void)
 {
-	for (uint16_t i = 0; i < (uint16_t)rpt_info.count; i++) {
-		const rpt_entry_t *e = &rpt_table[i];
+	uint16_t n = rpt_count();
+	for (uint16_t i = 0; i < n; i++) {
+		ref_key_t e;	/* the key section: position only, no 44-byte record */
 		int x, y;
-		if (i == pick || e->lat_e5 == RPT_NOPOS || e->lon_e5 == RPT_NOPOS ||
-		    !map_project(&view, e->lat_e5 * 100, e->lon_e5 * 100, &x, &y))
+		if (i == pick || !ref_key(REF_S_RKEY, i, &e) || e.lat_e5 == RPT_NOPOS || e.lon_e5 == RPT_NOPOS ||
+		    !map_project(&view, e.lat_e5 * 100, e.lon_e5 * 100, &x, &y))
 			continue;
 		mark_repeater(x, y, false);
 	}
-	if (pick < rpt_info.count) {
-		const rpt_entry_t *e = &rpt_table[pick];
-		int x, y;
-		if (e->lat_e5 != RPT_NOPOS && e->lon_e5 != RPT_NOPOS &&
-		    map_project(&view, e->lat_e5 * 100, e->lon_e5 * 100, &x, &y)) {
-			mark_repeater(x, y, true);
-			pick_label(x, y, e->name);
-		}
+	const rpt_entry_t *e = pick < n ? rpt_get(pick) : NULL;
+	int x, y;
+	if (e != NULL && e->lat_e5 != RPT_NOPOS && e->lon_e5 != RPT_NOPOS &&
+	    map_project(&view, e->lat_e5 * 100, e->lon_e5 * 100, &x, &y)) {
+		mark_repeater(x, y, true);
+		pick_label(x, y, e->name);
 	}
 }
 
 /* "TA1ABC 439.1625 12.3 km NE" (the way from the map's centre) */
 static void pick_line(sbuf_t *b)
 {
-	const rpt_entry_t *e = &rpt_table[pick];
+	const rpt_entry_t *e = rpt_get(pick);
 	int32_t la, lo;
 	uint32_t m;
 	uint16_t brg;
+	if (e == NULL)
+		return;
 	map_view_center(&view, &la, &lo);
 	sb_str(b, e->name);
 	sb_chr(b, ' ');
@@ -350,7 +369,7 @@ static void pick_next(void)
 	int32_t la, lo;
 	map_view_center(&view, &la, &lo);
 	rpt_here_set(&h, true, la, lo);
-	uint16_t n = pick < rpt_info.count ? rpt_next(&h, pick, 1) : RPT_NONE;
+	uint16_t n = pick < rpt_count() ? rpt_next(&h, pick, 1) : RPT_NONE;
 	pick = n != RPT_NONE ? n : rpt_nearest(&h);
 	spick = 0;
 	details = false;
@@ -435,23 +454,31 @@ static void here_line(sbuf_t *b, bool here, const ui_position_t *p)
 {
 	if (!here) {
 		sb_str(b, TR("No GPS fix"));
+	} else if (!map_ok()) {		/* no map pack: where we are as a position */
+		sb_coord(b, p->lat_e7, 'N', 'S');
+		sb_chr(b, ' ');
+		sb_coord(b, p->lon_e7, 'E', 'W');
 	} else if (here_province == MAP_NONE) {
 		sb_str(b, TR("Outside Turkey"));
 	} else {
 		sb_u32(b, map_province_plate((uint8_t)here_province), 2);
 		sb_chr(b, ' ');
-		sb_str(b, map_province_name((uint8_t)here_province));
+		map_province_name((uint8_t)here_province, name_a, sizeof name_a);
+		sb_str(b, name_a);
 		uint16_t d = map_district_near(p->lat_e7, p->lon_e7, here_province, DISTRICT_NEAR_M);
-		if (d != MAP_DISTRICT_NONE && strcmp(map_district_name(d), map_province_name((uint8_t)here_province))) {
+		map_district_name(d, name_b, sizeof name_b);
+		if (d != MAP_DISTRICT_NONE && name_b[0] && strcmp(name_b, name_a)) {
 			sb_str(b, " / ");
-			sb_str(b, map_district_name(d));
+			sb_str(b, name_b);
 		}
 	}
 }
 
 /* Under the map: the pick (station or repeater) on the whole line, else where we are and the scale on the right; the
- * hint */
-static void __attribute__((noinline)) draw_info(bool here, const ui_position_t *p)
+ * hint. Below the map rectangle (y = view.y + view.h + 1). full false (a cheap frame): the repeater or "you are in"
+ * text the last full frame read from the map pack, nothing read again (a station's line has no pack data: always
+ * made new) */
+static void __attribute__((noinline)) draw_info(bool here, const ui_position_t *p, bool full)
 {
 	char buf[48], fit[48];
 	sbuf_t b;
@@ -479,14 +506,22 @@ static void __attribute__((noinline)) draw_info(bool here, const ui_position_t *
 		}
 	}
 #if CONFIG_REPEATERS
-	else if (pick < rpt_info.count) {
-		pick_line(&b);
+	else if (pick < rpt_count()) {
+		if (full)
+			pick_line(&b);
+		else
+			sb_str(&b, last.line);
 		hint = TR("OK details  # next  0 APRS  Back clear");
 	}
 #endif
 	else {
-		here_line(&b, here, p);
-		c = here && here_province != MAP_NONE ? ui_col.fg : ui_col.warn;
+		if (full) {
+			here_line(&b, here, p);
+			c = here && (here_province != MAP_NONE || !map_ok()) ? ui_col.fg : ui_col.warn;
+		} else {
+			sb_str(&b, last.line);
+			c = last.c;
+		}
 #if CONFIG_REPEATERS
 		hint = TR("# repeater  0 APRS  ^v<> pan  knob zoom  OK follow");
 #else
@@ -504,6 +539,10 @@ static void __attribute__((noinline)) draw_info(bool here, const ui_position_t *
 		if (cov_on)
 			w = cov_legend(y, w);
 #endif
+	}
+	if (full) {
+		memcpy(last.line, buf, sizeof last.line);
+		last.c = c;
 	}
 	gfx_text_fit(s, buf, w, fit, sizeof fit);
 	gfx_text(s, 0, y, fit, c);
@@ -536,10 +575,77 @@ void ui_map_show_station(const char *call)
 }
 #endif
 
+static uint32_t mix(uint32_t h, uint32_t v)
+{
+	return (h ^ v) * 16777619u;	/* FNV-1a over 32-bit words */
+}
+
+static uint32_t pix(int x, int y)
+{
+	return (uint32_t)x << 16 ^ (uint32_t)(y & 0xFFFF);
+}
+
+/* Everything drawn inside the map rectangle, hashed: the view, the theme, our position in map pixels (a GPS wobble
+ * inside a pixel changes nothing), the centre mark, the picks, the APRS station marks and waypoints in view, the track,
+ * the coverage switch and the map pack in force. The province drawn bright follows from our pixel */
+static uint32_t __attribute__((noinline)) layer_key(bool here, const ui_position_t *p)
+{
+	uint32_t h = 2166136261u;
+	int x, y;
+	h = mix(mix(mix(h, (uint32_t)view.cx), (uint32_t)view.cy), view.zoom);
+	h = mix(mix(h, pix(view.x, view.y)), pix(view.w, view.h));
+	h = mix(mix(h, (uint32_t)ui_col.bg), (uint32_t)ui_col.fg);
+	h = mix(h, here && map_project(&view, p->lat_e7, p->lon_e7, &x, &y) ? pix(x, y) : 0xFFFFFFFFu);
+	h = mix(mix(mix(h, !here || !follow), spick), details);
+#if CONFIG_REPEATERS
+	h = mix(h, pick);
+#endif
+#if CONFIG_MAP_COVERAGE
+	h = mix(h, cov_on);
+#endif
+	aprs_station_t st;
+	for (uint8_t i = 0; i < ui_svc_aprs_station_count(); i++)
+		if (ui_svc_aprs_station(i, &st) && st.has_pos && map_project(&view, st.lat, st.lon, &x, &y))
+			h = mix(mix(h, pix(x, y)), mapnav_call_hash(st.call));
+	nav_point_t wp;
+	for (uint8_t i = 0; i < nav_count(); i++)
+		if (nav_get(i, &wp) && map_project(&view, wp.lat_e7, wp.lon_e7, &x, &y))
+			h = mix(mix(h, pix(x, y)), mapnav_call_hash(wp.name));
+#if CONFIG_MAP_TRACK
+	int32_t la, lo;
+	h = mix(h, ui_mapnav_track.n);
+	if (ui_mapnav_track.n != 0u && track_get(&ui_mapnav_track, (uint8_t)(ui_mapnav_track.n - 1u), &la, &lo))
+		h = mix(mix(h, (uint32_t)la), (uint32_t)lo);
+#endif
+	const dpk_info_t *g = dpk_active(DPK_REF);
+	return mix(mix(h, g != NULL ? g->seq : 0u), dpk_active_addr(DPK_REF));
+}
+
+/* "No map data. Load the map pack (PC programmer)." in the map area */
+static void __attribute__((noinline)) draw_no_map(void)
+{
+	const font_t *s = ui_layout.small;
+	char fit[48];
+	int y = view.y + view.h / 2 - s->h;
+	gfx_text_fit(s, TR("No map data."), view.w, fit, sizeof fit);
+	gfx_text(s, (view.w - gfx_text_width(s, fit)) / 2, y, fit, ui_col.warn);
+	gfx_text_fit(s, TR("Load the map pack (PC programmer)."), view.w, fit, sizeof fit);
+	gfx_text(s, (view.w - gfx_text_width(s, fit)) / 2, y + s->h + 2, fit, ui_col.dim);
+}
+
 static void map_draw_screen(void)
 {
 	ui_position_t p;
-	gfx_clear(ui_col.bg);
+	/* A cheap frame (docs/mappack-design.md C.4) needs the last frame on the screen to be this screen's own (nothing
+	 * else drew in between: the UI core's frame count) and no banner or toast now or then (they may cover the map) */
+	uint32_t draws = ui_app_draws();
+	bool overlay = ui_st.banner.kind != UI_BANNER_NONE || ui_st.toast != NULL;
+	bool cheap = last.valid && ready && draws == last.draws + 1u && !overlay && !last.overlay;
+	last.draws = draws;
+	if (cheap)
+		gfx_fill(0, 0, gfx_width(), view.y, ui_col.bg);	/* the top strip only */
+	else
+		gfx_clear(ui_col.bg);
 	int top = ui_draw_top(ui_view(), &ui_st, TR("Map"), "") + 1;
 	layout(top);
 #if CONFIG_APRS_STATION
@@ -554,16 +660,35 @@ static void map_draw_screen(void)
 		map_view_center(&view, &la, &lo);
 		map_view_set(&view, la, lo, zoom);
 	}
+	uint32_t k = layer_key(here, &p);
+	if (cheap && k == last.key) {
+		/* nothing inside the map rectangle changed: only the lines under it (no gfx_clear, nothing from the pack) */
+		int below = view.y + view.h;
+		gfx_fill(0, below, gfx_width(), gfx_height() - below, ui_col.bg);
+		draw_info(here, &p, false);
+		return;
+	}
+	if (cheap) {	/* the top strip was drawn on the old frame: all again */
+		gfx_clear(ui_col.bg);
+		(void)ui_draw_top(ui_view(), &ui_st, TR("Map"), "");
+	}
+	last.key = k;
+	last.valid = true;
+	last.overlay = overlay;
 	here_province = here ? (int8_t)map_province_near(p.lat_e7, p.lon_e7, PROVINCE_NEAR_M) : (int8_t)MAP_NONE;
 
-	draw_ctx_t d = { .hi = here_province };
-	map_draw(&view, border, &d);
+	if (map_ok()) {
+		draw_ctx_t d = { .hi = here_province };
+		map_draw(&view, border, &d);
+	} else {
+		draw_no_map();
+	}
 	draw_names();
 #if CONFIG_REPEATERS
 	draw_repeaters();
 #endif
 	draw_marks(here, &p);
-	draw_info(here, &p);
+	draw_info(here, &p, true);
 	ui_draw_banner(&ui_st);
 }
 
@@ -697,8 +822,8 @@ static bool map_key(const input_event_t *ev)
 	case ACT_CONTEXT:
 		if (ev->gesture != GESTURE_PRESS)
 			return true;
-		if (rpt_info.count == 0) {
-			ui_toast(TR("No repeaters in this build"));
+		if (rpt_count() == 0) {		/* no map pack, or one without repeaters */
+			ui_toast(TR("No repeater data: load the map pack"));
 			return true;
 		}
 		pick_next();
@@ -715,7 +840,7 @@ static bool map_key(const input_event_t *ev)
 				spick = 0;
 		}
 #if CONFIG_REPEATERS
-		else if (pick < rpt_info.count)
+		else if (pick < rpt_count())
 			pick = RPT_NONE;
 #endif
 		else
@@ -731,7 +856,7 @@ static bool map_key(const input_event_t *ev)
 			return true;
 		}
 #if CONFIG_REPEATERS
-		if (pick < rpt_info.count) {
+		if (pick < rpt_count()) {
 			ui_rpt_open(pick);
 			return true;
 		}
@@ -751,6 +876,7 @@ static bool map_key(const input_event_t *ev)
 
 static void map_enter(void)
 {
+	last.valid = false;	/* a full frame first */
 	ui_dirty();
 }
 

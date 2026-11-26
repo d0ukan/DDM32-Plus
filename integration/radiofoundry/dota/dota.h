@@ -40,7 +40,7 @@ typedef struct {
 	/* Sending: what (DOTA_KIND_*); kind CHANNEL: channel; kind ZONE: zone; SELECTED: dota_selection() */
 	uint8_t kind;
 	uint16_t channel, zone;
-	uint8_t pack;		/* kind PACK: DPK_RADIOID / DPK_AIR (the pack in force of that type) */
+	uint8_t pack;		/* kind PACK: DPK_RADIOID / DPK_AIR / DPK_REF (the pack in force of that type) */
 	/* Receiving: where it goes */
 	dota_imp_cfg_t imp;
 } dota_req_t;
@@ -77,6 +77,8 @@ typedef struct {
 	bool asking;			/* sending: waiting for the answer; receiving: the user is asked about a data pack */
 	bool ptt_prompt;		/* PTT was pressed during the transfer: ask "Stop the transfer?" */
 	bool pack;		/* a data pack goes (sending) / came (receiving) */
+	bool pack_other;		/* receiving: a map pack for another firmware version was offered (refused) */
+	bool pack_bad;			/* receiving: the map pack arrived but its CRC or structure did not check */
 	uint32_t serial;		/* bumped on every change worth a redraw */
 } dota_view_t;
 

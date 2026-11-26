@@ -23,15 +23,18 @@
 #define DPK_SECTOR	4096u
 #define DPK_HDR		64u
 
-enum { DPK_RADIOID = 1, DPK_AIR = 2, DPK_TYPES = 2 };
-/* Why a type has no pack in force (dpk_state) */
-enum { DPK_NONE, DPK_OK, DPK_BAD };
+enum { DPK_RADIOID = 1, DPK_AIR = 2, DPK_REF = 3, DPK_TYPES = 3 };
+/* Why a type has no pack in force (dpk_state): DPK_NONE nothing committed (no "DPK1" at a slot start), DPK_BAD a
+ * header or payload that does not check, DPK_BIG a RadioID pack whose header checks but is longer than this layout's
+ * slot (a 1.0.x pack over 196,544 bytes: rebuild it), DPK_OTHER a map pack that checks but was built for another
+ * firmware version (docs/mappack-design.md C.2). Of two rejected slots OTHER wins, then BIG, then BAD */
+enum { DPK_NONE, DPK_OK, DPK_BAD, DPK_BIG, DPK_OTHER };
 
 typedef struct {
 	char magic[4];		/* "DPK1" */
 	uint8_t type;		/* DPK_RADIOID, DPK_AIR */
 	uint8_t fmt;		/* the payload's format version (1) */
-	uint16_t flags;		/* 0 */
+	uint16_t flags;		/* 0; map pack: its version hint (DPK_REF_HINT), 0 = no hint */
 	uint32_t seq;		/* the higher valid one of the type's slots is in force */
 	uint32_t len;		/* payload bytes */
 	uint32_t crc;		/* storage_crc32 of the payload */
@@ -46,9 +49,19 @@ typedef struct {
 	uint32_t seq, len;
 } dpk_info_t;
 
-/* The slots of a type: 0 and 1; their address and size (0 for a type out of range) */
+/* The slots of a type: 0 and 1; their address and size (0 for a type out of range). Layout 2
+ * (docs/mappack-design.md A.1): RadioID 0xE70000 / 0xEB0000 (192 KB each, the same starts as 1.0.x), map pack
+ * 0xEA0000 / 0xEE0000 (64 KB), air band 0xEF0000 / 0xEF4000 (16 KB); 0xEF8000-0xEFFFFF spare */
 uint32_t dpk_slot_addr(uint8_t type, uint8_t slot);
 uint32_t dpk_slot_size(uint8_t type);
+/* The address of the slot in force for a type (its header), 0 none */
+uint32_t dpk_active_addr(uint8_t type);
+/* Raw bytes of the region (never outside [DPK_BASE, DPK_END)): the map pack's validation and readers */
+bool dpk_raw(uint32_t addr, void *buf, uint32_t len);
+
+/* The map pack's version hint in the header's flags: bits 0-7 the directory version, bits 8-15 the low byte of the
+ * map coordinate id; 0 = no hint (older writers) */
+#define DPK_REF_HINT(dir_version, coord_id)	((uint16_t)((dir_version) | ((coord_id) & 0xFFu) << 8))
 
 /* Check every slot's header and payload CRC (boot, after a CPS session, after a pack arrived): which is in force */
 void dpk_scan(void);

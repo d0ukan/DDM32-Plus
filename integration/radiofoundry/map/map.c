@@ -1,13 +1,60 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* DM32 Plus offline Turkey map renderer core (map.h). Integer only: CK803S has no FPU. Units are 0.001 degree
- * east / north of the data's origin (turkey_map_data.h); the province lookup works in 0.0001 degree. */
+ * east / north of the data's origin (turkey_map_data.h); the province lookup works in 0.0001 degree. Since 1.1 the
+ * tables are the map pack's (storage/ref_pack.h, docs/mappack-design.md): read from the data chip record by record
+ * (the steps through the stream window), every loop bounded by the pack's validated counts; no pack, no map. */
 #include "config.h"
 #if CONFIG_MAP
+#if !CONFIG_DATAPACK
+#error "the map, the repeaters and the airfields read the map pack (CONFIG_DATAPACK)"
+#endif
 #include <stddef.h>
 #include <string.h>
 #include "map.h"
 #include "turkey_map_data.h"
-#include "turkey_district_data.h"
+#include "storage/ref_pack.h"
+
+#define PROVS	TURKEY_MAP_PROVINCES
+
+bool map_ok(void)
+{
+	return ref_has(REF_MAP);
+}
+
+static bool prov_rec(uint32_t p, turkey_map_province_t *pr)
+{
+	return ref_rec(REF_S_PROV, p, pr);
+}
+
+/* A ring's record straight from the chip: the record window keeps the provinces' run */
+static bool ring_rec(uint32_t r, turkey_map_ring_t *g)
+{
+	return ref_direct(REF_S_RING, 8u * r, g, sizeof *g);
+}
+
+static bool step(uint32_t i, int8_t d[2])
+{
+	return ref_bytes(REF_S_STEP, 2u * i, d, 2);
+}
+
+static uint16_t dist_first(uint32_t p)
+{
+	uint16_t v = 0;
+	(void)ref_rec(REF_S_DFIRST, p, &v);
+	return v;
+}
+
+static uint16_t dist_name_first(uint32_t p)
+{
+	uint16_t v = 0;
+	(void)ref_rec(REF_S_DNFIRST, p, &v);
+	return v;
+}
+
+static bool dist_pos(uint32_t d, turkey_map_pt_t *q)
+{
+	return ref_rec(REF_S_DPOS, d, q);
+}
 
 /* Units per pixel x 16 (latitude), zoom 0..8: 0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125, 0.0015625, 0.00075,
  * 0.000375 degree per pixel (7 and 8 round to whole q4 steps). From zoom 7 on a pixel is finer than the data's unit
@@ -203,18 +250,26 @@ uint32_t map_draw(const map_view_t *v, map_line_fn fn, void *ctx)
 {
 	uint32_t n = 0;
 	int32_t rx0 = v->x, ry0 = v->y, rx1 = v->x + v->w - 1, ry1 = v->y + v->h - 1;
-	for (uint8_t p = 0; p < TURKEY_MAP_PROVINCES; p++) {
-		const turkey_map_province_t *pr = &turkey_map_provinces[p];
-		if (px_x(v, pr->max.x) < rx0 || px_x(v, pr->min.x) > rx1 || px_y(v, pr->min.y) < ry0 ||
-		    px_y(v, pr->max.y) > ry1)
+	if (!map_ok())
+		return 0;
+	for (uint8_t p = 0; p < PROVS; p++) {
+		turkey_map_province_t pr;
+		if (!prov_rec(p, &pr))
+			break;
+		if (px_x(v, pr.max.x) < rx0 || px_x(v, pr.min.x) > rx1 || px_y(v, pr.min.y) < ry0 || px_y(v, pr.max.y) > ry1)
 			continue;
-		for (uint16_t r = pr->first_ring; r < pr->first_ring + pr->ring_count; r++) {
-			const turkey_map_ring_t *ring = &turkey_map_rings[r];
-			int32_t ux = ring->start.x, uy = ring->start.y;
+		for (uint32_t r = pr.first_ring; r < (uint32_t)pr.first_ring + pr.ring_count; r++) {
+			turkey_map_ring_t ring;
+			if (!ring_rec(r, &ring))
+				break;
+			int32_t ux = ring.start.x, uy = ring.start.y;
 			int32_t lx = px_x(v, ux), ly = px_y(v, uy);
-			for (uint16_t i = ring->first; i < ring->first + ring->count; i++) {
-				ux += turkey_map_steps[i][0];
-				uy += turkey_map_steps[i][1];
+			for (uint32_t i = ring.first; i < (uint32_t)ring.first + ring.count; i++) {
+				int8_t sd[2];
+				if (!step(i, sd))
+					break;
+				ux += sd[0];
+				uy += sd[1];
 				int32_t x = px_x(v, ux), y = px_y(v, uy);
 				if (x == lx && y == ly)
 					continue;
@@ -233,10 +288,10 @@ uint32_t map_draw(const map_view_t *v, map_line_fn fn, void *ctx)
 
 bool map_label(const map_view_t *v, uint8_t province, int *x, int *y)
 {
-	if (province >= TURKEY_MAP_PROVINCES)
+	turkey_map_province_t pr;
+	if (province >= PROVS || !map_ok() || !prov_rec(province, &pr))
 		return false;
-	const turkey_map_pt_t *l = &turkey_map_provinces[province].label;
-	int32_t px = px_x(v, l->x), py = px_y(v, l->y);
+	int32_t px = px_x(v, pr.label.x), py = px_y(v, pr.label.y);
 	*x = (int)px;
 	*y = (int)py;
 	return px >= v->x && px < v->x + v->w && py >= v->y && py < v->y + v->h;
@@ -248,11 +303,16 @@ static bool inside(const turkey_map_province_t *pr, int32_t px, int32_t py)
 	if (px < pr->min.x * 10 || px > pr->max.x * 10 || py < pr->min.y * 10 || py > pr->max.y * 10)
 		return false;
 	bool in = false;
-	for (uint16_t r = pr->first_ring; r < pr->first_ring + pr->ring_count; r++) {
-		const turkey_map_ring_t *ring = &turkey_map_rings[r];
-		int32_t ax = ring->start.x * 10, ay = ring->start.y * 10;
-		for (uint16_t i = ring->first; i < ring->first + ring->count; i++) {
-			int32_t bx = ax + turkey_map_steps[i][0] * 10, by = ay + turkey_map_steps[i][1] * 10;
+	for (uint32_t r = pr->first_ring; r < (uint32_t)pr->first_ring + pr->ring_count; r++) {
+		turkey_map_ring_t ring;
+		if (!ring_rec(r, &ring))
+			break;
+		int32_t ax = ring.start.x * 10, ay = ring.start.y * 10;
+		for (uint32_t i = ring.first; i < (uint32_t)ring.first + ring.count; i++) {
+			int8_t d[2];
+			if (!step(i, d))
+				break;
+			int32_t bx = ax + d[0] * 10, by = ay + d[1] * 10;
 			if ((ay > py) != (by > py)) {
 				int32_t lhs = (px - ax) * (by - ay), rhs = (py - ay) * (bx - ax);
 				if (by > ay ? lhs < rhs : lhs > rhs)
@@ -268,9 +328,15 @@ static bool inside(const turkey_map_province_t *pr, int32_t px, int32_t py)
 int map_province_at(int32_t lat_e7, int32_t lon_e7)
 {
 	int32_t px = floor_div(lon_e7 - TURKEY_MAP_LON0_E7, 1000), py = floor_div(lat_e7 - TURKEY_MAP_LAT0_E7, 1000);
-	for (uint8_t p = 0; p < TURKEY_MAP_PROVINCES; p++)
-		if (inside(&turkey_map_provinces[p], px, py))
+	if (!map_ok())
+		return MAP_NONE;
+	for (uint8_t p = 0; p < PROVS; p++) {
+		turkey_map_province_t pr;
+		if (!prov_rec(p, &pr))
+			break;
+		if (inside(&pr, px, py))
 			return p;
+	}
 	return MAP_NONE;
 }
 
@@ -284,17 +350,23 @@ int map_province_near(int32_t lat_e7, int32_t lon_e7, uint32_t max_m)
 	int32_t m = (int32_t)(max_m > 50000u ? 50000u : max_m) * 1000 / (int32_t)M_PER_UNIT_X100;	/* 0.0001 deg */
 	int64_t best = (int64_t)m * m;
 	int found = MAP_NONE;
-	for (uint8_t p = 0; p < TURKEY_MAP_PROVINCES; p++) {
-		const turkey_map_province_t *pr = &turkey_map_provinces[p];
+	for (uint8_t p = 0; p < PROVS; p++) {
+		turkey_map_province_t pr;
+		if (!prov_rec(p, &pr))
+			break;
 		int32_t mx = m * 32768 / cosq + 1;	/* the margin in longitude */
-		if (px < pr->min.x * 10 - mx || px > pr->max.x * 10 + mx || py < pr->min.y * 10 - m ||
-		    py > pr->max.y * 10 + m)
+		if (px < pr.min.x * 10 - mx || px > pr.max.x * 10 + mx || py < pr.min.y * 10 - m || py > pr.max.y * 10 + m)
 			continue;
-		for (uint16_t r = pr->first_ring; r < pr->first_ring + pr->ring_count; r++) {
-			const turkey_map_ring_t *ring = &turkey_map_rings[r];
-			int32_t ax = ring->start.x * 10, ay = ring->start.y * 10;
-			for (uint16_t i = ring->first; i < ring->first + ring->count; i++) {
-				int32_t bx = ax + turkey_map_steps[i][0] * 10, by = ay + turkey_map_steps[i][1] * 10;
+		for (uint32_t r = pr.first_ring; r < (uint32_t)pr.first_ring + pr.ring_count; r++) {
+			turkey_map_ring_t ring;
+			if (!ring_rec(r, &ring))
+				break;
+			int32_t ax = ring.start.x * 10, ay = ring.start.y * 10;
+			for (uint32_t i = ring.first; i < (uint32_t)ring.first + ring.count; i++) {
+				int8_t d[2];
+				if (!step(i, d))
+					break;
+				int32_t bx = ax + d[0] * 10, by = ay + d[1] * 10;
 				/* longitude scaled by cos(latitude): distances in latitude units */
 				int64_t dx = (int64_t)(bx - ax) * cosq / 32768, dy = by - ay;
 				int64_t wx = (int64_t)(px - ax) * cosq / 32768, wy = py - ay;
@@ -319,31 +391,36 @@ int map_province_near(int32_t lat_e7, int32_t lon_e7, uint32_t max_m)
 	return found;
 }
 
-const char *map_province_name(uint8_t province)
+void map_province_name(uint8_t province, char *out, size_t n)
 {
-	return province < TURKEY_MAP_PROVINCES ? &turkey_map_names[turkey_map_provinces[province].name] : "";
+	turkey_map_province_t pr;
+	if (n != 0u)
+		out[0] = '\0';
+	if (province < PROVS && map_ok() && prov_rec(province, &pr))
+		(void)ref_name(REF_S_PNAME, pr.name, out, n);
 }
 
 uint8_t map_province_plate(uint8_t province)
 {
-	return province < TURKEY_MAP_PROVINCES ? turkey_map_provinces[province].plate : 0u;
+	turkey_map_province_t pr;
+	return province < PROVS && map_ok() && prov_rec(province, &pr) ? pr.plate : 0u;
 }
 
 /* ---- Districts (turkey_district_data.h, GeoNames, CC BY 4.0) ---- */
 
 uint16_t map_district_count(void)
 {
-	return (uint16_t)TURKEY_DISTRICTS;
+	return map_ok() ? ref_count(REF_S_DPOS) : 0u;
 }
 
 uint8_t map_district_province(uint16_t d)
 {
-	if (d >= TURKEY_DISTRICTS)
+	if (d >= map_district_count())
 		return 0xFFu;
-	uint8_t lo = 0, hi = (uint8_t)(TURKEY_MAP_PROVINCES - 1u);	/* the last p with first[p] <= d */
+	uint8_t lo = 0, hi = (uint8_t)(PROVS - 1u);	/* the last p with first[p] <= d */
 	while (lo < hi) {
 		uint8_t mid = (uint8_t)((lo + hi + 1u) / 2u);
-		if (turkey_district_first[mid] <= d)
+		if (dist_first(mid) <= d)
 			lo = mid;
 		else
 			hi = (uint8_t)(mid - 1u);
@@ -351,42 +428,59 @@ uint8_t map_district_province(uint16_t d)
 	return lo;
 }
 
-const char *map_district_name(uint16_t d)
+void map_district_name(uint16_t d, char *out, size_t n)
 {
 	uint8_t p = map_district_province(d);
+	if (n != 0u)
+		out[0] = '\0';
 	if (p == 0xFFu)
-		return "";
-	const char *s = &turkey_district_names[turkey_district_name_first[p]];
-	for (uint16_t i = turkey_district_first[p]; i < d; i++)
-		s += strlen(s) + 1u;
-	return s;
+		return;
+	uint32_t at = dist_name_first(p);
+	for (uint32_t i = dist_first(p); i < d; i++) {
+		uint32_t k = ref_name(REF_S_DNAME, at, NULL, 0);
+		if (k == 0u)
+			return;
+		at += k;
+	}
+	(void)ref_name(REF_S_DNAME, at, out, n);
 }
 
 void map_district_pos(uint16_t d, int32_t *lat_e7, int32_t *lon_e7)
 {
-	const turkey_map_pt_t *q = &turkey_district_pos[d < TURKEY_DISTRICTS ? d : 0u];
-	*lat_e7 = TURKEY_MAP_LAT0_E7 + q->y * TURKEY_MAP_UNIT_E7 + TURKEY_MAP_UNIT_E7 / 2;
-	*lon_e7 = TURKEY_MAP_LON0_E7 + q->x * TURKEY_MAP_UNIT_E7 + TURKEY_MAP_UNIT_E7 / 2;
+	turkey_map_pt_t q = { 0, 0 };
+	if (d < map_district_count())
+		(void)dist_pos(d, &q);
+	*lat_e7 = TURKEY_MAP_LAT0_E7 + q.y * TURKEY_MAP_UNIT_E7 + TURKEY_MAP_UNIT_E7 / 2;
+	*lon_e7 = TURKEY_MAP_LON0_E7 + q.x * TURKEY_MAP_UNIT_E7 + TURKEY_MAP_UNIT_E7 / 2;
 }
 
 uint16_t map_districts_draw(const map_view_t *v, map_point_fn fn, void *ctx)
 {
+	static char name[MAP_NAME_MAX];		/* each name from the walk, handed to fn */
 	uint16_t n = 0;
 	int32_t rx0 = v->x, ry0 = v->y, rx1 = v->x + v->w - 1, ry1 = v->y + v->h - 1;
-	for (uint8_t p = 0; p < TURKEY_MAP_PROVINCES; p++) {
-		const turkey_map_province_t *pr = &turkey_map_provinces[p];
+	if (!map_ok())
+		return 0;
+	for (uint8_t p = 0; p < PROVS; p++) {
+		turkey_map_province_t pr;
+		if (!prov_rec(p, &pr))
+			break;
 		/* a district centre lies inside (or within a few km of) its province: one pixel of slack */
-		if (px_x(v, pr->max.x) < rx0 - 1 || px_x(v, pr->min.x) > rx1 + 1 || px_y(v, pr->min.y) < ry0 - 1 ||
-		    px_y(v, pr->max.y) > ry1 + 1)
+		if (px_x(v, pr.max.x) < rx0 - 1 || px_x(v, pr.min.x) > rx1 + 1 || px_y(v, pr.min.y) < ry0 - 1 ||
+		    px_y(v, pr.max.y) > ry1 + 1)
 			continue;
-		const char *name = &turkey_district_names[turkey_district_name_first[p]];
-		for (uint16_t d = turkey_district_first[p]; d < turkey_district_first[p + 1u]; d++) {
-			int32_t x = px_x(v, turkey_district_pos[d].x), y = px_y(v, turkey_district_pos[d].y);
+		uint32_t at = dist_name_first(p), d1 = dist_first(p + 1u);
+		for (uint32_t d = dist_first(p); d < d1; d++) {
+			turkey_map_pt_t q;
+			uint32_t k = ref_name(REF_S_DNAME, at, name, sizeof name);
+			if (k == 0u || !dist_pos(d, &q))
+				break;
+			at += k;
+			int32_t x = px_x(v, q.x), y = px_y(v, q.y);
 			if (x >= rx0 && x <= rx1 && y >= ry0 && y <= ry1) {
-				fn(ctx, (int)x, (int)y, d, name);
+				fn(ctx, (int)x, (int)y, (uint16_t)d, name);
 				n++;
 			}
-			name += strlen(name) + 1u;
 		}
 	}
 	return n;
@@ -402,13 +496,16 @@ uint16_t map_district_near(int32_t lat_e7, int32_t lon_e7, int province, uint32_
 	int32_t m = (int32_t)(max_m > 100000u ? 100000u : max_m) * 100 / (int32_t)M_PER_UNIT_X100;	/* units */
 	int32_t best = m * m;
 	uint16_t found = MAP_DISTRICT_NONE;
-	uint16_t d0 = 0, d1 = (uint16_t)TURKEY_DISTRICTS;
-	if (province >= 0 && province < (int)TURKEY_MAP_PROVINCES) {
-		d0 = turkey_district_first[province];
-		d1 = turkey_district_first[province + 1];
+	uint16_t d0 = 0, d1 = map_district_count();
+	if (d1 != 0u && province >= 0 && province < (int)PROVS) {
+		d0 = dist_first((uint32_t)province);
+		d1 = dist_first((uint32_t)province + 1u);
 	}
 	for (uint16_t d = d0; d < d1; d++) {
-		int32_t dx = (turkey_district_pos[d].x - ux) * cosq / 32768, dy = turkey_district_pos[d].y - uy;
+		turkey_map_pt_t q;
+		if (!dist_pos(d, &q))
+			break;
+		int32_t dx = (q.x - ux) * cosq / 32768, dy = q.y - uy;
 		if (dx > m || dx < -m || dy > m || dy < -m)
 			continue;
 		int32_t d2 = dx * dx + dy * dy;

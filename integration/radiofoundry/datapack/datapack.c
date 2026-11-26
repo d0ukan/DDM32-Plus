@@ -7,27 +7,39 @@
 #include "storage/storage.h"
 #include "storage/datapack.h"
 #include "ui/fmt.h"
+#include "storage/ref_pack.h"
 
-/* RadioID: two 256 KB slots; air band: two 16 KB slots after them; the rest of the region spare */
-#define ID_SLOT		0x40000u
-#define AIR_SLOT	0x4000u
-#define AIR_BASE	(DPK_BASE + 2u * ID_SLOT)
+/* Layout 2 (docs/mappack-design.md A.1): per type its two slot starts and its slot size. The RadioID slots keep
+ * 1.0.x's starts (a pack of up to 192 KB there stays valid both ways); the map pack slots are what were the tails of
+ * 1.0.x's 256 KB RadioID slots */
+static const struct {
+	uint32_t a, b, size;
+} slots[DPK_TYPES] = {
+	{ 0xE70000u, 0xEB0000u, 0x30000u },	/* DPK_RADIOID */
+	{ 0xEF0000u, 0xEF4000u, 0x4000u },	/* DPK_AIR */
+	{ 0xEA0000u, 0xEE0000u, 0x10000u },	/* DPK_REF */
+};
+/* Every slot inside the region, 4 KB aligned, no two overlapping: in address order RadioID A, map A, RadioID B,
+ * map B, air A, air B (the host test checks the table itself, docs/mappack-design.md G T1) */
+_Static_assert(DPK_TYPES == 3 && DPK_RADIOID == 1 && DPK_AIR == 2 && DPK_REF == 3, "slots[] is by type - 1");
+_Static_assert(0xE70000u >= DPK_BASE && 0xE70000u + 0x30000u <= 0xEA0000u && 0xEA0000u + 0x10000u <= 0xEB0000u &&
+	       0xEB0000u + 0x30000u <= 0xEE0000u && 0xEE0000u + 0x10000u <= 0xEF0000u &&
+	       0xEF0000u + 0x4000u <= 0xEF4000u && 0xEF4000u + 0x4000u <= DPK_END, "layout 2 inside the region, apart");
 
 static struct {
 	dpk_info_t h;
 	uint8_t slot;		/* 0xFF: none in force */
-	uint8_t state;		/* DPK_OK / DPK_NONE / DPK_BAD */
+	uint8_t state;		/* DPK_OK / DPK_NONE / DPK_BAD / DPK_BIG / DPK_OTHER */
 } cur[DPK_TYPES];
 
 uint32_t dpk_slot_size(uint8_t type)
 {
-	return type == DPK_RADIOID ? ID_SLOT : type == DPK_AIR ? AIR_SLOT : 0u;
+	return type >= 1u && type <= DPK_TYPES ? slots[type - 1u].size : 0u;
 }
 
 uint32_t dpk_slot_addr(uint8_t type, uint8_t slot)
 {
-	uint32_t base = type == DPK_RADIOID ? DPK_BASE : AIR_BASE;
-	return dpk_slot_size(type) != 0u && slot < 2u ? base + slot * dpk_slot_size(type) : 0u;
+	return type >= 1u && type <= DPK_TYPES && slot < 2u ? (slot == 0u ? slots[type - 1u].a : slots[type - 1u].b) : 0u;
 }
 
 static bool inside(uint32_t addr, uint32_t len)
@@ -39,6 +51,11 @@ static bool rd(uint32_t addr, void *buf, uint32_t len)
 {
 	return board.flash != NULL && board.flash->read != NULL && board.flash->size >= DPK_END &&
 	       board.flash->read(addr, buf, len);
+}
+
+bool dpk_raw(uint32_t addr, void *buf, uint32_t len)
+{
+	return inside(addr, len) && rd(addr, buf, len);
 }
 
 bool dpk_erase(uint32_t addr)
@@ -68,7 +85,8 @@ void dpk_seal(dpk_hdr_t *h)
 
 bool dpk_hdr_ok(const dpk_hdr_t *h, uint8_t type)
 {
-	return memcmp(h->magic, "DPK1", 4) == 0 && h->type == type && h->fmt == 1u &&
+	/* the slot size first: a type the build does not know has size 0, and 0 - DPK_HDR would wrap */
+	return memcmp(h->magic, "DPK1", 4) == 0 && h->type == type && h->fmt == 1u && dpk_slot_size(type) > DPK_HDR &&
 	       h->len <= dpk_slot_size(type) - DPK_HDR && h->hcrc == storage_crc32(0, h, offsetof(dpk_hdr_t, hcrc));
 }
 
@@ -87,29 +105,41 @@ static bool payload_crc(uint32_t addr, uint32_t len, uint32_t *crc)
 	return true;
 }
 
-/* A slot's header if the slot holds a whole, checked pack; *bad: something is there that does not check */
-static bool slot_ok(uint8_t type, uint8_t slot, dpk_hdr_t *h, bool *bad)
+/* What a slot holds (DPK_OK: a whole, checked pack, h its header). A slot whose first 4 bytes are not "DPK1" holds
+ * nothing committed (the header is written last): empty, being written, or another layout's payload bytes */
+static uint8_t slot_check(uint8_t type, uint8_t slot, dpk_hdr_t *h)
 {
 	uint32_t a = dpk_slot_addr(type, slot), crc;
-	if (!rd(a, h, sizeof *h))
-		return false;
-	static const uint8_t erased[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
-	if (memcmp(h->magic, erased, 4) == 0)
-		return false;		/* empty (or being written: the header comes last) */
-	if (dpk_hdr_ok(h, type) && payload_crc(a + DPK_HDR, h->len, &crc) && crc == h->crc)
-		return true;
-	*bad = true;
-	return false;
+	if (!rd(a, h, sizeof *h) || memcmp(h->magic, "DPK1", 4) != 0)
+		return DPK_NONE;
+	if (!dpk_hdr_ok(h, type)) {
+		/* a RadioID header that checks but is longer than this layout's slot: a 1.0.x pack over 192 KB */
+		return type == DPK_RADIOID && h->type == type && h->fmt == 1u && h->len > dpk_slot_size(type) - DPK_HDR &&
+		       h->hcrc == storage_crc32(0, h, offsetof(dpk_hdr_t, hcrc)) ? DPK_BIG : DPK_BAD;
+	}
+	/* the CRC, then (a map pack) the structure: one after the other, never both 64-byte buffers live */
+	if (!payload_crc(a + DPK_HDR, h->len, &crc) || crc != h->crc)
+		return DPK_BAD;
+	return type == DPK_REF ? ref_validate(a + DPK_HDR, h->len, h->flags) : DPK_OK;
+}
+
+/* Of two rejected slots, the state About names: OTHER, then BIG, then BAD, then NONE */
+static uint8_t worse(uint8_t a, uint8_t b)
+{
+	static const uint8_t rank[5] = { [DPK_NONE] = 0, [DPK_OK] = 0, [DPK_BAD] = 1, [DPK_BIG] = 2, [DPK_OTHER] = 3 };
+	return b < 5u && rank[b] > rank[a] ? b : a;
 }
 
 static void scan_type(uint8_t type)
 {
 	dpk_hdr_t h;
-	bool bad = false;
-	uint8_t i = (uint8_t)(type - 1u), slot = 0xFF;
+	uint8_t i = (uint8_t)(type - 1u), slot = 0xFF, why = DPK_NONE;
 	uint32_t seq = 0, len = 0;
 	for (uint8_t s = 0; s < 2u; s++) {
-		if (slot_ok(type, s, &h, &bad) && (slot == 0xFF || h.seq > seq)) {
+		uint8_t st = slot_check(type, s, &h);
+		if (st != DPK_OK) {
+			why = worse(why, st);
+		} else if (slot == 0xFF || h.seq > seq) {
 			seq = h.seq;
 			len = h.len;
 			slot = s;
@@ -120,7 +150,7 @@ static void scan_type(uint8_t type)
 	cur[i].h.seq = seq;
 	cur[i].h.len = len;
 	cur[i].slot = slot;
-	cur[i].state = slot != 0xFF ? DPK_OK : bad ? DPK_BAD : DPK_NONE;
+	cur[i].state = slot != 0xFF ? DPK_OK : why;
 }
 
 void dpk_scan(void)
@@ -137,6 +167,11 @@ const dpk_info_t *dpk_active(uint8_t type)
 uint8_t dpk_state(uint8_t type)
 {
 	return type >= 1u && type <= DPK_TYPES ? cur[type - 1u].state : DPK_NONE;
+}
+
+uint32_t dpk_active_addr(uint8_t type)
+{
+	return dpk_active(type) != NULL ? dpk_slot_addr(type, cur[type - 1u].slot) : 0u;
 }
 
 bool dpk_header(uint8_t type, dpk_hdr_t *h)
@@ -255,6 +290,10 @@ bool dpk_commit(dpk_writer_t *w)
 	uint32_t crc, a = w->addr;
 	w->addr = 0;		/* closed, whatever happens now */
 	if (a == 0u || !payload_crc(a + DPK_HDR, w->h.len, &crc) || crc != w->h.crc)
+		return false;
+	/* A map pack's structure is checked before its header is programmed: one that checks by CRC but not by
+	 * structure (or was built for another version) is never committed; the pack in force stays */
+	if (w->h.type == DPK_REF && ref_validate(a + DPK_HDR, w->h.len, w->h.flags) != DPK_OK)
 		return false;
 	memcpy(w->h.magic, "DPK1", 4);
 	dpk_seal(&w->h);

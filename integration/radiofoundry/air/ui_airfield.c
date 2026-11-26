@@ -31,6 +31,7 @@
 #include "aprs/aprs.h"
 #include "ui/airfield.h"
 #include "ui/air_pack.h"	/* DDM32 Plus: the user's air band pack over the table */
+#include "storage/ref_pack.h"
 #if CONFIG_AIR_WATCH
 #include "ui_svc.h"	/* UI_MW_MAX */
 #endif
@@ -95,9 +96,11 @@ static void __attribute__((noinline)) row(int y, int h, uint16_t i, bool focus, 
 {
 	char buf[48], fit[48];
 	sbuf_t b;
-	const air_field_t *a = &air_fields[i];
+	const air_field_t *a = air_get(i);	/* the one copy: used before anything else reads a record */
 	const font_t *s = ui_layout.small, *m = ui_layout.medium;
 	int w = gfx_width();
+	if (a == NULL)
+		return;
 	if (focus)
 		gfx_fill(0, y, w, h, ui_col.focus);
 	color_t fg = focus ? ui_col.focus_fg : ui_col.fg, dim = focus ? ui_col.focus_fg : ui_col.dim;
@@ -146,8 +149,8 @@ static void __attribute__((noinline)) draw_list(int y, const air_here_t *h, int3
 	if (rows < 1)
 		rows = 1;
 	/* Keep the picked row on the page: the top row moves only when the pick would leave it */
-	uint16_t rs = air_rank_in(h, sel, FILT), rt = top < air_field_count ? air_rank_in(h, top, FILT) : 0;
-	if (top >= air_field_count || rs < rt) {
+	uint16_t nf = air_nfields(), rs = air_rank_in(h, sel, FILT), rt = top < nf ? air_rank_in(h, top, FILT) : 0;
+	if (top >= nf || rs < rt) {
 		top = sel;
 	} else if (rs >= rt + (uint16_t)rows) {
 		top = sel;
@@ -183,8 +186,9 @@ static void grp_scan(void)
 {
 	memset(present, 0, sizeof present);
 	present[0] = 1u;	/* All */
-	for (uint16_t i = 0; i < air_field_count; i++) {
-		uint8_t p = air_fields[i].prov;
+	for (uint16_t i = 0, n = air_nfields(); i < n; i++) {
+		ref_key_t k;
+		uint8_t p = ref_key(REF_S_AKEY, i, &k) ? k.prov : (uint8_t)AIR_PROV_UNKNOWN;
 		uint8_t g = p >= 1u && p <= AIR_PROVS ? p : (uint8_t)GRP_UNKNOWN;
 		present[g >> 3] |= (uint8_t)(1u << (g & 7u));
 	}
@@ -220,7 +224,9 @@ static void grp_item(uint16_t r, ui_item_t *it)
 	} else {
 		sb_u32(&b, g, 2);
 		sb_chr(&b, ' ');
-		sb_str(&b, map_province_name((uint8_t)(g - 1u)));
+		char name[MAP_NAME_MAX];
+		map_province_name((uint8_t)(g - 1u), name, sizeof name);
+		sb_str(&b, name);
 	}
 	sb_str(&b, " (");
 	sb_u32(&b, air_count_in(grp_filter(g)), 1);
@@ -239,7 +245,13 @@ static void __attribute__((noinline)) draw_groups(void)
 /* The province list's title: the province's name, "Unknown", or nothing for All */
 static const char *filt_name(void)
 {
-	return filt == AIR_PROV_ALL ? "" : filt == AIR_PROV_UNKNOWN ? TR("Unknown") : map_province_name((uint8_t)(filt - 1u));
+	static char name[MAP_NAME_MAX];
+	if (filt == AIR_PROV_ALL)
+		return "";
+	if (filt == AIR_PROV_UNKNOWN)
+		return TR("Unknown");
+	map_province_name((uint8_t)(filt - 1u), name, sizeof name);
+	return name;
 }
 #endif
 
@@ -248,16 +260,19 @@ static void __attribute__((noinline)) draw_info(int y, uint16_t i, const air_her
 	static const char *const kinds[] = { TRN("Large airport"), TRN("Airport"), TRN("Small airfield") };
 	char buf[48], fit[48];
 	sbuf_t b;
-	const air_field_t *a = &air_fields[i];
+	const air_field_t *a = air_get(i);	/* the one copy: name and kind taken before the frequencies */
 	const font_t *s = ui_layout.small, *m = ui_layout.medium;
 	int w = gfx_width();
+	if (a == NULL)
+		return;
+	uint8_t kind = a->kind;
 	sb_init(&b, buf, sizeof buf);
 	sb_field(&b, a);
 	gfx_text_fit(m, buf, w, fit, sizeof fit);
 	gfx_text(m, 0, y, fit, ui_col.fg);
 	y += m->h + 3;
 	sb_init(&b, buf, sizeof buf);
-	sb_str(&b, tr(kinds[a->kind < 3u ? a->kind : 2u]));
+	sb_str(&b, tr(kinds[kind < 3u ? kind : 2u]));
 	if (h->ok) {
 		uint32_t meters;
 		uint16_t brg;
@@ -308,7 +323,7 @@ static void airfield_draw(void)
 	air_here_t h;
 	int32_t lat = 0, lon = 0;
 #if CONFIG_AIR_PROV
-	if (groups && air_field_count != 0) {
+	if (groups && air_nfields() != 0) {
 		draw_groups();
 		return;
 	}
@@ -318,8 +333,14 @@ static void airfield_draw(void)
 #endif
 	gfx_clear(ui_col.bg);
 	int y = ui_draw_top(ui_view(), &ui_st, TR("Airfields"), name) + 2;
+	if (air_nfields() == 0) {	/* no map pack, or one without airfields */
+		gfx_text(ui_layout.small, 0, y, TR("No airfield data: load the map pack"), ui_col.warn);
+		ui_draw_bottom(&ui_st, TR("Back"));
+		ui_draw_banner(&ui_st);
+		return;
+	}
 	here_now(&h, &lat, &lon);
-	if (sel >= air_field_count)
+	if (sel >= air_nfields())
 		sel = air_next_in(&h, AIR_NONE, 1, FILT);
 	if (info)
 		draw_info(y, sel, &h, lat, lon);
@@ -336,9 +357,11 @@ static void airfield_draw(void)
 
 void ui_airfield_tune(uint16_t i, uint8_t k)
 {
-	if (i >= air_field_count || k >= air_count(i))
+	if (i >= air_nfields() || k >= air_count(i))
 		return;
-	const air_field_t *a = &air_fields[i];
+	const air_field_t *a = air_get(i);	/* nothing below reads another record before a->code is used */
+	if (a == NULL)
+		return;
 	const air_freq_t *f = air_freq(i, k);
 	uint32_t hz = air_freq_hz(f);
 	if (!radio_am_capable()) {
@@ -384,7 +407,9 @@ static bool __attribute__((noinline)) seen_before(uint16_t i, uint8_t k, uint32_
  * ("LTAI: 6/7 frequencies watched"). One alone is tuned as OK does */
 static void __attribute__((noinline)) watch_all(uint16_t i)
 {
-	const air_field_t *a = &air_fields[i];
+	const air_field_t *a = air_get(i);	/* air_freq below keeps its own copy, not this one */
+	if (a == NULL)
+		return;
 	uint32_t hz[UI_MW_MAX];
 	uint8_t n = 0, first = 0, atis = 0, all = 0, count = air_count(i);
 	for (uint8_t pass = 0; pass < 2; pass++) {	/* 0: every service but the ATIS; 1: the ATIS */
@@ -483,7 +508,7 @@ static bool grp_key(const input_event_t *ev, bool press)
 static bool airfield_key(const input_event_t *ev)
 {
 	bool press = ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
-	if (air_field_count == 0)
+	if (air_nfields() == 0)
 		return false;
 #if CONFIG_AIR_PROV
 	if (groups)
@@ -499,14 +524,14 @@ static bool airfield_key(const input_event_t *ev)
 			air_here_t h;
 			int32_t lat, lon;
 			here_now(&h, &lat, &lon);
-			uint16_t nx = sel < air_field_count ? air_next_in(&h, sel, dir, FILT) : AIR_NONE;
+			uint16_t nx = sel < air_nfields() ? air_next_in(&h, sel, dir, FILT) : AIR_NONE;
 			sel = nx != AIR_NONE ? nx : air_next_in(&h, AIR_NONE, dir, FILT);	/* round from the end to the start */
 		}
 		ui_dirty();
 		return true;
 	}
 	if (ev->action == ACT_SELECT && ev->gesture == GESTURE_PRESS) {
-		if (sel < air_field_count) {
+		if (sel < air_nfields()) {
 			if (!info) {
 				info = true;
 				fsel = 0;
@@ -520,7 +545,7 @@ static bool airfield_key(const input_event_t *ev)
 		return true;
 	}
 #if CONFIG_AIR_WATCH
-	if (ev->action == ACT_CONTEXT && ev->gesture == GESTURE_PRESS && info && sel < air_field_count) {
+	if (ev->action == ACT_CONTEXT && ev->gesture == GESTURE_PRESS && info && sel < air_nfields()) {
 		if (air_count(sel) == 0)
 			ui_toast(TR("No frequencies in the data"));
 		else

@@ -33,14 +33,16 @@
 /* --- The checks before a start (the band plan's part DOTA's frequency check shares) --- */
 
 #if CONFIG_REPEATERS
-/* A repeater of the list transmits or listens there (within half a 12.5 kHz channel) */
+/* A listed repeater transmits or listens there (within half a 12.5 kHz channel): the frequency set in program flash
+ * (with or without a map pack, docs/mappack-design.md C.7), or a repeater of the map pack in force (a user's own
+ * pack may list more: a pack only ever adds refusals, never removes one) */
 static bool known_repeater(uint32_t hz)
 {
-	for (uint32_t i = 0; i < rpt_info.count; i++) {
-		const rpt_entry_t *e = &rpt_table[i];
-		uint32_t in = (uint32_t)((int32_t)e->rx_hz + (int32_t)e->off * (int32_t)RPT_STEP_HZ);
-		if ((hz + 6250u > e->rx_hz && hz < e->rx_hz + 6250u) ||
-		    (e->off != 0 && hz + 6250u > in && hz < in + 6250u))
+	if (rpt_freq_listed(hz))
+		return true;
+	for (uint16_t i = 0, n = rpt_count(); i < n; i++) {
+		const rpt_entry_t *e = rpt_get(i);
+		if (e != NULL && rpt_entry_near(e, hz))
 			return true;
 	}
 	return false;

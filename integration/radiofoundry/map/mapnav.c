@@ -271,14 +271,17 @@ uint16_t arpt_check(arpt_t *s, bool fix, int32_t lat_e7, int32_t lon_e7, bool dm
 	uint16_t best = arpt_best(lat_e7, lon_e7, dmr, in_band);
 	uint32_t mb, mc;
 	uint16_t brg;
-	if (best == RPT_NONE || best == s->cur || !rpt_way(&rpt_table[best], lat_e7, lon_e7, &mb, &brg))
+	/* rpt_get keeps one copy: what is needed of the best entry is taken before the current one is read */
+	const rpt_entry_t *e = best != RPT_NONE && best != s->cur ? rpt_get(best) : NULL;
+	if (e == NULL || !rpt_way(e, lat_e7, lon_e7, &mb, &brg))
 		return RPT_NONE;
-	if (s->cur < rpt_info.count && arpt_suitable(&rpt_table[s->cur], dmr, in_band) &&
-	    rpt_way(&rpt_table[s->cur], lat_e7, lon_e7, &mc, &brg) &&
+	uint32_t best_hz = e->rx_hz;
+	e = s->cur < rpt_count() ? rpt_get(s->cur) : NULL;
+	if (e != NULL && arpt_suitable(e, dmr, in_band) && rpt_way(e, lat_e7, lon_e7, &mc, &brg) &&
 	    ((uint64_t)mb * 100u > (uint64_t)mc * (100u - ARPT_GAIN_PCT) || mc <= mb + ARPT_GAIN_M))
 		return RPT_NONE;	/* not clearly nearer than the one offered before */
 	s->cur = best;
-	if (tuned_hz == rpt_table[best].rx_hz)
+	if (tuned_hz == best_hz)
 		return RPT_NONE;	/* there already */
 	return best;
 }

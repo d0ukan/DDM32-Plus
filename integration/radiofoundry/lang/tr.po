@@ -6740,3 +6740,43 @@ msgstr "Tarama: hızlı"
 #: core/ui/ui_scanfast.c
 msgid "Scan: classic (v1.0.0)"
 msgstr "Tarama: klasik (v1.0.0)"
+
+#: core/ui/ui_rpt.c core/ui/ui_map.c core/ui/ui_mapnav.c
+msgid "No repeater data: load the map pack"
+msgstr "Röle verisi yok: harita paketini yükleyin"
+
+#: core/ui/ui_airfield.c
+msgid "No airfield data: load the map pack"
+msgstr "Meydan verisi yok: harita paketini yükleyin"
+
+#: core/ui/ui_map.c
+msgid "No map data."
+msgstr "Harita verisi yok."
+
+#: core/ui/ui_map.c
+msgid "Load the map pack (PC programmer)."
+msgstr "Harita paketini yükleyin (PC programı)."
+
+#: core/ui/ui_menus.c
+msgid "Map pack: "
+msgstr "Harita paketi: "
+
+#: core/ui/ui_menus.c
+msgid "too big for this firmware, rebuild it"
+msgstr "bu yazılım için büyük, yeniden oluşturun"
+
+#: core/ui/ui_menus.c
+msgid "for another version, load the one for this firmware"
+msgstr "başka bir sürüm için, bu yazılımınkini yükleyin"
+
+#: core/ui/ui_dota.c
+msgid "Map pack"
+msgstr "Harita paketi"
+
+#: core/ui/ui_dota.c
+msgid "Map pack for another version"
+msgstr "Başka sürümün harita paketi"
+
+#: core/ui/ui_dota.c
+msgid "Bad pack"
+msgstr "Bozuk paket"

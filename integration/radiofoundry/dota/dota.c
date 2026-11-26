@@ -15,6 +15,7 @@
 #include "board.h"
 #if CONFIG_DATAPACK
 #include "storage/datapack.h"
+#include "storage/ref_pack.h"
 #endif
 
 #define PREAMBLE_FLAGS	60u	/* 400 ms: the receiver's CTCSS detector opens first */
@@ -292,6 +293,8 @@ void dota_job(void *ctx)
 #if CONFIG_DATAPACK
 		/* the payload read back against its CRC, then the header: the new pack is in force */
 		bool ok = !job_failed && (r->pack ? dpk_commit(&r->u.pk.w) : dota_imp_commit(&r->u.im));
+		if (!ok && r->pack && r->u.pk.h.type == DPK_REF)
+			view.pack_bad = true;	/* its CRC or its structure did not check: never committed */
 #else
 		bool ok = !job_failed && dota_imp_commit(&r->u.im);
 #endif
@@ -833,6 +836,16 @@ static uint8_t pack_hello(rxs_t *r, const dota_manifest_t *m)
 	dpk_hdr_t h;
 	memcpy(&h, m->pack, sizeof h);
 	uint16_t chunks = (uint16_t)((h.len + PACK_CHUNK - 1u) / PACK_CHUNK);
+	/* A map pack whose header says it was built for another firmware (another format, or a version hint that
+	 * disagrees; hint 0 = none, then the commit's structure check decides): refused before the ~9 minute transfer,
+	 * nothing erased, and the receiver says why */
+	if (h.type == DPK_REF && memcmp(h.magic, "DPK1", 4) == 0 && (h.fmt != 1u || (h.flags != 0u && h.flags != ref_hint()))) {
+		if (!view.pack_other) {
+			view.pack_other = true;
+			touch();
+		}
+		return DOTA_R_VERSION;
+	}
 	if (h.type < 1u || h.type > DPK_TYPES || !dpk_hdr_ok(&h, h.type) || h.len == 0u || dota_manifest_total(m) != chunks ||
 	    m->recs[DOTA_SEC_CHANNELS] != chunks || m->frames[DOTA_SEC_CHANNELS] != chunks)
 		return DOTA_R_VERSION;

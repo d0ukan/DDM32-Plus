@@ -52,10 +52,18 @@ typedef struct {
 	uint8_t type;			/* air_type_t */
 } air_freq_t;
 
-/* The generated table (ui/airfield_data.c), sorted by code. A test may link its own */
+/* The generated table (airfield_data.c, sorted by code): since 1.1 it goes into the map pack (tools/refpack.py) and
+ * the host tests, not into the firmware (the link audit refuses air_fields) */
 extern const air_field_t air_fields[];
 extern const air_freq_t air_freqs[];
 extern const uint16_t air_field_count;
+
+/* The airfields the radio uses: the map pack's (storage/ref_pack.h), UI task only; 0 without a map pack */
+uint16_t air_nfields(void);
+/* Airfield i copied out of the pack, its strings terminated; one static copy (never hold two), NULL past the end */
+const air_field_t *air_get(uint16_t i);
+/* Frequency k of the pack's table (air_field_t.first + n), false past its end */
+bool air_freq_get(uint32_t k, air_freq_t *f);
 
 /* Where we are, for the order: ok false = no position (the table's order) */
 typedef struct {

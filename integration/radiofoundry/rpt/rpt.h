@@ -53,9 +53,31 @@ typedef struct {
 	char source[16];		/* "RadioID.net", "own list", "own+RadioID.net", "sample" */
 } rpt_info_t;
 
-/* The generated table (ui/rpt_data.c), sorted by RX frequency */
+/* The table tools/rpt_list.py generates (build/rpt/rpt_data.c), sorted by RX frequency: since 1.1 it goes into the
+ * map pack (tools/refpack.py) and the host tests, not into the firmware (the link audit refuses rpt_table) */
 extern const rpt_info_t rpt_info;
 extern const rpt_entry_t rpt_table[];
+
+/* The list the radio uses: the map pack's repeater sections (storage/ref_pack.h), UI task only. No map pack, or one
+ * without repeaters: 0 entries ("load the map pack") */
+uint16_t rpt_count(void);
+/* Entry i copied out of the pack, its strings terminated whatever the pack holds; one static copy (the next call
+ * overwrites it: never hold two), NULL past the end */
+const rpt_entry_t *rpt_get(uint16_t i);
+/* The pack's repeater info (count, sample, date, source), strings terminated; false (zeroed) without it */
+bool rpt_info_get(rpt_info_t *out);
+bool rpt_sample(void);		/* the pack's list is the fictional sample (rpt_info_t.sample) */
+/* Repeater i listens or transmits within half a 12.5 kHz channel of hz: the TX refusal (cross-band, DOTA) */
+bool rpt_entry_near(const rpt_entry_t *e, uint32_t hz);
+
+/* The TX refusal set in program flash (generated rpt_freqs.c, docs/mappack-design.md C.7): every listed repeater's
+ * output and input (frequencies only), whatever map pack the radio has. True when a repeater of the set transmits or
+ * listens within +-6,250 Hz of hz, exactly as rpt_entry_near over the rows it was made from */
+bool rpt_freq_listed(uint32_t hz);
+#define RPT_FQ_VHF_BASE	135993750u	/* the steps' zero: 136 MHz - 6,250 Hz (an entry on the rim still matches) */
+#define RPT_FQ_UHF_BASE	399993750u
+extern const uint16_t rpt_fq_vhf[], rpt_fq_uhf[];	/* sorted steps of RPT_STEP_HZ above the base */
+extern const uint16_t rpt_fq_vhf_n, rpt_fq_uhf_n;
 
 /* Where we are, for the order: ok false = no position (the table's order) */
 typedef struct {

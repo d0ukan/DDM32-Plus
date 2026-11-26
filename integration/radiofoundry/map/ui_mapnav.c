@@ -48,7 +48,9 @@ static void __attribute__((noinline)) auto_check(bool fix, int32_t lat, int32_t 
 	uint16_t i = arpt_check(&arpt, fix, lat, lon, v->ch.mode == RADIO_MODE_DMR, in_band, v->ch.rx_hz, now);
 	if (i == RPT_NONE)
 		return;
-	const rpt_entry_t *e = &rpt_table[i];
+	const rpt_entry_t *e = rpt_get(i);
+	if (e == NULL)
+		return;
 	char title[48];
 	sbuf_t b;
 	uint32_t m;
@@ -74,6 +76,10 @@ bool ui_mapnav_auto_on(void)
 void ui_mapnav_auto_toggle(void)
 {
 	ui_position_t p;
+	if (!arpt.on && rpt_count() == 0u) {	/* no map pack (or one without repeaters): stays off */
+		ui_toast(TR("No repeater data: load the map pack"));
+		return;
+	}
 	arpt_set(&arpt, !arpt.on, ui_st.now_ms);
 	offered = RPT_NONE;
 	if (ui_st.banner.kind == UI_BANNER_RPT)
@@ -84,7 +90,7 @@ void ui_mapnav_auto_toggle(void)
 
 void ui_mapnav_banner_open(void)
 {
-	if (offered < rpt_info.count)
+	if (offered < rpt_count())
 		ui_rpt_tune(offered);
 }
 #endif

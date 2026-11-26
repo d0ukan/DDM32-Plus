@@ -8,8 +8,10 @@
 #define PLUS_MAP_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
+#define MAP_NAME_MAX		24u	/* a province or district name with its NUL (the longest is 16 characters) */
 #define MAP_ZOOMS		9u	/* 0: all of Turkey .. 4: one province .. 6: a few districts .. 8: a town (~40 m a pixel) */
 #define MAP_NONE		(-1)	/* no province */
 #define MAP_DISTRICT_NONE	0xFFFFu	/* no district */
@@ -42,6 +44,9 @@ void map_unproject(const map_view_t *v, int x, int y, int32_t *lat_e7, int32_t *
 /* Cohen-Sutherland: clips the segment to [x0r, x1r] x [y0r, y1r] (inclusive); false when nothing is left */
 bool map_clip(int32_t *x0, int32_t *y0, int32_t *x1, int32_t *y1, int32_t x0r, int32_t y0r, int32_t x1r, int32_t y1r);
 
+/* The map pack (storage/ref_pack.h) holds the map's sections: without it nothing below draws or finds anything
+ * (map_draw 0, map_province_at MAP_NONE, no districts, names ""). UI task only, like every map pack reader */
+bool map_ok(void);
 /* Every province border inside the view through fn; consecutive points on the same pixel are merged. Returns the
  * number of segments handed out */
 uint32_t map_draw(const map_view_t *v, map_line_fn fn, void *ctx);
@@ -53,7 +58,8 @@ int map_province_at(int32_t lat_e7, int32_t lon_e7);
 /* As map_province_at, else the province whose border is nearest within max_m metres (coasts and borders are
  * simplified: a GPS fix on the shore may fall just outside). max_m is capped at 50 km */
 int map_province_near(int32_t lat_e7, int32_t lon_e7, uint32_t max_m);
-const char *map_province_name(uint8_t province);	/* TURKEY_MAP_CHARSET */
+/* The name into out (TURKEY_MAP_CHARSET, cut to n - 1, always terminated; "" for none) */
+void map_province_name(uint8_t province, char *out, size_t n);
 uint8_t map_province_plate(uint8_t province);		/* 1..81 */
 
 /* Districts (ilce, turkey_district_data.h: GeoNames, CC BY 4.0): 973 points, the district centre and its name
@@ -61,9 +67,10 @@ uint8_t map_province_plate(uint8_t province);		/* 1..81 */
 typedef void (*map_point_fn)(void *ctx, int x, int y, uint16_t district, const char *name);
 uint16_t map_district_count(void);
 uint8_t map_district_province(uint16_t d);		/* 0..80 (plate - 1), 0xFF: no such district */
-const char *map_district_name(uint16_t d);		/* "" for no such district */
+void map_district_name(uint16_t d, char *out, size_t n);	/* as map_province_name; "" for no such district */
 void map_district_pos(uint16_t d, int32_t *lat_e7, int32_t *lon_e7);
-/* Every district centre inside the view through fn (provinces outside it are skipped whole). Returns how many */
+/* Every district centre inside the view through fn (provinces outside it are skipped whole); the name fn gets is a
+ * buffer valid until fn returns. Returns how many */
 uint16_t map_districts_draw(const map_view_t *v, map_point_fn fn, void *ctx);
 /* The district whose centre is nearest, within max_m metres (capped at 100 km), only in that province when
  * province >= 0; MAP_DISTRICT_NONE when none is that close */

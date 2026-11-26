@@ -47,13 +47,17 @@ static char digits[9];		/* a number being typed on the focused row */
 static uint32_t shown_serial;
 static uint16_t est_s, est_ch;	/* the sender's estimate, made when the form changes */
 
-/* What (R_WHAT): the kinds, then (CONFIG_DATAPACK) the two pack types */
-#define WHATS	(4u + 2u * CONFIG_DATAPACK)
+/* What (R_WHAT): the kinds, then (CONFIG_DATAPACK) the three pack types */
+#if CONFIG_DATAPACK
+#define WHATS	(4u + DPK_TYPES)
+#else
+#define WHATS	4u
+#endif
 static uint8_t what_i(void)
 {
 #if CONFIG_DATAPACK
 	if (rq.kind == DOTA_KIND_PACK)
-		return (uint8_t)(3u + rq.pack);	/* DPK_RADIOID 4, DPK_AIR 5 */
+		return (uint8_t)(3u + rq.pack);	/* DPK_RADIOID 4, DPK_AIR 5, DPK_REF 6 */
 #endif
 	return rq.kind;
 }
@@ -158,7 +162,7 @@ static void row_text(uint8_t r, bool f, sbuf_t *b, const char **label)
 	static const char *const what[] = { TRN("One channel"), TRN("Selected channels"), TRN("A zone"),
 					    TRN("DOTA Clone (all)"),
 #if CONFIG_DATAPACK
-					    TRN("RadioID pack"), TRN("Air band pack"),
+					    TRN("RadioID pack"), TRN("Air band pack"), TRN("Map pack"),
 #endif
 	};
 	/* By R_*; R_ITEM and R_GO name themselves below */
@@ -281,6 +285,8 @@ static void result_text(const dota_view_t *v, sbuf_t *b)
 		    v->why == DOTA_R_WAIT || v->why == DOTA_R_DECLINED ? TRN("Not accepted") : TRN("Codeplug full");
 	else if (v->result == DOTA_RES_PEER_STOPPED)
 		t = sending() ? TRN("Receiver stopped") : text[0];
+	if (!sending() && v->pack_bad && v->result != DOTA_RES_DONE)
+		t = TRN("Bad pack");	/* a map pack whose CRC or structure did not check: the old one stays */
 	char what[24];	/* "1024 channels, 68 zones" */
 	sbuf_t w;
 	sb_init(&w, what, sizeof what);
@@ -374,7 +380,8 @@ static void dota_draw(void)
 			result_text(&rv, &b);
 			l.hint = TR("Back");
 		} else {
-			sb_str(&b, rv.phase == DOTA_P_WAIT ? TR("Waiting for sender") : rv.phase == DOTA_P_PREP ? TR("Preparing") :
+			sb_str(&b, rv.pack_other && rv.phase == DOTA_P_WAIT ? TR("Map pack for another version") :
+				   rv.phase == DOTA_P_WAIT ? TR("Waiting for sender") : rv.phase == DOTA_P_PREP ? TR("Preparing") :
 				   rv.phase == DOTA_P_WRITING ? TR("Writing") : rv.keyed ? TR("On air") :
 				   rv.asking ? TR("Waiting for answer") : "");
 			l.hint = rv.phase == DOTA_P_WRITING ? "" : TR("Back stop");

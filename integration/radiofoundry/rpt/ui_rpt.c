@@ -34,6 +34,7 @@
 #include "radio/radio.h"
 #include "aprs/aprs.h"
 #include "ui/rpt.h"
+#include "storage/ref_pack.h"
 #if CONFIG_RPT_PROV
 #include <string.h>
 #include "ui/map.h"
@@ -122,6 +123,8 @@ static void __attribute__((noinline)) row(int y, int h, const rpt_entry_t *e, bo
 	if (focus)
 		gfx_fill(0, y, w, h, ui_col.focus);
 	color_t fg = focus ? ui_col.focus_fg : ui_col.fg, dim = focus ? ui_col.focus_fg : ui_col.dim;
+	if (e == NULL)
+		return;
 	gfx_text(m, 2, y + 1, e->name, fg);
 	sb_init(&b, buf, sizeof buf);
 	sb_way(&b, e, here, lat, lon, false);
@@ -138,17 +141,18 @@ static void __attribute__((noinline)) row(int y, int h, const rpt_entry_t *e, bo
 static void __attribute__((noinline)) draw_list(int y, const rpt_here_t *h, int32_t lat, int32_t lon)
 {
 	const font_t *s = ui_layout.small, *m = ui_layout.medium;
-	gfx_text(s, 0, y, rpt_info.sample ? TR("Sample list: not real repeaters")
+	bool sample = rpt_sample();
+	gfx_text(s, 0, y, sample ? TR("Sample list: not real repeaters")
 				 : h->ok ? TR("Nearest first") : TR("No position: sorted by frequency"),
-		 rpt_info.sample || !h->ok ? ui_col.warn : ui_col.dim);
+		 sample || !h->ok ? ui_col.warn : ui_col.dim);
 	y += s->h + 3;
 	int rh = m->h + s->h + 4;
 	int rows = (ui_layout.hint_y - y) / rh;
 	if (rows < 1)
 		rows = 1;
 	/* Keep the picked row on the page: the top row moves only when the pick would leave it */
-	uint16_t rs = rpt_rank_in(h, sel, FILT), rt = top < rpt_info.count ? rpt_rank_in(h, top, FILT) : 0;
-	if (top >= rpt_info.count || rs < rt) {
+	uint16_t n = rpt_count(), rs = rpt_rank_in(h, sel, FILT), rt = top < n ? rpt_rank_in(h, top, FILT) : 0;
+	if (top >= n || rs < rt) {
 		top = sel;
 	} else if (rs >= rt + (uint16_t)rows) {
 		top = sel;
@@ -161,7 +165,7 @@ static void __attribute__((noinline)) draw_list(int y, const rpt_here_t *h, int3
 	}
 	uint16_t i = top;
 	for (int k = 0; k < rows && i != RPT_NONE; k++) {
-		row(y, rh, &rpt_table[i], i == sel, h, lat, lon);
+		row(y, rh, rpt_get(i), i == sel, h, lat, lon);	/* the one copy, used before the next walk */
 		y += rh;
 		i = rpt_next_in(h, i, 1, FILT);
 	}
@@ -184,8 +188,9 @@ static void grp_scan(void)
 {
 	memset(present, 0, sizeof present);
 	present[0] = 1u;	/* All */
-	for (uint16_t i = 0; i < rpt_info.count; i++) {
-		uint8_t p = rpt_table[i].prov;
+	for (uint16_t i = 0, n = rpt_count(); i < n; i++) {
+		ref_key_t k;
+		uint8_t p = ref_key(REF_S_RKEY, i, &k) ? k.prov : (uint8_t)RPT_PROV_UNKNOWN;
 		uint8_t g = p >= 1u && p <= RPT_PROVS ? p : (uint8_t)GRP_UNKNOWN;
 		present[g >> 3] |= (uint8_t)(1u << (g & 7u));
 	}
@@ -221,7 +226,9 @@ static void grp_item(uint16_t r, ui_item_t *it)
 	} else {
 		sb_u32(&b, g, 2);
 		sb_chr(&b, ' ');
-		sb_str(&b, map_province_name((uint8_t)(g - 1u)));
+		char name[MAP_NAME_MAX];
+		map_province_name((uint8_t)(g - 1u), name, sizeof name);
+		sb_str(&b, name);
 	}
 	sb_str(&b, " (");
 	sb_u32(&b, rpt_count_in(grp_filter(g)), 1);
@@ -231,7 +238,7 @@ static void grp_item(uint16_t r, ui_item_t *it)
 static void __attribute__((noinline)) draw_groups(void)
 {
 	ui_list_t l = {
-		.prefix = TR("Repeaters"), .header = rpt_info.sample ? TR("Sample list: not real repeaters") : NULL,
+		.prefix = TR("Repeaters"), .header = rpt_sample() ? TR("Sample list: not real repeaters") : NULL,
 		.count = grp_count(), .focus = gfocus, .top = &gtop, .item = grp_item,
 		.hint = TR("^v pick  OK list  # nearest"),
 	};
@@ -241,7 +248,13 @@ static void __attribute__((noinline)) draw_groups(void)
 /* The province list's title: the province's name, "Unknown", or nothing for All */
 static const char *filt_name(void)
 {
-	return filt == RPT_PROV_ALL ? "" : filt == RPT_PROV_UNKNOWN ? TR("Unknown") : map_province_name((uint8_t)(filt - 1u));
+	static char name[MAP_NAME_MAX];
+	if (filt == RPT_PROV_ALL)
+		return "";
+	if (filt == RPT_PROV_UNKNOWN)
+		return TR("Unknown");
+	map_province_name((uint8_t)(filt - 1u), name, sizeof name);
+	return name;
 }
 #endif
 
@@ -326,7 +339,7 @@ static void rpt_draw(void)
 	rpt_here_t h;
 	int32_t lat = 0, lon = 0;
 #if CONFIG_RPT_PROV
-	if (groups && rpt_info.count != 0) {
+	if (groups && rpt_count() != 0) {
 		draw_groups();
 		return;
 	}
@@ -337,16 +350,17 @@ static void rpt_draw(void)
 	gfx_clear(ui_col.bg);
 	int y = ui_draw_top(ui_view(), &ui_st, TR("Repeaters"), name) + 2;
 	here_now(&h, &lat, &lon);
-	if (rpt_info.count == 0) {
-		gfx_text(ui_layout.small, 0, y, TR("No repeaters in this build"), ui_col.warn);
+	if (rpt_count() == 0) {	/* no map pack, or one without repeaters */
+		gfx_text(ui_layout.small, 0, y, TR("No repeater data: load the map pack"), ui_col.warn);
 		ui_draw_bottom(&ui_st, TR("Back"));
 		ui_draw_banner(&ui_st);
 		return;
 	}
-	if (sel >= rpt_info.count)
+	if (sel >= rpt_count())
 		sel = rpt_next_in(&h, RPT_NONE, 1, FILT);
-	if (info)
-		draw_info(y, &rpt_table[sel], &h, lat, lon);
+	const rpt_entry_t *e = info ? rpt_get(sel) : NULL;
+	if (e != NULL)
+		draw_info(y, e, &h, lat, lon);
 	else
 		draw_list(y, &h, lat, lon);
 #if RPT_ADD
@@ -628,7 +642,7 @@ static bool rpt_key(const input_event_t *ev)
 	bool press = ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_REPEAT;
 	int dir = !press ? 0 : ev->action == ACT_ENC_STEP ? (ev->value > 0 ? 1 : -1) : ev->action == ACT_NAV_DOWN ? 1 :
 		ev->action == ACT_NAV_UP ? -1 : 0;
-	if (rpt_info.count == 0)
+	if (rpt_count() == 0)
 		return false;
 #if CONFIG_RPT_PROV
 	if (groups)
@@ -638,15 +652,15 @@ static bool rpt_key(const input_event_t *ev)
 		rpt_here_t h;
 		int32_t lat, lon;
 		here_now(&h, &lat, &lon);
-		uint16_t n = sel < rpt_info.count ? rpt_next_in(&h, sel, dir, FILT) : RPT_NONE;
+		uint16_t n = sel < rpt_count() ? rpt_next_in(&h, sel, dir, FILT) : RPT_NONE;
 		sel = n != RPT_NONE ? n : rpt_next_in(&h, RPT_NONE, dir, FILT);	/* round from the end to the start */
 		ui_dirty();
 		return true;
 	}
 	if (ev->action == ACT_SELECT && ev->gesture == GESTURE_PRESS) {
-		if (sel < rpt_info.count) {
-			if (info)
-				tune(&rpt_table[sel]);
+		if (sel < rpt_count()) {
+			if (info && rpt_get(sel) != NULL)
+				tune(rpt_get(sel));
 			else
 				info = true;
 		}
@@ -655,9 +669,10 @@ static bool rpt_key(const input_event_t *ev)
 	}
 #if RPT_ADD
 	if (ev->action == ACT_QUICK && ev->gesture == GESTURE_PRESS) {	/* * (ui_app.c leaves it to this screen) */
-		if (sel >= rpt_info.count)
+		const rpt_entry_t *e = sel < rpt_count() ? rpt_get(sel) : NULL;
+		if (e == NULL)
 			return false;	/* nothing picked: quick settings, as everywhere */
-		add_channel(&rpt_table[sel]);
+		add_channel(e);
 		return true;
 	}
 #endif
@@ -699,7 +714,7 @@ static void rpt_enter(void)
 	gfocus = 0;
 	gtop = 0;
 #endif
-	if (arg != 0 && arg <= rpt_info.count) {
+	if (arg != 0 && arg <= rpt_count()) {
 		sel = (uint16_t)(arg - 1u);
 		info = true;
 	}
@@ -708,14 +723,15 @@ static void rpt_enter(void)
 
 void ui_rpt_open(uint16_t i)
 {
-	if (i < rpt_info.count)
+	if (i < rpt_count())
 		ui_push(SCR_REPEATERS, (uint16_t)(i + 1u));
 }
 
 void ui_rpt_tune(uint16_t i)
 {
-	if (i < rpt_info.count)
-		tune(&rpt_table[i]);
+	const rpt_entry_t *e = i < rpt_count() ? rpt_get(i) : NULL;
+	if (e != NULL)
+		tune(e);
 }
 
 const ui_scr_def_t ui_rpt_screen = {
