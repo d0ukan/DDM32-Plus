@@ -175,7 +175,7 @@ export component HelpPage inherits Page {
 }
 
 // a section of the data packs page: its title, its words, its controls
-component Section inherits Card {
+export component Section inherits Card {
     in property <string> title;
     in property <string> text;
     min-height: sl.preferred-height;
@@ -267,6 +267,15 @@ export component PacksPage inherits Page {
                 if Packs.air-result != "" : Label { text: Packs.air-result; font-size: Theme.font-small; }
             }
             Section {
+                title: Tr.t(Tr.lang, "pack_map_title");
+                text: Tr.t(Tr.lang, "pack_map_text");
+                HorizontalLayout {
+                    alignment: start;
+                    Button { text: Tr.t(Tr.lang, "pack_load_map"); enabled: !App.busy && !Packs.working; clicked => { Packs.load-map(); } }
+                }
+                Label { text: Packs.map-result; font-size: Theme.font-small; }
+            }
+            Section {
                 title: Tr.t(Tr.lang, "pack_write_title");
                 text: Tr.t(Tr.lang, "pack_write_text") + "\n" + Tr.t(Tr.lang, "packs_note");
                 Label { text: Packs.chosen-text; font-size: Theme.font-small; }
@@ -277,6 +286,11 @@ export component PacksPage inherits Page {
                         text: Tr.t(Tr.lang, "pack_write_radioid"); kind: "primary";
                         enabled: Packs.radioid-pack && root.radio-ok && Radio.disclaimer-ok && !Packs.working;
                         clicked => { Packs.write-radioid(); }
+                    }
+                    Button {
+                        text: Tr.t(Tr.lang, "pack_write_map"); kind: "primary";
+                        enabled: Packs.map-pack && root.radio-ok && Radio.disclaimer-ok && !Packs.working;
+                        clicked => { Packs.write-map(); }
                     }
                     Button {
                         text: Tr.t(Tr.lang, "pack_write_air"); kind: "primary";

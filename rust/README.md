@@ -11,7 +11,7 @@ Licence: GPL-3.0-or-later (dependencies: [THIRD_PARTY.md](THIRD_PARTY.md)).
 
 ```
 rust/
-  Cargo.toml                 workspace (version 3.1.0)
+  Cargo.toml                 workspace (version 3.2.0)
   crates/ddm32-core/         everything that is not the window
     src/crypto/ed25519.rs        Ed25519 verify (a port of the RFC 8032 reference code, as the C# and Python ones)
     src/releases/                signed manifest checks, version order and labels, release list, downloads, local folder
@@ -98,7 +98,7 @@ controls under the shade take no focus or click and read as disabled (`widgets.s
 
 ## Versions and the update question
 
-The window's title and Home's bottom bar say "Program 3.1.0 · Radio firmware 1.0.1 (from your last install)"
+The window's title and Home's bottom bar say "Program 3.2.0 · Radio firmware 1.0.1 (from your last install)"
 ("Telsiz firmware" in Turkish); About lists both numbers separately. What the radio runs is what the program knows:
 
 - After every **verified** radio write the program records what the radio now runs in `settings.json`: the C#
@@ -171,6 +171,17 @@ Since v1.1.0 (candidate) the window has what a normal user used in the C# 2.0.0 
   passes the screen line as the C# program does) and **Choose a .dpk file...**. Countries and names are the C# keys
   (`pack_countries`, `pack_radioid_name`, `pack_air_name`); packs are saved as `packs/radioid-DATE.dpk` /
   `air-DATE.dpk` as the C# program names them.
+- **Map pack** (3.2.0, `src/packs.rs`, `src/mappack.rs`, `ddm32-core/src/datapacks/refpack.rs`;
+  `docs/mappack-design.md` in the firmware tree): pack type 3 ("ref" in the tool's JSON, "Harita paketi" on screen) in
+  0xEA0000 / 0xEE0000 (64 KB each); RadioID slots are 192 KB since (a RadioID pack over 196,544 bytes is refused for
+  every firmware). The programmer applies the firmware's structural check before writing and judges the radio's slots
+  as the firmware does (valid / damaged / "for another version"); it never overwrites the slot the running firmware
+  uses and writes the new pack with a sequence above every checked header. The header's `flags` (the version hint) is
+  carried from the .dpk. The update wizard downloads the release's signed `ref_pack` (size and SHA-256 from the
+  manifest) and writes it: before the firmware over an installed DDM32 Plus, after it from the factory firmware. A pack
+  the user built (header tag not "build VERSION") is never replaced without a choice: rebuild it for this version (the
+  release's sections with the repeaters of both packs), keep it, or use the release's. The data pack tool's
+  `update-ref` command does this (`ASK` and no write without `--choice`).
 - **My channels** (`src/channels.rs`): a view-only warning, a zone filter and a mode filter (each a small picker),
   **All columns** (every field but the two made from others; the table then scrolls sideways), a sort by any column
   title (numbers as numbers, again for the other way round), a double click on a zone shows its channels, **Open

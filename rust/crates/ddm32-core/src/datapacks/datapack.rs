@@ -15,6 +15,10 @@ use std::collections::BTreeMap;
 pub const MAGIC: &[u8; 4] = b"DPK1";
 pub const RADIO_ID: u8 = 1;
 pub const AIR: u8 = 2;
+/// The map / reference pack (docs/mappack-design.md, `DPK_REF`): map, districts, repeaters, airfields.
+pub const REF: u8 = 3;
+/// The largest RadioID payload firmware 1.1 takes (192 KB slot - header; docs/mappack-design.md B.1, B.4 N2).
+pub const RADIO_ID_PAYLOAD_MAX: usize = 0x30000 - HEADER_SIZE;
 pub const HEADER_SIZE: usize = 64;
 pub const SECTOR: usize = 4096;
 /// 6-bit characters a record's text, a multiple of 4.
@@ -40,6 +44,9 @@ pub struct PackHeader {
     pub seq: u32,
     pub length: u32,
     pub crc: u32,
+    /// Header bytes 6-7: 0 for types 1 and 2; for type 3 the version hint (bits 0-7 the directory version, bits 8-15
+    /// the low byte of the map coordinate CRC), 0 = no hint (docs/mappack-design.md B.2).
+    pub flags: u16,
     pub date: String,
     pub name: String,
     pub tag: String,
@@ -53,23 +60,40 @@ pub struct PackSector {
     pub data: Vec<u8>,
 }
 
+/// Layout 2 (docs/mappack-design.md A.1): RadioID 192 KB (also towards a 1.0.x radio: the slot starts are the same,
+/// the smaller limit is safe for both), map pack 64 KB, air band 16 KB.
 pub fn slot_size(ptype: u8) -> Result<usize, PackError> {
     match ptype {
-        RADIO_ID => Ok(0x40000),
+        RADIO_ID => Ok(0x30000),
+        REF => Ok(0x10000),
         AIR => Ok(0x4000),
         _ => Err(perr(format!("pack type {ptype}"))),
     }
 }
 
-/// datapack.SLOT_ADDR: RadioID 0xE70000 / 0xEB0000, air band 0xEF0000 / 0xEF4000.
+/// Layout 2: RadioID 0xE70000 / 0xEB0000, map pack 0xEA0000 / 0xEE0000, air band 0xEF0000 / 0xEF4000.
 pub fn slot_address(ptype: u8, slot: usize) -> Result<u64, PackError> {
     if slot > 1 {
         return Err(perr(format!("slot {slot}")));
     }
     match ptype {
         RADIO_ID => Ok(if slot == 0 { 0xE70000 } else { 0xEB0000 }),
+        REF => Ok(if slot == 0 { 0xEA0000 } else { 0xEE0000 }),
         AIR => Ok(if slot == 0 { 0xEF0000 } else { 0xEF4000 }),
         _ => Err(perr(format!("pack type {ptype}"))),
+    }
+}
+
+/// The pack types this program knows, in the order it lists them.
+pub const TYPES: [u8; 3] = [RADIO_ID, REF, AIR];
+
+/// The three-way type name of the tool's JSON ("radioid" / "ref" / "air"; docs/mappack-design.md F.5).
+pub fn type_name(ptype: u8) -> &'static str {
+    match ptype {
+        RADIO_ID => "radioid",
+        REF => "ref",
+        AIR => "air",
+        _ => "unknown",
     }
 }
 
@@ -82,8 +106,17 @@ fn le32(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 
-/// The header (64 bytes): datapack.header(ptype, payload, date, name, seq, tag).
-pub fn header(ptype: u8, payload: &[u8], date: &str, name: &str, seq: u32, tag: &str) -> Result<Vec<u8>, PackError> {
+/// The header (64 bytes): datapack.header(ptype, payload, date, name, seq, tag), with `flags` in bytes 6-7 (0 for
+/// types 1 and 2; a map pack's version hint is carried from its .dpk, docs/mappack-design.md S-A).
+pub fn header(
+    ptype: u8,
+    payload: &[u8],
+    date: &str,
+    name: &str,
+    seq: u32,
+    tag: &str,
+    flags: u16,
+) -> Result<Vec<u8>, PackError> {
     if date.chars().count() != 8 || !date.chars().all(|c| c.is_ascii_digit()) {
         return Err(perr(format!("date '{date}': YYYYMMDD")));
     }
@@ -95,6 +128,7 @@ pub fn header(ptype: u8, payload: &[u8], date: &str, name: &str, seq: u32, tag: 
     h[..4].copy_from_slice(MAGIC);
     h[4] = ptype;
     h[5] = 1; // format 1
+    h[6..8].copy_from_slice(&flags.to_le_bytes());
     h[8..12].copy_from_slice(&seq.to_le_bytes());
     h[12..16].copy_from_slice(&(payload.len() as u32).to_le_bytes());
     h[16..20].copy_from_slice(&crc32(payload, 0).to_le_bytes());
@@ -110,9 +144,17 @@ pub fn header(ptype: u8, payload: &[u8], date: &str, name: &str, seq: u32, tag: 
     Ok(h)
 }
 
-/// The slot image of a new pack: the header with sequence seq, then the payload.
-pub fn image(ptype: u8, payload: &[u8], date: &str, name: &str, seq: u32, tag: &str) -> Result<Vec<u8>, PackError> {
-    let mut v = header(ptype, payload, date, name, seq, tag)?;
+/// The slot image of a new pack: the header with sequence seq (and flags), then the payload.
+pub fn image(
+    ptype: u8,
+    payload: &[u8],
+    date: &str,
+    name: &str,
+    seq: u32,
+    tag: &str,
+    flags: u16,
+) -> Result<Vec<u8>, PackError> {
+    let mut v = header(ptype, payload, date, name, seq, tag, flags)?;
     v.extend_from_slice(payload);
     Ok(v)
 }
@@ -132,6 +174,7 @@ pub fn parse(image: &[u8]) -> (Option<PackHeader>, Vec<u8>) {
         seq: le32(&image[8..]),
         length,
         crc,
+        flags: u16::from_le_bytes([image[6], image[7]]),
         date: ascii_decode(&image[20..28]),
         name: ascii_decode(rstrip_nul(&image[28..44])),
         tag: ascii_decode(rstrip_nul(&image[44..60])),
@@ -315,10 +358,13 @@ pub fn info(image: &[u8]) -> String {
     if h.ptype == AIR && payload.len() >= 4 {
         lines.push(format!("{} airfields", u16::from_le_bytes([payload[0], payload[1]])));
     }
+    if h.ptype == REF {
+        lines.push(super::refpack::info(&payload, h.flags));
+    }
     lines.join("\n")
 }
 
-/// How many entries a pack's payload holds (IDs or airfields), or None.
+/// How many entries a pack's payload holds (IDs or airfields), or None (also for a map pack: it has sections).
 pub fn count(h: &PackHeader, payload: &[u8]) -> Option<usize> {
     if h.ptype == RADIO_ID && payload.len() >= 8 {
         Some(le32(payload) as usize)

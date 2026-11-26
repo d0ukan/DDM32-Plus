@@ -7,7 +7,7 @@ import { Tr, Label, Muted, Title, Heading, Button, Card, Notice, Check, Choice, 
 import { MenuBar } from "menubar.slint";
 import { Radio, Fact, TableRow, PortRow, ZoneRow, HealthPage, LivePage, ChannelsPage, SearchLogPage, DisclaimerGate } from "radio_pages.slint";
 import { App, Packs, VersionRow, BackupRow, VerRow, HelpItem } from "state.slint";
-import { Page, ProgramUpdate, VersionsPage, HelpPage, PacksPage } from "pages.slint";
+import { Page, ProgramUpdate, VersionsPage, HelpPage, PacksPage, Section } from "pages.slint";
 export { Theme, Tr, Radio, Fact, TableRow, PortRow, ZoneRow, Modal, App, Packs, VersionRow, BackupRow, VerRow, HelpItem }
 
 
@@ -183,6 +183,22 @@ component Wizard inherits Page {
                     Notice { text: Tr.t(Tr.lang, "none_warning"); kind: "danger"; }
                     Check { text: Tr.t(Tr.lang, "none_understood"); checked <=> App.understood; }
                 }
+                // over DDM32 Plus the map pack goes first (H.3): 1.0.x ignores it, a failed install leaves a working radio
+                if App.map-first : VerticalLayout {
+                if App.map-available : Section {
+                    title: Tr.t(Tr.lang, "map_title");
+                    text: Tr.t(Tr.lang, App.map-first && App.step == 1 ? "map_first_text" : "map_after_text");
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            text: Tr.t(Tr.lang, "map_write"); kind: App.map-done ? "secondary" : "primary";
+                            enabled: !App.busy && App.radio-access && !Radio.slog-running && !Radio.live-running && Radio.disclaimer-ok;
+                            clicked => { App.map-write(); }
+                        }
+                    }
+                    if App.map-text != "" : Notice { text: App.map-text; kind: App.map-kind; }
+                }
+                }
             }
             // 2: the backup (a radio step: one button, the radio switched off and on)
             if App.step == 2 : VerticalLayout {
@@ -225,6 +241,22 @@ component Wizard inherits Page {
                 spacing: Theme.gap;
                 alignment: start;
                 Notice { text: Tr.t(Tr.lang, "done_text"); kind: "success"; big: true; }
+                // from the factory firmware the pack follows the firmware (H.3); over DDM32 Plus a pack not yet written
+                if !App.map-first || !App.map-done : VerticalLayout {
+                if App.map-available : Section {
+                    title: Tr.t(Tr.lang, "map_title");
+                    text: Tr.t(Tr.lang, App.map-first && App.step == 1 ? "map_first_text" : "map_after_text");
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            text: Tr.t(Tr.lang, "map_write"); kind: App.map-done ? "secondary" : "primary";
+                            enabled: !App.busy && App.radio-access && !Radio.slog-running && !Radio.live-running && Radio.disclaimer-ok;
+                            clicked => { App.map-write(); }
+                        }
+                    }
+                    if App.map-text != "" : Notice { text: App.map-text; kind: App.map-kind; }
+                }
+                }
             }
             if App.busy || App.progress > 0 : VerticalLayout {
                 spacing: 6px;
@@ -463,7 +495,7 @@ export component AppWindow inherits Window {
     default-font-size: Theme.font;
     // a dialog is open: the controls under it take no keyboard focus and no click (widgets.slint Modal)
     property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open || App.disc-open || App.test-confirm-open || App.force-close-open
-        || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || Radio.zone-picker-open;
+        || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || Radio.zone-picker-open || App.map-ask-open;
     changed modal => { Modal.open = self.modal; }
 
     VerticalLayout {
@@ -471,7 +503,7 @@ export component AppWindow inherits Window {
         spacing: 0;
         if App.page != 6 : MenuBar {
             radio-locked: App.menu-radio-locked || App.confirm-open || App.disc-open || App.test-confirm-open
-                || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open;
+                || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || App.map-ask-open;
             developer: App.developer;
             lang: Tr.lang;
             cable-text: Radio.access ? Radio.port-head : "";
@@ -662,6 +694,29 @@ export component AppWindow inherits Window {
         yes: Tr.t(Tr.lang, "pack_confirm_yes");
         no-clicked => { Packs.write-confirm-open = false; }
         yes-clicked => { Packs.write-yes(); }
+    }
+
+    // the map pack step found a pack the user built: never replaced without a choice (E.3 S-B); no choice writes nothing
+    if App.map-ask-open : Rectangle {
+        background: Theme.scrim;
+        TouchArea {}
+        Card {
+            width: min(parent.width - 48px, 600px);
+            height: min(mv.preferred-height, parent.height - 32px);
+            mv := VerticalLayout {
+                padding: Theme.pad * 1.25; spacing: Theme.gap * 1.5;
+                Title { text: Tr.t(Tr.lang, "map_ask_title"); }
+                Label { text: App.map-ask-text; }
+                if App.map-ask-rebuild : Button { text: Tr.t(Tr.lang, "map_ask_rebuild"); kind: "primary"; in-dialog: true; clicked => { App.map-choose("rebuild"); } }
+                if App.map-ask-keep : Button { text: Tr.t(Tr.lang, "map_ask_keep"); in-dialog: true; clicked => { App.map-choose("keep"); } }
+                Muted { text: Tr.t(Tr.lang, "map_ask_release_warning"); }
+                Button { text: Tr.t(Tr.lang, "map_ask_release"); kind: "danger"; in-dialog: true; clicked => { App.map-choose("release"); } }
+                HorizontalLayout {
+                    spacing: Theme.gap; alignment: end;
+                    Button { text: Tr.t(Tr.lang, "map_ask_none"); in-dialog: true; default-focus: true; clicked => { App.map-ask-open = false; } }
+                }
+            }
+        }
     }
 
     // my channels: the zone or mode filter (all, or one zone's channels / one mode)

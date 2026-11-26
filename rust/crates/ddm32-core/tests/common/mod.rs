@@ -955,3 +955,105 @@ impl RawSerial for NullPort {
 pub fn py(v: &Value) -> Py {
     Py::from_json(v)
 }
+
+// ---- map pack (type 3) fixtures: a tiny pack that passes the firmware's structural check -------------------------
+
+pub const COORD: u32 = 0x1A2B_3C4D;
+
+/// One repeater record (rpt_entry_t, 44 bytes): position, RX, mode, callsign, province.
+pub fn rpt_rec(lat: i32, lon: i32, rx: u32, mode: u8, name: &str, prov: u8) -> Vec<u8> {
+    let mut r = vec![0u8; 44];
+    r[0..4].copy_from_slice(&lat.to_le_bytes());
+    r[4..8].copy_from_slice(&lon.to_le_bytes());
+    r[8..12].copy_from_slice(&rx.to_le_bytes());
+    r[16] = mode;
+    let n = name.as_bytes();
+    r[18..18 + n.len().min(10)].copy_from_slice(&n[..n.len().min(10)]);
+    r[42] = prov;
+    r
+}
+
+pub fn rpt_info_rec(count: u32, source: &str) -> Vec<u8> {
+    let mut r = vec![0u8; 32];
+    r[0..4].copy_from_slice(&count.to_le_bytes());
+    r[5..15].copy_from_slice(b"2026-11-19");
+    let s = source.as_bytes();
+    r[16..16 + s.len().min(15)].copy_from_slice(&s[..s.len().min(15)]);
+    r
+}
+
+/// The sections of a valid pack: 81 provinces of one ring of one step, one district each, the repeaters given, two
+/// airfields. (id, record size, bytes), in the order tools/refpack.py writes them.
+pub fn ref_sections(rpts: &[Vec<u8>], source: &str) -> Vec<(u16, u16, Vec<u8>)> {
+    use ddm32_core::datapacks::refpack as rp;
+    let mut meta = vec![0u8; 32];
+    meta[rp::META_PROVINCES..rp::META_PROVINCES + 2].copy_from_slice(&81u16.to_le_bytes());
+    meta[rp::META_RINGS..rp::META_RINGS + 2].copy_from_slice(&81u16.to_le_bytes());
+    meta[rp::META_STEPS..rp::META_STEPS + 2].copy_from_slice(&81u16.to_le_bytes());
+    meta[rp::META_DISTRICTS..rp::META_DISTRICTS + 2].copy_from_slice(&81u16.to_le_bytes());
+    let mut provs = Vec::new();
+    let mut rings = Vec::new();
+    let mut pnames = Vec::new();
+    let mut dnames = Vec::new();
+    let mut dfirst = Vec::new();
+    let mut nfirst = Vec::new();
+    for i in 0..81u16 {
+        let mut p = vec![0u8; 18];
+        p[0..2].copy_from_slice(&i.to_le_bytes());
+        p[2] = 1;
+        p[3] = (i + 1) as u8;
+        p[4..6].copy_from_slice(&(pnames.len() as u16).to_le_bytes());
+        p[14..16].copy_from_slice(&10i16.to_le_bytes());
+        p[16..18].copy_from_slice(&10i16.to_le_bytes());
+        provs.extend(p);
+        pnames.extend(format!("P{i}\0").into_bytes());
+        let mut r = vec![0u8; 8];
+        r[4..6].copy_from_slice(&i.to_le_bytes());
+        r[6..8].copy_from_slice(&1u16.to_le_bytes());
+        rings.extend(r);
+        dfirst.extend(i.to_le_bytes());
+        nfirst.extend((dnames.len() as u16).to_le_bytes());
+        dnames.extend(format!("D{i}\0").into_bytes());
+    }
+    dfirst.extend(81u16.to_le_bytes());
+    let keys: Vec<u8> = rpts.iter().flat_map(|r| rp::rpt_key(r)).collect();
+    let mut air = vec![0u8; 88];
+    air[8..10].copy_from_slice(&0u16.to_le_bytes());
+    air[10] = 2;
+    air[44 + 8..44 + 10].copy_from_slice(&2u16.to_le_bytes());
+    air[44 + 10] = 1;
+    vec![
+        (rp::MAP_META, 32, meta),
+        (rp::PROVINCES, 18, provs),
+        (rp::RINGS, 8, rings),
+        (rp::STEPS, 2, vec![1u8; 162]),
+        (rp::PROV_NAMES, 1, pnames),
+        (rp::DIST_POS, 4, vec![0u8; 81 * 4]),
+        (rp::DIST_FIRST, 2, dfirst),
+        (rp::DIST_NAME_FIRST, 2, nfirst),
+        (rp::DIST_NAMES, 1, dnames),
+        (rp::RPT_INFO, 32, rpt_info_rec(rpts.len() as u32, source)),
+        (rp::RPT, 44, rpts.concat()),
+        (rp::RPT_KEY, 10, keys),
+        (rp::AIR, 44, air),
+        (rp::AIR_FREQ, 4, vec![0u8; 12]),
+        (rp::AIR_KEY, 10, vec![0u8; 20]),
+    ]
+}
+
+pub fn ref_payload(coord: u32, rpts: &[Vec<u8>], source: &str) -> Vec<u8> {
+    ddm32_core::datapacks::refpack::assemble(coord, &ref_sections(rpts, source)).unwrap()
+}
+
+pub fn two_rpts() -> Vec<Vec<u8>> {
+    vec![
+        rpt_rec(3_900_000, 3_200_000, 145_600_000, 0, "TA2RPT", 6),
+        rpt_rec(4_100_000, 2_900_000, 439_000_000, 1, "TA1DMR", 34),
+    ]
+}
+
+/// A whole map pack image (.dpk: sequence 0), header tag and flags as given.
+pub fn ref_image(payload: &[u8], seq: u32, tag: &str, flags: u16) -> Vec<u8> {
+    use ddm32_core::datapacks::datapack as dp;
+    dp::image(dp::REF, payload, "20261119", "DDM32 TR 1.1.0", seq, tag, flags).unwrap()
+}

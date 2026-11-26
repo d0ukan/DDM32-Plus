@@ -9,8 +9,8 @@
 
 use super::version::ReleaseVersion;
 use super::{
-    AssetEntry, FirmwareEntry, Manifest, ManifestError, ManifestSchema, Notes, APP_START, CHANNELS, CODEC_SLOT,
-    CURRENT, MAX_ASSET_SIZE, MAX_MANIFEST, PUBLIC_KEY_HEX,
+    AssetEntry, FirmwareEntry, Manifest, ManifestError, ManifestSchema, Notes, RefPackEntry, APP_START, CHANNELS,
+    CODEC_SLOT, CURRENT, MAX_ASSET_SIZE, MAX_MANIFEST, PUBLIC_KEY_HEX, REF_PACK_MAX, REF_PACK_SCHEMA,
 };
 use crate::crypto::ed25519;
 use crate::pytext::py_strip;
@@ -269,6 +269,13 @@ pub fn check_manifest(m: &Value, schema: &ManifestSchema) -> Result<Manifest, Ma
         )?;
         need(!seen.contains(&a.version), &format!("{w}.version (duplicate)"))?;
         seen.insert(a.version.clone());
+        let (ref_pack, ref_pack_newer) = match get(e, "ref_pack") {
+            None | Some(Value::Null) => (None, false),
+            Some(r) => match check_ref_pack(r, &format!("{w}.ref_pack"), schema)? {
+                Some(rp) => (Some(rp), false),
+                None => (None, true),
+            },
+        };
         let n = notes.unwrap();
         entries.push(FirmwareEntry {
             asset: a,
@@ -279,6 +286,8 @@ pub fn check_manifest(m: &Value, schema: &ManifestSchema) -> Result<Manifest, Ma
             codeplug_format: formats[1],
             min_compatible_version: minc.unwrap().to_string(),
             notes: Notes { tr: str_of(get(n, "tr")).unwrap().into(), en: str_of(get(n, "en")).unwrap().into() },
+            ref_pack,
+            ref_pack_newer,
         });
     }
     let mut app = None;
@@ -316,6 +325,55 @@ pub fn check_manifest(m: &Value, schema: &ManifestSchema) -> Result<Manifest, Ma
         app_net,
         app_rs,
     })
+}
+
+/// A firmware entry's `ref_pack` object (docs/mappack-design.md E.2): Ok(None) for a schema this program does not
+/// read yet (ignored, the firmware still installs), a ManifestError for a malformed schema-1 object.
+pub fn check_ref_pack(r: &Value, w: &str, schema: &ManifestSchema) -> Result<Option<RefPackEntry>, ManifestError> {
+    need(r.is_object(), w)?;
+    let sv = py_int(get(r, "schema"), false);
+    need(sv.as_ref().is_some_and(|s| *s >= BigInt::from(1)), &format!("{w}.schema"))?;
+    if *sv.as_ref().unwrap() > BigInt::from(REF_PACK_SCHEMA) {
+        return Ok(None);
+    }
+    let a = asset(r, w, schema)?;
+    need(a.size <= REF_PACK_MAX, &format!("{w}.size"))?;
+    need(body(&a.file).ends_with(".dpk"), &format!("{w}.file"))?;
+    let small = |name: &str, lo: u64, hi: u64| -> Result<u64, ManifestError> {
+        let v = py_int(get(r, name), false);
+        need(v.as_ref().is_some_and(|v| *v >= BigInt::from(lo) && *v <= BigInt::from(hi)), &format!("{w}.{name}"))?;
+        Ok(to_u64(v.as_ref().unwrap()))
+    };
+    let pack_type = small("pack_type", 3, 3)? as u8;
+    let pack_format = small("pack_format", 1, 255)? as u8;
+    let dir_version = small("dir_version", 1, 255)? as u8;
+    let coord = str_of(get(r, "coord_crc"));
+    let coord_crc = coord.and_then(|c| {
+        let h = c.strip_prefix("0x").or_else(|| c.strip_prefix("0X"))?;
+        (!h.is_empty() && h.len() <= 8 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| u32::from_str_radix(h, 16).ok())
+            .flatten()
+    });
+    need(coord_crc.is_some(), &format!("{w}.coord_crc"))?;
+    let date = str_of(get(r, "date"));
+    need(date.is_some_and(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit())), &format!("{w}.date"))?;
+    let minf = str_of(get(r, "min_firmware"));
+    need(minf.is_some(), &format!("{w}.min_firmware"))?;
+    ReleaseVersion::parse(minf.unwrap())?;
+    Ok(Some(RefPackEntry {
+        schema: to_u64(sv.as_ref().unwrap()),
+        version: a.version,
+        file: a.file,
+        url: a.url,
+        sha256: a.sha256,
+        size: a.size,
+        pack_type,
+        pack_format,
+        dir_version,
+        coord_crc: coord_crc.unwrap(),
+        date: date.unwrap().to_string(),
+        min_firmware: minf.unwrap().to_string(),
+    }))
 }
 
 fn app_asset(el: &Value, key: &str, schema: &ManifestSchema) -> Result<AssetEntry, ManifestError> {

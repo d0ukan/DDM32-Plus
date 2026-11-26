@@ -10,6 +10,7 @@ pub mod channels;
 pub mod disclaimer;
 pub mod help;
 pub mod i18n;
+pub mod mappack;
 pub mod packs;
 pub mod radio_pages;
 pub mod restore;
@@ -135,6 +136,8 @@ pub struct State {
     pub health_timer: Option<slint::Timer>,
     /// Data packs: the list, the pages, the packs built or loaded, what the radio holds
     pub packs: packs::PackState,
+    /// The update wizard's map pack step
+    pub map: mappack::MapState,
     /// The environment the other programs' backups are found through (setup_with_env)
     pub env: EnvLookup,
     /// The DM-32's codec tables the backups are detected with (always Codec::dm32() in the program; the tests set a
@@ -172,6 +175,11 @@ thread_local! {
 
 pub(crate) fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("controller set up")))
+}
+
+/// Whether the controller's state is set up (the screenshot demos draw pages without it).
+pub(crate) fn has_state() -> bool {
+    STATE.with(|s| s.borrow().is_some())
 }
 
 /// The controller's state from outside (the tests drive the close guard with it).
@@ -315,6 +323,7 @@ pub fn setup_with_env(ui: &AppWindow, paths: AppPaths, fetch: bool, env: EnvLook
             channels: Default::default(),
             health_timer: None,
             packs: Default::default(),
+            map: Default::default(),
             env,
             codec: Codec::dm32(),
         })
@@ -412,6 +421,7 @@ fn page_dialog_open(ui: &AppWindow) -> bool {
     ui.global::<App>().get_res_confirm_open()
         || p.get_download_confirm_open()
         || p.get_write_confirm_open()
+        || ui.global::<App>().get_map_ask_open()
         || ui.global::<Radio>().get_zone_picker_open()
 }
 
@@ -745,6 +755,10 @@ fn wire(ui: &AppWindow) {
         force_close(&w.unwrap());
     });
     let w = ui.as_weak();
+    app.on_map_write(move || mappack::write(&w.unwrap()));
+    let w = ui.as_weak();
+    app.on_map_choose(move |c| mappack::choose(&w.unwrap(), &c));
+    let w = ui.as_weak();
     app.on_test_confirm_yes(move || {
         let ui = w.unwrap();
         let app = ui.global::<App>();
@@ -932,7 +946,10 @@ pub fn show_prompt(ui: &AppWindow, lang: &str, offer: &UpdateOffer) {
         None => (String::new(), String::new()),
     };
     let (f, fd) = match &offer.firmware {
-        Some((cur, new)) => (two("prompt_firmware", cur, new), i18n::t(lang, "prompt_firmware_d")),
+        Some((cur, new)) => {
+            let fv = if has_state() { with(|s| s.catalog.as_ref().and_then(|c| c.find(new).cloned())) } else { None };
+            (two("prompt_firmware", cur, new), updates::firmware_detail(lang, fv.as_ref()))
+        }
         None => (String::new(), String::new()),
     };
     app.set_prompt_program(p.into());
@@ -1618,6 +1635,7 @@ fn set_step(ui: &AppWindow, step: i32) {
         app.set_details("".into());
     }
     set_message(ui, "", "info");
+    mappack::show(ui);
 }
 
 /// What Home says about the cable: Windows' device list (a missing CH340 driver is found without opening a port),

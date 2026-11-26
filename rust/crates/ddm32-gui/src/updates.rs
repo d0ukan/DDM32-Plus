@@ -536,6 +536,22 @@ pub fn update_offer(
     UpdateOffer { program, firmware }
 }
 
+/// The firmware part's detail line: the wizard opens; a release with a map pack says the pack goes with it (and a
+/// map pack of a newer kind than this program reads says to update the program first; docs/mappack-design.md H.2).
+pub fn firmware_detail(lang: &str, fv: Option<&FirmwareVersion>) -> String {
+    let mut d = crate::i18n::t(lang, "prompt_firmware_d");
+    if let Some(f) = fv {
+        if f.entry.ref_pack.is_some() {
+            d.push(' ');
+            d.push_str(&crate::i18n::t(lang, "prompt_firmware_map"));
+        } else if f.entry.ref_pack_newer {
+            d.push(' ');
+            d.push_str(&crate::i18n::t(lang, "prompt_firmware_map_newer"));
+        }
+    }
+    d
+}
+
 /// Whether the question is shown now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptDecision {

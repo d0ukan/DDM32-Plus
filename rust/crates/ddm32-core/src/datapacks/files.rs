@@ -2,8 +2,9 @@
 //! Building packs from the user's files and reading what a verified backup holds (files only, no port), and the
 //! RadioID.net list download (DataPacks/PackFiles.cs).
 
-use super::datapack::{self as dp, PackHeader, AIR, HEADER_SIZE, RADIO_ID, REGION_END};
+use super::datapack::{self as dp, PackHeader, AIR, HEADER_SIZE, RADIO_ID, REF, REGION_END};
 use super::radioid::{RadioIdSkipped, DOWNLOAD_URL};
+use super::refpack;
 use super::{air, pdf, PackError};
 use crate::releases::net::{check_url_hosts, open_checked, stream_to_file, HttpTransport, NetError, Url};
 use std::collections::BTreeMap;
@@ -35,7 +36,7 @@ pub fn radio_id(csv_path: &Path, countries: &[String], name: &str, date: Option<
         return Err(PackError("no ID of the chosen countries in the list".into()));
     }
     let today = crate::storage::today();
-    let image = dp::image(RADIO_ID, &payload, date.unwrap_or(&today), name, 0, dp::TAG)?;
+    let image = dp::image(RADIO_ID, &payload, date.unwrap_or(&today), name, 0, dp::TAG, 0)?;
     let header = dp::parse(&image).0.unwrap();
     Ok(BuiltPack { ptype: RADIO_ID, image, header, count, skipped: Some(skipped) })
 }
@@ -62,28 +63,53 @@ pub fn air_pack(sources: &[AirSource], name: &str, date: Option<&str>) -> Result
     }
     let payload = dp::air_payload(&fields)?;
     let today = crate::storage::today();
-    let image = dp::image(AIR, &payload, date.unwrap_or(&today), name, 0, dp::TAG)?;
+    let image = dp::image(AIR, &payload, date.unwrap_or(&today), name, 0, dp::TAG, 0)?;
     let header = dp::parse(&image).0.unwrap();
     Ok(BuiltPack { ptype: AIR, image, header, count: fields.len(), skipped: None })
 }
 
-/// A .dpk file (this program's, the C# program's or datapack.py's): whole and checked, or PackError.
+/// A .dpk file (this program's, the C# program's, datapack.py's or a release's map pack): whole and checked, or
+/// PackError. A RadioID pack over 192 KB is refused (firmware 1.1's slot, docs/mappack-design.md B.4 N2); a map pack
+/// must pass the firmware's structural check (C.2).
 pub fn load(path: &Path) -> Result<BuiltPack, PackError> {
     let image = std::fs::read(path)?;
-    let (h, payload) = dp::parse(&image);
     let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    check_image(&image, &name)
+}
+
+/// The checks of [`load`] on bytes already read (name: for the messages).
+pub fn check_image(image: &[u8], name: &str) -> Result<BuiltPack, PackError> {
+    let (h, payload) = dp::parse(image);
     let bad = || PackError(format!("{name}: not a whole data pack"));
     let h = h.ok_or_else(bad)?;
     if !h.crc_ok
         || h.format != 1
-        || !(h.ptype == RADIO_ID || h.ptype == AIR)
+        || !(h.ptype == RADIO_ID || h.ptype == AIR || h.ptype == REF)
         || image.len() != HEADER_SIZE + h.length as usize
-        || image.len() > dp::slot_size(h.ptype).unwrap_or(0)
     {
         return Err(bad());
     }
+    if h.ptype == RADIO_ID && h.length as usize > dp::RADIO_ID_PAYLOAD_MAX {
+        return Err(PackError(format!(
+            "{name}: RadioID pack of {} bytes: firmware 1.1 takes at most {} (192 KB); build it with fewer countries",
+            h.length,
+            dp::RADIO_ID_PAYLOAD_MAX
+        )));
+    }
+    if image.len() > dp::slot_size(h.ptype).unwrap_or(0) {
+        return Err(bad());
+    }
+    if h.ptype == REF {
+        match refpack::validate(&payload, h.flags, &refpack::Rules::new(None)) {
+            refpack::Verdict::Valid(_) => {}
+            refpack::Verdict::Bad(e) => return Err(PackError(format!("{name}: map pack does not check: {e}"))),
+            refpack::Verdict::Other(e) => {
+                return Err(PackError(format!("{name}: map pack for another firmware version: {e}")))
+            }
+        }
+    }
     let count = dp::count(&h, &payload).unwrap_or(0);
-    Ok(BuiltPack { ptype: h.ptype, image, header: h, count, skipped: None })
+    Ok(BuiltPack { ptype: h.ptype, image: image.to_vec(), header: h, count, skipped: None })
 }
 
 /// Both slots of a type as a verified backup's data chip image holds them (q128-pass1.bin, files only).

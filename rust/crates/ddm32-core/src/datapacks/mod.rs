@@ -6,6 +6,7 @@ pub mod datapack;
 pub mod files;
 pub mod pdf;
 pub mod radioid;
+pub mod refpack;
 
 /// A pack that cannot be built (tools/datapack.py PackError / iddb.IddbError).
 #[derive(Debug, Clone, PartialEq, Eq)]

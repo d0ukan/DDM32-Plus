@@ -206,6 +206,20 @@ fn verify_manifest(args: &[String]) -> Result<ExitCode, String> {
         }
         println!("  {what} {} {} OK", a.version, a.file);
     }
+    // each firmware's map pack (docs/mappack-design.md E.2): size, SHA-256 and the pack's own structure check
+    for f in &m.firmware {
+        if f.ref_pack_newer {
+            println!("  ref_pack of {}: a newer schema than this program reads (ignored)", f.version());
+        }
+        let Some(rp) = &f.ref_pack else { continue };
+        let path = dir.join(&rp.file);
+        if !path.is_file() {
+            println!("  ref_pack {} {} (not in the folder)", rp.version, rp.file);
+            continue;
+        }
+        ddm32_core::releases::client::check_ref_file(&path, rp).map_err(|e| format!("{}: {e}", rp.file))?;
+        println!("  ref_pack {} {} OK (coordinate id 0x{:08X})", rp.version, rp.file, rp.coord_crc);
+    }
     let platform = ddm32_core::releases::platform_key();
     if let Some((_, a)) = m.app_rs.iter().find(|(p, _)| *p == platform) {
         let zip = dir.join(&a.file);

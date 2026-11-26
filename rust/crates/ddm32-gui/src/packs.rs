@@ -9,9 +9,10 @@
 use crate::{
     i18n, port_busy, radio_allowed, reader_holds_port, tr, trf, with, with_port, worker, App, AppWindow, Packs,
 };
-use ddm32_core::datapacks::datapack::{self as dp, AIR, RADIO_ID};
+use ddm32_core::datapacks::datapack::{self as dp, AIR, RADIO_ID, REF};
 use ddm32_core::datapacks::files::{self as files, AirSource, BuiltPack};
 use ddm32_core::datapacks::radioid;
+use ddm32_core::datapacks::refpack;
 use ddm32_core::radio::cps;
 use ddm32_core::storage::paths::is_verified_backup;
 use serde_json::Value;
@@ -32,6 +33,9 @@ pub struct PackState {
     pub air: Vec<AirSource>,
     pub radioid: Option<(BuiltPack, PathBuf)>,
     pub air_pack: Option<(BuiltPack, PathBuf)>,
+    /// A map pack (type 3) chosen from a release folder or a .dpk file (docs/mappack-design.md E.3)
+    pub map_pack: Option<(BuiltPack, PathBuf)>,
+    pub map_error: Option<String>,
     pub radio_text: String,
     pub radioid_error: Option<String>,
     pub air_error: Option<String>,
@@ -61,22 +65,59 @@ pub fn date(yyyymmdd: &str) -> String {
     }
 }
 
-/// A pack in words: 'RadioID pack "RadioID TR", 2026-11-24: 3120 IDs, 81,6 KB'.
+/// A pack in words: 'RadioID pack "RadioID TR", 2026-11-24: 3120 IDs, 81,6 KB'; a map pack with its repeaters,
+/// airfields and repeater data source.
 pub fn describe(lang: &str, p: &BuiltPack) -> String {
+    if p.ptype == REF {
+        let payload = &p.image[dp::HEADER_SIZE.min(p.image.len())..];
+        let d = refpack::directory(payload).ok();
+        let n = |id| d.as_ref().map_or(0, |d| d.count(id)).to_string();
+        let source = refpack::rpt_info(payload).map(|i| i.source).unwrap_or_else(|| "-".into());
+        let key = if refpack::is_release_built(&p.header.tag) { "pack_desc_ref" } else { "pack_desc_ref_user" };
+        return i18n::tn(
+            lang,
+            key,
+            &[
+                &p.header.name,
+                &date(&p.header.date),
+                &n(refpack::RPT),
+                &n(refpack::AIR),
+                &source,
+                &kb(lang, p.image.len() as u64),
+            ],
+        );
+    }
     let key = if p.ptype == RADIO_ID { "pack_desc_radioid" } else { "pack_desc_air" };
     i18n::tn(lang, key, &[&p.header.name, &date(&p.header.date), &p.count.to_string(), &kb(lang, p.image.len() as u64)])
 }
 
+/// The word for a pack type in the slot lines ("radioid" / "ref" / "air" of the tool's JSON).
+pub fn type_word(lang: &str, t: &str) -> String {
+    i18n::t(
+        lang,
+        match t {
+            "radioid" => "pack_type_radioid",
+            "ref" => "pack_type_ref",
+            _ => "pack_type_air",
+        },
+    )
+}
+
 /// One slot as the radio tool's JSON (or a backup's slot state) says it.
 pub fn slot_line(lang: &str, s: &Value) -> String {
-    let t = |k: &str| i18n::t(lang, k);
-    let kind =
-        t(if s.get("type").and_then(Value::as_str) == Some("radioid") { "pack_type_radioid" } else { "pack_type_air" });
+    let kind = type_word(lang, s.get("type").and_then(Value::as_str).unwrap_or("air"));
     let slot = s.get("slot").and_then(Value::as_i64).unwrap_or(0).to_string();
     let addr = s.get("address").and_then(Value::as_str).unwrap_or("").to_string();
     let name = s.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-    if !s.get("valid").and_then(Value::as_bool).unwrap_or(false) {
+    let state = s.get("state").and_then(Value::as_str).unwrap_or("");
+    if !s.get("valid").and_then(Value::as_bool).unwrap_or(false) && state != "bad" {
         return i18n::tn(lang, "pack_slot_empty", &[&kind, &slot, &addr]);
+    }
+    match state {
+        "big" => return i18n::tn(lang, "pack_slot_big", &[&kind, &slot, &addr, &name]),
+        "other" => return i18n::tn(lang, "pack_slot_other", &[&kind, &slot, &addr, &name]),
+        "bad" => return i18n::tn(lang, "pack_slot_damaged", &[&kind, &slot, &addr, &name]),
+        _ => {}
     }
     if !s.get("crc_ok").and_then(Value::as_bool).unwrap_or(false) {
         return i18n::tn(lang, "pack_slot_damaged", &[&kind, &slot, &addr, &name]);
@@ -90,7 +131,11 @@ pub fn slot_line(lang: &str, s: &Value) -> String {
     let bytes = s.get("bytes").and_then(Value::as_u64).unwrap_or(0) + dp::HEADER_SIZE as u64;
     let seq = s.get("seq").and_then(Value::as_i64).unwrap_or(0).to_string();
     let d = date(s.get("date").and_then(Value::as_str).unwrap_or(""));
-    i18n::tn(lang, key, &[&kind, &slot, &addr, &name, &d, &count, &kb(lang, bytes), &seq])
+    let mut l = i18n::tn(lang, key, &[&kind, &slot, &addr, &name, &d, &count, &kb(lang, bytes), &seq]);
+    if s.get("user_built").and_then(Value::as_bool) == Some(true) {
+        l.push_str(&i18n::t(lang, "pack_slot_user_built"));
+    }
+    l
 }
 
 /// A backup's slot as the same line (files only).
@@ -106,7 +151,7 @@ pub fn backup_lines(lang: &str, folder: &Path) -> Result<Vec<String>, String> {
     }
     let mut lines =
         vec![i18n::tf(lang, "pack_from_backup_of", &folder.file_name().unwrap_or_default().to_string_lossy())];
-    for ptype in [RADIO_ID, AIR] {
+    for ptype in dp::TYPES {
         let slots = files::slots_from_backup(folder, ptype).map_err(|e| e.0)?;
         lines.extend(cps::describe(ptype, &slots).iter().map(|s| slot_state_line(lang, s)));
     }
@@ -200,6 +245,19 @@ pub fn wire(ui: &AppWindow) {
     p.on_write_radioid(move || ask_write(&w.unwrap(), RADIO_ID));
     let w = ui.as_weak();
     p.on_write_air(move || ask_write(&w.unwrap(), AIR));
+    let w = ui.as_weak();
+    p.on_write_map(move || ask_write(&w.unwrap(), REF));
+    let w = ui.as_weak();
+    p.on_load_map(move || {
+        let ui = w.unwrap();
+        let dir = with(|s| s.paths.releases().join(ddm32_core::releases::client::REF_PACKS));
+        let dir = if dir.is_dir() { dir } else { with(|s| s.paths.packs()) };
+        if let Some(f) =
+            rfd::FileDialog::new().set_directory(&dir).add_filter("DDM32 Plus (*.dpk)", &["dpk"]).pick_file()
+        {
+            load_dpk(&ui, &f);
+        }
+    });
     let w = ui.as_weak();
     p.on_write_yes(move || write_yes(&w.unwrap()));
 }
@@ -306,8 +364,18 @@ pub fn show(ui: &AppWindow) {
             _ => String::new(),
         };
         p.set_air_result(air.into());
-        let chosen: Vec<String> =
-            [&st.radioid, &st.air_pack].into_iter().flatten().map(|(pk, _)| describe(&lang, pk)).collect();
+        let map = match (&st.map_error, &st.map_pack) {
+            (Some(e), _) => e.clone(),
+            (None, Some((pk, file))) => format!("{}\n{}", describe(&lang, pk), file.display()),
+            _ => i18n::t(&lang, "pack_map_none"),
+        };
+        p.set_map_result(map.into());
+        p.set_map_pack(st.map_pack.is_some());
+        let chosen: Vec<String> = [&st.radioid, &st.map_pack, &st.air_pack]
+            .into_iter()
+            .flatten()
+            .map(|(pk, _)| describe(&lang, pk))
+            .collect();
         p.set_chosen_text(
             if chosen.is_empty() { i18n::t(&lang, "pack_nothing_built") } else { chosen.join("\n") }.into(),
         );
@@ -451,6 +519,14 @@ pub fn built(ui: &AppWindow, ptype: u8, r: Result<(BuiltPack, PathBuf), String>)
                 st.radioid = None;
                 st.radioid_error = Some(i18n::tf(&lang, "pack_failed", &e));
             }
+            (REF, Ok(x)) => {
+                st.map_pack = Some(x);
+                st.map_error = None;
+            }
+            (REF, Err(e)) => {
+                st.map_pack = None;
+                st.map_error = Some(i18n::tf(&lang, "pack_failed", &e));
+            }
             (_, Ok(x)) => {
                 st.air_pack = Some(x);
                 st.air_error = None;
@@ -535,7 +611,7 @@ pub fn ask_write(ui: &AppWindow, ptype: u8) {
     }
     let lang = with(|s| s.lang.clone());
     let Some(text) = with(|s| {
-        let pk = if ptype == RADIO_ID { s.packs.radioid.as_ref() } else { s.packs.air_pack.as_ref() };
+        let pk = chosen(&s.packs, ptype);
         let port = s.port_now.port.clone().unwrap_or_else(|| "-".into());
         pk.map(|(p, _)| confirm_text(&lang, p, &port))
     }) else {
@@ -564,10 +640,9 @@ fn write_on(ui: &AppWindow, found: Option<String>) {
         result(ui, &tr("radio_nocable"), "warning");
         return;
     };
-    let Some(file) = with(|s| {
+    let Some((file, ptype)) = with(|s| {
         let ptype = s.packs.pending.take()?;
-        let pk = if ptype == RADIO_ID { s.packs.radioid.as_ref() } else { s.packs.air_pack.as_ref() };
-        pk.map(|(_, f)| f.clone())
+        chosen(&s.packs, ptype).map(|(_, f)| (f.clone(), ptype))
     }) else {
         return;
     };
@@ -579,7 +654,7 @@ fn write_on(ui: &AppWindow, found: Option<String>) {
     ui.global::<Packs>().set_progress(0.0);
     result(ui, &tr("pack_writing"), "info");
     let line = radioid::fold(&tr("pack_screen_line"));
-    let argv = vec![
+    let mut argv = vec![
         "write".into(),
         "--port".into(),
         port,
@@ -588,6 +663,10 @@ fn write_on(ui: &AppWindow, found: Option<String>) {
         "--line".into(),
         line,
     ];
+    if ptype == REF {
+        // the coordinate ids of the releases the program knows: the running firmware's slot is never overwritten
+        argv.extend(known_coords_args());
+    }
     crate::run_tool_lines(ui, "datapack", argv, true, tool_line, move |ui, err| {
         match err {
             None => {
@@ -598,6 +677,34 @@ fn write_on(ui: &AppWindow, found: Option<String>) {
         }
         show(ui);
     });
+}
+
+/// The pack of a type the page holds.
+fn chosen(st: &PackState, ptype: u8) -> Option<&(BuiltPack, PathBuf)> {
+    match ptype {
+        RADIO_ID => st.radioid.as_ref(),
+        REF => st.map_pack.as_ref(),
+        _ => st.air_pack.as_ref(),
+    }
+}
+
+/// `--known-coords 1.1.0=0x...,...` from the release list (nothing when no release names a map pack).
+pub fn known_coords_args() -> Vec<String> {
+    let text = with(|s| known_coords(&s.catalog.clone().unwrap_or_default()));
+    if text.is_empty() {
+        vec![]
+    } else {
+        vec!["--known-coords".into(), text]
+    }
+}
+
+/// "1.1.0=0x1A2B3C4D,..." for every firmware of the list whose release names a map pack.
+pub fn known_coords(cat: &ddm32_core::releases::Catalog) -> String {
+    cat.firmware
+        .iter()
+        .filter_map(|f| f.entry.ref_pack.as_ref().map(|r| format!("{}=0x{:08X}", f.version(), r.coord_crc)))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// "Read the radio's packs": the radio information and both slots of each type (read only, no power cycle).
@@ -619,7 +726,8 @@ fn read_on(ui: &AppWindow, found: Option<String>) {
     with(|s| s.packs.radio_text.clear());
     result(ui, &tr("pack_reading"), "info");
     show(ui);
-    let argv = vec!["read".into(), "--port".into(), port];
+    let mut argv = vec!["read".into(), "--port".into(), port];
+    argv.extend(known_coords_args());
     crate::run_tool_lines(ui, "datapack", argv, false, tool_line, |ui, err| {
         match err {
             None => result(ui, &tr("pack_read_done"), "success"),
@@ -670,6 +778,15 @@ pub fn tool_line(ui: &AppWindow, line: &str) {
             );
             result(ui, &text, "info");
         }
+    } else if line.starts_with("{\"note\"") || line.starts_with("{\"warning\"") {
+        if let Some(t) = note_text(&lang, line) {
+            with(|s| {
+                if !s.packs.radio_text.is_empty() {
+                    s.packs.radio_text.push('\n');
+                }
+                s.packs.radio_text.push_str(&t);
+            });
+        }
     } else if line.starts_with("pack: sector ") {
         let v = with(|s| {
             s.packs.sectors_done += 1;
@@ -684,6 +801,17 @@ pub fn tool_line(ui: &AppWindow, line: &str) {
     show(ui);
 }
 
+/// A note or warning line of the data pack tool in words (the map pack's old-firmware note, a RadioID pack too big
+/// for firmware 1.1).
+pub fn note_text(lang: &str, line: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    match (v.get("note").and_then(Value::as_str), v.get("warning").and_then(Value::as_str)) {
+        (Some("ref_after_update"), _) => Some(i18n::t(lang, "pack_ref_after_update")),
+        (_, Some("radioid_big")) => Some(i18n::t(lang, "pack_radioid_big_warning")),
+        _ => None,
+    }
+}
+
 /// Example contents for the screenshots (no file, no radio).
 pub fn demo(ui: &AppWindow, lang: &str) {
     let p = ui.global::<Packs>();
@@ -694,8 +822,10 @@ pub fn demo(ui: &AppWindow, lang: &str) {
     let lines = [
         i18n::tn(lang, "pack_radio_info", &["1.0.1-ddm32", "2026-11-24"]),
         slot_line(lang, &slot("radioid", 0, "0xE70000", true, true, "RadioID TR", 3120)),
-        slot_line(lang, &slot("radioid", 1, "0xEA0000", false, false, "", 0)),
-        slot_line(lang, &slot("air", 0, "0xED0000", true, true, "TR aerodromes", 41)),
+        slot_line(lang, &slot("radioid", 1, "0xEB0000", false, false, "", 0)),
+        slot_line(lang, &slot("ref", 0, "0xEA0000", true, true, "DDM32 TR 1.1.0", 252)),
+        slot_line(lang, &slot("ref", 1, "0xEE0000", false, false, "", 0)),
+        slot_line(lang, &slot("air", 0, "0xEF0000", true, true, "TR aerodromes", 41)),
     ];
     p.set_radio_text(lines.join("\n").into());
     p.set_csv_text(i18n::tn(lang, "pack_csv", &["…/DDM32 Plus/packs/user.csv", &kb(lang, 48_211_000)]).into());
@@ -721,6 +851,8 @@ pub fn demo(ui: &AppWindow, lang: &str) {
     );
     p.set_radioid_pack(true);
     p.set_air_pack(false);
+    p.set_map_result(i18n::t(lang, "pack_map_none").into());
+    p.set_map_pack(false);
     p.set_result("".into());
     p.set_progress(0.0);
     p.set_working(false);
@@ -734,7 +866,7 @@ pub fn demo(ui: &AppWindow, lang: &str) {
 pub fn demo_pack() -> BuiltPack {
     let entries = [(2869999i64, "TA1TST".to_string(), "Test".to_string())];
     let payload = dp::radioid_payload(&entries, dp::ID_CHARS).expect("a valid entry");
-    let image = dp::image(RADIO_ID, &payload, "20261124", "RadioID TR", 0, dp::TAG).expect("a valid pack");
+    let image = dp::image(RADIO_ID, &payload, "20261124", "RadioID TR", 0, dp::TAG, 0).expect("a valid pack");
     let header = dp::parse(&image).0.expect("its own header");
     BuiltPack { ptype: RADIO_ID, image, header, count: 3120, skipped: None }
 }

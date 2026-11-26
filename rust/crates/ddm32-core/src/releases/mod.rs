@@ -125,6 +125,34 @@ pub struct FirmwareEntry {
     pub codeplug_format: u32,
     pub min_compatible_version: String,
     pub notes: Notes,
+    /// The map pack that belongs to this firmware (docs/mappack-design.md E.2), schema 1.
+    pub ref_pack: Option<RefPackEntry>,
+    /// The entry carries a `ref_pack` of a newer schema than this program reads: ignored, "update the programmer".
+    pub ref_pack_newer: bool,
+}
+
+/// The highest `ref_pack` schema this program reads.
+pub const REF_PACK_SCHEMA: u64 = 1;
+/// A map pack asset is at most one map slot (64 KB: header + payload).
+pub const REF_PACK_MAX: u64 = 0x10000;
+
+/// A firmware entry's `ref_pack` object: a separate signed asset (the zip keeps its three files). The manifest's
+/// signature covers its SHA-256.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefPackEntry {
+    pub schema: u64,
+    pub version: String,
+    pub file: String,
+    pub url: String,
+    pub sha256: String,
+    pub size: u64,
+    pub pack_type: u8,
+    pub pack_format: u8,
+    pub dir_version: u8,
+    pub coord_crc: u32,
+    pub date: String,
+    /// The oldest firmware that uses the pack (N3); writing it to an older one is allowed and harmless.
+    pub min_firmware: String,
 }
 
 impl FirmwareEntry {

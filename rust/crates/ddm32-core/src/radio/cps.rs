@@ -6,7 +6,8 @@ use super::error::{ToolError, ToolResult};
 use super::monitor::{be32, be32_bytes, crc32};
 use super::port::{Clock, RadioPort, RawSerial};
 use super::tools::{Args, ToolContext};
-use crate::datapacks::datapack::{self as dp, PackHeader, PackSector, AIR, HEADER_SIZE, RADIO_ID, SECTOR};
+use crate::datapacks::datapack::{self as dp, PackHeader, PackSector, HEADER_SIZE, RADIO_ID, REF, SECTOR};
+use crate::datapacks::refpack::{self, Rules, Running, SlotChoice, SlotVerdict, UpdateDecision};
 use crate::pyjson::{self, Py, PyDict};
 use crate::pytext::ascii_decode;
 
@@ -406,6 +407,11 @@ pub struct SlotState {
     pub header: Option<PackHeader>,
     pub count: Option<usize>,
     pub in_force: bool,
+    /// "empty", "valid", "bad", "other" (a map pack for another firmware version) or "big" (a RadioID pack over
+    /// 192 KB that firmware 1.1 does not use; docs/mappack-design.md B.1 rule 4)
+    pub state: &'static str,
+    /// A map pack's repeater data source (RPT_INFO), if any.
+    pub source: Option<String>,
 }
 
 /// A slot's image as far as the checks need it: the header, and the payload when the header is valid.
@@ -422,14 +428,47 @@ pub fn read_slot(c: &mut CpsClient<'_>, ptype: u8, slot: usize) -> ToolResult<Ve
     Ok(head)
 }
 
+fn base_state(ptype: u8, img: &[u8]) -> &'static str {
+    if img.len() < 4 || &img[..4] != dp::MAGIC {
+        return "empty";
+    }
+    match dp::parse(img).0 {
+        None => "bad",
+        Some(h) if ptype == RADIO_ID && h.ptype == RADIO_ID && h.length as usize > dp::RADIO_ID_PAYLOAD_MAX => "big",
+        Some(h) if h.crc_ok && h.ptype == ptype && h.format == 1 => "valid",
+        Some(_) => "bad",
+    }
+}
+
+/// Both slots of a type; a map pack is judged with the firmware's rules (the pack's own coordinate id when the
+/// firmware's is not known).
 pub fn describe(ptype: u8, images: &[Vec<u8>]) -> Vec<SlotState> {
-    let active = dp::active_slot(ptype, images);
+    describe_with(ptype, images, &Rules::new(None))
+}
+
+pub fn describe_with(ptype: u8, images: &[Vec<u8>], rules: &Rules) -> Vec<SlotState> {
+    let active = if ptype == REF { refpack::in_force(images, rules) } else { dp::active_slot(ptype, images) };
     images
         .iter()
         .enumerate()
         .map(|(i, img)| {
             let (h, payload) = dp::parse(img);
-            let count = h.as_ref().filter(|h| h.crc_ok).and_then(|h| dp::count(h, &payload));
+            let mut count = h.as_ref().filter(|h| h.crc_ok).and_then(|h| dp::count(h, &payload));
+            if ptype == REF && h.as_ref().is_some_and(|h| h.crc_ok) {
+                // a map pack's entries: its repeaters
+                count = refpack::directory(&payload).ok().map(|d| d.count(refpack::RPT) as usize);
+            }
+            let state = if ptype == REF {
+                match refpack::judge(img, rules) {
+                    SlotVerdict::Empty => "empty",
+                    SlotVerdict::Valid => "valid",
+                    SlotVerdict::Bad(_) => "bad",
+                    SlotVerdict::Other(_) => "other",
+                }
+            } else {
+                base_state(ptype, img)
+            };
+            let source = if ptype == REF { refpack::rpt_info(&payload).map(|r| r.source) } else { None };
             SlotState {
                 ptype,
                 slot: i,
@@ -437,6 +476,8 @@ pub fn describe(ptype: u8, images: &[Vec<u8>]) -> Vec<SlotState> {
                 header: h,
                 count,
                 in_force: active == Some(i),
+                state,
+                source,
             }
         })
         .collect()
@@ -444,8 +485,8 @@ pub fn describe(ptype: u8, images: &[Vec<u8>]) -> Vec<SlotState> {
 
 pub fn slot_json(s: &SlotState) -> PyDict {
     let h = s.header.as_ref();
-    PyDict::new()
-        .with("type", if s.ptype == RADIO_ID { "radioid" } else { "air" })
+    let mut d = PyDict::new()
+        .with("type", dp::type_name(s.ptype))
         .with("slot", s.slot)
         .with("address", pyjson::hex(s.address as i64))
         .with("valid", h.is_some())
@@ -457,48 +498,135 @@ pub fn slot_json(s: &SlotState) -> PyDict {
         .with("bytes", h.map(|h| h.length as i64))
         .with("count", s.count)
         .with("tag", h.map(|h| h.tag.clone()))
+        .with("state", s.state);
+    if s.ptype == REF {
+        d = d
+            .with("source", s.source.clone())
+            .with("user_built", h.map(|h| !refpack::is_release_built(&h.tag)))
+            .with("flags", h.map(|h| h.flags as i64));
+    }
+    d
 }
 
 fn line(d: PyDict) -> String {
     pyjson::dumps(&Py::Dict(d), None)
 }
 
+/// The firmware version the CPS info's `git` field names ("ddm32-plus-1.1." cut to 15 characters, E.3): (major,
+/// minor), or None when it is not a DDM32 Plus version string.
+pub fn running_version(git: &str) -> Option<(u32, u32)> {
+    let rest = git.strip_prefix("ddm32-plus-")?;
+    let mut it = rest.split('.');
+    let major = it.next()?.parse().ok()?;
+    let minor: String = it.next()?.chars().take_while(char::is_ascii_digit).collect();
+    Some((major, minor.parse().ok()?))
+}
+
+/// "1.1.0=0x1A2B3C4D,1.2.0=0x..." (the coordinate ids of the releases the program knows) -> [(version, id)].
+pub fn parse_known_coords(text: &str) -> ToolResult<Vec<(String, u32)>> {
+    let mut out = Vec::new();
+    for part in text.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let (v, c) = part.split_once('=').ok_or_else(|| ToolError::exit("2"))?;
+        out.push((v.trim().to_string(), parse_coord(c).ok_or_else(|| ToolError::exit("2"))?));
+    }
+    Ok(out)
+}
+
+/// "0x1A2B3C4D" (or plain hex) -> the coordinate id.
+pub fn parse_coord(text: &str) -> Option<u32> {
+    let t = text.trim();
+    let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
+    if t.is_empty() || t.len() > 8 {
+        return None;
+    }
+    u32::from_str_radix(t, 16).ok()
+}
+
+/// What the running firmware makes of the map slots, from its version and the known coordinate ids (R3).
+pub fn running_rules(version: Option<(u32, u32)>, known: &[(String, u32)]) -> Running {
+    match version {
+        None => Running::Unknown,
+        Some(v) if v < (1, 1) => Running::NoMapPack,
+        Some((ma, mi)) => {
+            let mut coords: Vec<u32> = known
+                .iter()
+                .filter(|(ver, _)| {
+                    let mut it = ver.split(['.', '-']);
+                    it.next().and_then(|x| x.parse::<u32>().ok()) == Some(ma)
+                        && it.next().and_then(|x| x.parse::<u32>().ok()) == Some(mi)
+                })
+                .map(|(_, c)| *c)
+                .collect();
+            coords.sort();
+            coords.dedup();
+            Running::MapPack(coords)
+        }
+    }
+}
+
 /// The data pack tool (like the other radio tools: argv, printed lines, the port only from ctx.serial):
-///   read --port COMx                         the radio info and both slots of each pack type (read only)
-///   write --port COMx --pack FILE.dpk        the pack into the slot not in force (docs/plus.md, steps 1-5)
+///   read --port COMx [--known-coords V=ID,...]
+///       the radio info and both slots of each pack type (read only)
+///   write --port COMx --pack FILE.dpk [--coord ID] [--known-coords V=ID,...]
+///       the pack into the slot not in force (docs/plus.md, steps 1-5; a map pack by docs/mappack-design.md E.3 R3)
+///   update-ref --port COMx --pack RELEASE.dpk --coord ID [--known-coords ...] [--choice keep|release|rebuild]
+///       the update step's map pack (E.3 S-B): nothing when the radio has it already; a user-built pack in force is
+///       never replaced without --choice (the tool says "ASK" and writes nothing)
 pub fn data_pack_tool(argv: &[String], ctx: &ToolContext<'_>) -> ToolResult<()> {
-    if argv.is_empty() || !(argv[0] == "read" || argv[0] == "write") {
+    if argv.is_empty() || !(argv[0] == "read" || argv[0] == "write" || argv[0] == "update-ref") {
         return Err(ToolError::exit("2"));
     }
-    let a = Args::new(&argv[1..], &["--port", "--pack", "--line"], &[], &["--port"])?;
+    let a = Args::new(
+        &argv[1..],
+        &["--port", "--pack", "--line", "--coord", "--known-coords", "--choice"],
+        &[],
+        &["--port"],
+    )?;
     let port_name = a.get("--port").ok_or_else(|| ToolError::exit("2"))?.to_string();
+    let coord = match a.get("--coord") {
+        Some(c) => Some(parse_coord(c).ok_or_else(|| ToolError::exit("2"))?),
+        None => None,
+    };
+    let known = parse_known_coords(a.get("--known-coords").unwrap_or(""))?;
+    let choice = a.get("--choice").map(str::to_string);
+    if choice.as_deref().is_some_and(|c| !["keep", "release", "rebuild"].contains(&c)) {
+        return Err(ToolError::exit("2"));
+    }
     let mut pack: Option<(Vec<u8>, PackHeader)> = None;
-    if argv[0] == "write" {
+    if argv[0] != "read" {
+        // every check of the file before the port is opened
         let path = std::path::PathBuf::from(a.get("--pack").ok_or_else(|| ToolError::exit("2"))?);
         let image = std::fs::read(&path)?;
-        let (h, _) = dp::parse(&image);
-        let whole = h.as_ref().is_some_and(|h| {
-            h.crc_ok
-                && h.format == 1
-                && (h.ptype == RADIO_ID || h.ptype == AIR)
-                && image.len() == HEADER_SIZE + h.length as usize
-        });
-        if !whole {
-            return Err(ToolError::value(format!(
-                "{}: not a whole data pack",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            )));
+        let fname = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let built = crate::datapacks::files::check_image(&image, &fname).map_err(|e| ToolError::value(e.0))?;
+        let h = built.header;
+        if h.ptype == REF {
+            if let refpack::Verdict::Bad(e) | refpack::Verdict::Other(e) =
+                refpack::validate(&image[HEADER_SIZE..], h.flags, &Rules::new(coord))
+            {
+                return Err(ToolError::value(format!("{fname}: not for this firmware: {e}")));
+            }
         }
-        pack = Some((image, h.unwrap()));
+        if argv[0] == "update-ref" && (h.ptype != REF || coord.is_none()) {
+            return Err(ToolError::value("update-ref takes a map pack and its release's --coord"));
+        }
+        pack = Some((image, h));
     }
     let mut raw = (ctx.serial)(&port_name)?;
     raw.open()?;
     raw.set_baud_rate(115200)?;
     raw.reset_input_buffer()?;
     let mut guard = CpsPackPort::new(raw);
-    let result = data_pack_run(&mut guard, &argv[0], pack, a.get("--line").unwrap_or("Data pack"), ctx);
+    let opts = RefOptions { coord, known, choice };
+    let result = data_pack_run(&mut guard, &argv[0], pack, a.get("--line").unwrap_or("Data pack"), &opts, ctx);
     let _ = guard.raw.close();
     result
+}
+
+struct RefOptions {
+    coord: Option<u32>,
+    known: Vec<(String, u32)>,
+    choice: Option<String>,
 }
 
 fn data_pack_run(
@@ -506,6 +634,7 @@ fn data_pack_run(
     cmd: &str,
     pack: Option<(Vec<u8>, PackHeader)>,
     line_text: &str,
+    opts: &RefOptions,
     ctx: &ToolContext<'_>,
 ) -> ToolResult<()> {
     let mut c = CpsClient::new(guard, ctx.clock);
@@ -515,10 +644,16 @@ fn data_pack_run(
         let t = info.get("radio_type").and_then(Py::as_i64).map_or("None".into(), |t| t.to_string());
         return Err(ToolError::new("RadioError", format!("radio type {t}: not a DM-32UV running DDM32 Plus")));
     }
+    let git = info.get("git").and_then(Py::as_str).unwrap_or("").to_string();
+    let running = running_rules(running_version(&git), &opts.known);
     if cmd == "read" {
-        for ptype in [RADIO_ID, AIR] {
+        let rules = match &running {
+            Running::MapPack(c) if c.len() == 1 => Rules::new(Some(c[0])),
+            _ => Rules::new(None),
+        };
+        for ptype in dp::TYPES {
             let images = vec![read_slot(&mut c, ptype, 0)?, read_slot(&mut c, ptype, 1)?];
-            for s in describe(ptype, &images) {
+            for s in describe_with(ptype, &images, &rules) {
                 (ctx.print)(&line(PyDict::new().with("slot", slot_json(&s))));
             }
         }
@@ -526,7 +661,79 @@ fn data_pack_run(
         return Ok(());
     }
     let (image, ph) = pack.unwrap();
-    write_pack(&mut c, &image, &ph, line_text, ctx)
+    if ph.ptype != REF {
+        return write_pack(&mut c, &image, &ph, line_text, ctx);
+    }
+    let target = Rules::new(opts.coord);
+    if running == Running::NoMapPack {
+        // harmless (1.0.x never reads the map slots), said for the user (E.3)
+        (ctx.print)(&line(PyDict::new().with("note", "ref_after_update")));
+    }
+    // a RadioID pack over 192 KB would lose its tail to the map slot: warned, not refused (B.4 N1)
+    for slot in 0..2 {
+        let head = read_slot(&mut c, RADIO_ID, slot)?;
+        if base_state(RADIO_ID, &head) == "big" {
+            (ctx.print)(&line(PyDict::new().with("warning", "radioid_big").with("slot", slot)));
+        }
+    }
+    let before = vec![read_slot(&mut c, REF, 0)?, read_slot(&mut c, REF, 1)?];
+    for s in describe_with(REF, &before, &target) {
+        (ctx.print)(&line(PyDict::new().with("slot", slot_json(&s))));
+    }
+    let mut payload = image[HEADER_SIZE..].to_vec();
+    let (mut name, mut tag) = (ph.name.clone(), ph.tag.clone());
+    if cmd == "update-ref" {
+        match refpack::update_decision(&before, &running, &image, &target) {
+            UpdateDecision::Same => {
+                (ctx.print)(&line(PyDict::new().with("result", "SAME")));
+                return Ok(());
+            }
+            UpdateDecision::WriteRelease => {}
+            UpdateDecision::AskUserBuilt { name: un, tag: ut, keep_ok, rebuild_ok } => match opts.choice.as_deref() {
+                None => {
+                    (ctx.print)(&line(
+                        PyDict::new().with(
+                            "ask",
+                            PyDict::new()
+                                .with("name", un)
+                                .with("tag", ut)
+                                .with("keep", keep_ok)
+                                .with("rebuild", rebuild_ok),
+                        ),
+                    ));
+                    (ctx.print)(&line(PyDict::new().with("result", "ASK")));
+                    return Ok(());
+                }
+                Some("keep") => {
+                    (ctx.print)(&line(PyDict::new().with("result", "KEPT").with("valid", keep_ok)));
+                    return Ok(());
+                }
+                Some("rebuild") => {
+                    let s = refpack::in_force_for_update(&before, &running).unwrap_or(0);
+                    let (uh, up) = dp::parse(&before[s]);
+                    let uh = uh.ok_or_else(|| ToolError::value("the user's pack cannot be read"))?;
+                    payload = refpack::rebuild(&payload, ph.flags, &up, &target)
+                        .map_err(|e| ToolError::new("PackError", format!("the pack cannot be rebuilt: {e}")))?;
+                    name = uh.name;
+                    tag = dp::TAG.to_string();
+                }
+                _ => {} // "release": the release pack as it is
+            },
+        }
+    }
+    let choice =
+        refpack::choose_slot(&before, &running, &target, &payload).map_err(|e| ToolError::new("PackError", e))?;
+    let (slot, seq) = match choice {
+        SlotChoice::AlreadyThere { slot } => {
+            (ctx.print)(&line(PyDict::new().with("result", "SAME").with("slot", slot)));
+            return Ok(());
+        }
+        SlotChoice::Write { slot, seq } => (slot, seq),
+    };
+    let pe = |e: crate::datapacks::PackError| ToolError::new("PackError", e.0);
+    let new = dp::image(REF, &payload, &ph.date, &name, seq, &tag, ph.flags).map_err(pe)?;
+    let w = Written { ptype: REF, slot, seq, name: &name, date: &ph.date };
+    write_into(&mut c, &w, &new, line_text, ctx, &|after: &[Vec<u8>]| refpack::in_force(after, &target) == Some(slot))
 }
 
 fn write_pack(
@@ -545,16 +752,41 @@ fn write_pack(
     let slot = dp::inactive_slot(ptype, &before);
     let seq = dp::next_seq(&before).map_err(pe)?;
     let payload = &image[HEADER_SIZE..];
-    let target = dp::image(ptype, payload, &ph.date, &ph.name, seq, &ph.tag).map_err(pe)?;
-    let plan = dp::plan_for_slot(ptype, slot, &target).map_err(pe)?;
+    let target = dp::image(ptype, payload, &ph.date, &ph.name, seq, &ph.tag, ph.flags).map_err(pe)?;
+    let w = Written { ptype, slot, seq, name: &ph.name, date: &ph.date };
+    write_into(c, &w, &target, line_text, ctx, &|after: &[Vec<u8>]| dp::active_slot(ptype, after) == Some(slot))
+}
+
+/// The slot a write goes to, and what the PASS line names.
+struct Written<'a> {
+    ptype: u8,
+    slot: usize,
+    seq: u32,
+    name: &'a str,
+    date: &'a str,
+}
+
+/// The plan for one slot, the write (payload sectors, the header's sector last, each read back) and the check that
+/// the new pack is the one in force afterwards.
+fn write_into(
+    c: &mut CpsClient<'_>,
+    w: &Written<'_>,
+    target: &[u8],
+    line_text: &str,
+    ctx: &ToolContext<'_>,
+    in_force: &dyn Fn(&[Vec<u8>]) -> bool,
+) -> ToolResult<()> {
+    let (ptype, slot) = (w.ptype, w.slot);
+    let pe = |e: crate::datapacks::PackError| ToolError::new("PackError", e.0);
+    let plan = dp::plan_for_slot(ptype, slot, target).map_err(pe)?;
     (ctx.print)(&line(
         PyDict::new().with(
             "plan",
             PyDict::new()
-                .with("type", if ptype == RADIO_ID { "radioid" } else { "air" })
+                .with("type", dp::type_name(ptype))
                 .with("slot", slot)
                 .with("address", pyjson::hex(dp::slot_address(ptype, slot).map_err(pe)? as i64))
-                .with("seq", seq as i64)
+                .with("seq", w.seq as i64)
                 .with("bytes", target.len())
                 .with("sectors", Py::List(plan.iter().map(|p| Py::Str(pyjson::hex(p.address as i64))).collect())),
         ),
@@ -585,17 +817,17 @@ fn write_pack(
     for s in describe(ptype, &after) {
         (ctx.print)(&line(PyDict::new().with("slot", slot_json(&s))));
     }
-    if after[slot] != target || dp::active_slot(ptype, &after) != Some(slot) {
+    if after[slot] != target || !in_force(&after) {
         return Err(ToolError::new("VerifyError", "the new pack is not the one in force after the write"));
     }
     (ctx.print)(&line(
         PyDict::new()
             .with("result", "PASS")
             .with("slot", slot)
-            .with("seq", seq as i64)
+            .with("seq", w.seq as i64)
             .with("sectors", plan.len())
-            .with("name", ph.name.clone())
-            .with("date", ph.date.clone()),
+            .with("name", w.name.to_string())
+            .with("date", w.date.to_string()),
     ));
     Ok(())
 }

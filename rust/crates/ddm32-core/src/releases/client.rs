@@ -460,3 +460,69 @@ pub fn download_app(
     }
     Ok(dest)
 }
+
+/// The folder the map packs of the releases are kept in (beside the firmware folders; never a firmware folder).
+pub const REF_PACKS: &str = "refpacks";
+
+/// The map pack of fv's release (its `ref_pack`), verified: the size and SHA-256 the signed manifest lists, a whole
+/// type-3 pack, and the firmware's structural check with the release's coordinate id. A failed download or check
+/// leaves nothing behind. Kept as releases_root/refpacks/VERSION/FILE (downloaded again only when it does not check).
+pub fn download_ref_pack(
+    fv: &FirmwareVersion,
+    releases_root: &Path,
+    net: &dyn ReleaseNet,
+    progress: Progress<'_>,
+) -> Result<PathBuf, VerifyError> {
+    let rp = fv
+        .entry
+        .ref_pack
+        .as_ref()
+        .ok_or_else(|| verr(VerifyFailure::NotInstallable, "This release has no map pack"))?;
+    if fv.is_legacy() {
+        return Err(verr(VerifyFailure::NotInstallable, "This release uses the old DDM25 names"));
+    }
+    let dir = releases_root.join(REF_PACKS).join(fv.version());
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(&rp.file);
+    if dest.is_file() && check_ref_file(&dest, rp).is_ok() {
+        return Ok(dest);
+    }
+    if dest.is_file() {
+        std::fs::remove_file(&dest)?;
+    }
+    let r = net
+        .download(&rp.url, &dest, rp.size, progress)
+        .map_err(VerifyError::from)
+        .and_then(|_| check_ref_file(&dest, rp));
+    if r.is_err() {
+        let _ = std::fs::remove_file(&dest);
+    }
+    r.map(|_| dest)
+}
+
+/// A downloaded map pack against its manifest entry.
+pub fn check_ref_file(path: &Path, rp: &super::RefPackEntry) -> Result<(), VerifyError> {
+    use crate::datapacks::{datapack as dp, refpack};
+    let data = std::fs::read(path)?;
+    if data.len() as u64 != rp.size || sha256_hex(&data) != rp.sha256 {
+        return Err(verr(
+            VerifyFailure::HashMismatch,
+            "The downloaded map pack's SHA-256 does not match the signed list",
+        ));
+    }
+    let bad = || verr(VerifyFailure::UnexpectedContents, "The downloaded map pack does not check");
+    let (h, payload) = dp::parse(&data);
+    let h = h.ok_or_else(bad)?;
+    if !h.crc_ok
+        || h.ptype != dp::REF
+        || h.format != rp.pack_format
+        || data.len() != dp::HEADER_SIZE + h.length as usize
+    {
+        return Err(bad());
+    }
+    let rules = refpack::Rules { dir_version: rp.dir_version, coord: Some(rp.coord_crc) };
+    if !refpack::validate(&payload, h.flags, &rules).is_valid() {
+        return Err(bad());
+    }
+    Ok(())
+}

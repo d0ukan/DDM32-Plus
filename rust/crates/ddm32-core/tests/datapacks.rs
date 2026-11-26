@@ -79,14 +79,14 @@ fn radioid_packs_equal_datapack_py() {
         assert_eq!(b(&c["payload"]), payload, "{name} payload");
         assert_eq!(
             b(&c["image"]),
-            dp::image(RADIO_ID, &payload, "20261121", "RadioID TR", 0, PYTHON_TAG).unwrap(),
+            dp::image(RADIO_ID, &payload, "20261121", "RadioID TR", 0, PYTHON_TAG, 0).unwrap(),
             "{name} image"
         );
         // image_cs: the C# program's tag; this program writes its own tag but the same header otherwise
         let cs = b(&c["image_cs"]);
         assert_eq!(
             cs,
-            dp::image(RADIO_ID, &payload, "20261121", "RadioID TR", 7, "DDM32Plus-win 1").unwrap(),
+            dp::image(RADIO_ID, &payload, "20261121", "RadioID TR", 7, "DDM32Plus-win 1", 0).unwrap(),
             "{name} C# tag"
         );
         n += 1;
@@ -168,8 +168,11 @@ fn air_packs_equal_datapack_py() {
         .collect();
     let payload = dp::air_payload(&fields).unwrap();
     assert_eq!(b(&a["payload"]), payload);
-    assert_eq!(b(&a["image"]), dp::image(AIR, &payload, "20261121", "TR aerodromes", 0, PYTHON_TAG).unwrap());
-    assert_eq!(b(&a["image_cs"]), dp::image(AIR, &payload, "20261121", "TR aerodromes", 3, "DDM32Plus-win 1").unwrap());
+    assert_eq!(b(&a["image"]), dp::image(AIR, &payload, "20261121", "TR aerodromes", 0, PYTHON_TAG, 0).unwrap());
+    assert_eq!(
+        b(&a["image_cs"]),
+        dp::image(AIR, &payload, "20261121", "TR aerodromes", 3, "DDM32Plus-win 1", 0).unwrap()
+    );
     let refused = strs(&a["refused"]);
     let one = |code: &str| dp::air_payload(&BTreeMap::from([(code.to_string(), vec![(0, 118000)])])).unwrap_err().0;
     assert_eq!(refused[0], one(""));
@@ -189,9 +192,9 @@ fn headers_equal_datapack_py() {
         match h.get("error") {
             Some(err) => assert_eq!(
                 err.as_str().unwrap().replace('\'', ""),
-                dp::header(t, &payload, date, name, seq, tag).unwrap_err().0.replace('\'', "")
+                dp::header(t, &payload, date, name, seq, tag, 0).unwrap_err().0.replace('\'', "")
             ),
-            None => assert_eq!(b(&h["header"]), dp::header(t, &payload, date, name, seq, tag).unwrap(), "{name}"),
+            None => assert_eq!(b(&h["header"]), dp::header(t, &payload, date, name, seq, tag, 0).unwrap(), "{name}"),
         }
     }
 }
@@ -260,12 +263,13 @@ fn the_region_guard_refuses_every_sector_outside() {
     assert!(dp::cps_plan(0, &[0; 1]).is_err());
     assert!(dp::plan_for_slot(AIR, 1, &vec![0; 0x4001]).is_err());
     assert!(dp::slot_address(AIR, 2).is_err());
-    assert!(dp::slot_address(3, 0).is_err());
+    assert!(dp::slot_address(4, 0).is_err());
     let full = dp::plan_for_slot(AIR, 1, &vec![0; 0x4000]).unwrap();
     assert_eq!(vec![0xEF5000, 0xEF6000, 0xEF7000, 0xEF4000], full.iter().map(|s| s.address).collect::<Vec<_>>());
-    let id = dp::plan_for_slot(RADIO_ID, 1, &vec![0; 0x40000]).unwrap();
-    assert_eq!(64, id.len());
-    assert!(id.iter().all(|s| (0xEB0000..0xEF0000).contains(&s.address)));
+    let id = dp::plan_for_slot(RADIO_ID, 1, &vec![0; 0x30000]).unwrap();
+    assert_eq!(48, id.len());
+    assert!(id.iter().all(|s| (0xEB0000..0xEE0000).contains(&s.address)));
+    assert!(dp::plan_for_slot(RADIO_ID, 1, &vec![0; 0x30001]).is_err());
 }
 
 #[test]
@@ -395,6 +399,7 @@ fn a_backup_shows_its_slots() {
         "Air",
         2,
         dp::TAG,
+        0,
     )
     .unwrap();
     q[0xEF4000..0xEF4000 + img.len()].copy_from_slice(&img);
@@ -470,6 +475,8 @@ struct FakeCps {
     refuse_commit_number: Option<usize>,
     opened: bool,
     closes: usize,
+    /// The CPS info's git field (12 bytes; "ddm32plus-b4" when not set: a version the tool cannot tell)
+    git: Option<[u8; 15]>,
 }
 
 impl FakeCps {
@@ -515,7 +522,10 @@ impl RadioPort for FakeCps {
                     let mut info = vec![0u8; 46];
                     info[..4].copy_from_slice(&3u32.to_le_bytes());
                     info[4..8].copy_from_slice(&self.radio_type.to_le_bytes());
-                    info[8..20].copy_from_slice(b"ddm32plus-b4");
+                    match self.git {
+                        Some(g) => info[8..23].copy_from_slice(&g),
+                        None => info[8..20].copy_from_slice(b"ddm32plus-b4"),
+                    }
                     info[24..35].copy_from_slice(b"Nov 21 2026");
                     info[40..44].copy_from_slice(&0xEF4018u32.to_le_bytes());
                     self.reply(&[0x52, 0, 46]);
@@ -610,7 +620,7 @@ fn radioid_image(n: usize, seq: u32, name: &str) -> Vec<u8> {
             (2860000 + i as i64 * 3, format!("TA{}A{}", i % 10, (b'A' + (i % 26) as u8) as char), format!("Name{i}"))
         })
         .collect();
-    dp::image(RADIO_ID, &dp::radioid_payload(&entries, 16).unwrap(), "20261121", name, seq, dp::TAG).unwrap()
+    dp::image(RADIO_ID, &dp::radioid_payload(&entries, 16).unwrap(), "20261121", name, seq, dp::TAG, 0).unwrap()
 }
 
 fn air_image(seq: u32) -> Vec<u8> {
@@ -621,6 +631,7 @@ fn air_image(seq: u32) -> Vec<u8> {
         "TR aerodromes",
         seq,
         dp::TAG,
+        0,
     )
     .unwrap()
 }
@@ -663,7 +674,9 @@ fn cps_read_shows_both_slots_of_each_type() {
     assert!(err.is_none(), "{err:?}");
     assert!(lines.iter().any(|l| l.contains("\"radio_type\": 11")));
     let slots: Vec<&String> = lines.iter().filter(|l| l.starts_with("{\"slot\"")).collect();
-    assert_eq!(4, slots.len());
+    assert_eq!(6, slots.len());
+    assert!(slots[2].contains("\"type\": \"ref\"") && slots[2].contains("\"state\": \"empty\""));
+    assert!(slots[4].contains("\"type\": \"air\""));
     assert!(slots[1].contains("\"in_force\": true") && slots[1].contains("\"count\": 20"));
     assert!(slots[0].contains("\"valid\": false"));
     assert_eq!("{\"result\": \"READ\"}", lines.last().unwrap());
@@ -682,7 +695,7 @@ fn cps_a_first_pack_goes_to_slot_zero_header_last() {
     assert!(err.is_none(), "{err:?}");
     let r = radio.borrow();
     assert_eq!(vec![0xE71000, 0xE72000, 0xE70000], r.commits);
-    let target = dp::image(RADIO_ID, &image[64..], "20261121", "RadioID TR", 1, dp::TAG).unwrap();
+    let target = dp::image(RADIO_ID, &image[64..], "20261121", "RadioID TR", 1, dp::TAG, 0).unwrap();
     assert_eq!(target, r.get(0xE70000, target.len()));
     assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 0, \"seq\": 1"));
     only_region_written(&r);
@@ -912,4 +925,211 @@ fn cps_a_refused_frame_never_reaches_the_port() {
 #[test]
 fn pack_errors_are_plain_messages() {
     assert_eq!("x", PackError("x".into()).to_string());
+}
+
+// --- the map pack (type 3) through the CPS writer (docs/mappack-design.md E.3) ---
+
+use ddm32_core::datapacks::refpack as rp;
+
+fn git(v: &str) -> Option<[u8; 15]> {
+    let mut g = [0u8; 15];
+    g[..v.len()].copy_from_slice(v.as_bytes());
+    Some(g)
+}
+
+fn release_pack() -> Vec<u8> {
+    ref_image(&ref_payload(COORD, &two_rpts(), "own+RadioID.net"), 0, "build 1.1.0", rp::hint(COORD))
+}
+
+#[test]
+fn cps_a_map_pack_goes_to_its_slot_header_last_with_its_flags() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.1.");
+    let t = tmp();
+    let image = release_pack();
+    let coord = format!("0x{COORD:08X}");
+    let (lines, err) =
+        run(&radio, &["write", "--port", "COM9", "--pack", &pack_file(&t, &image, "r.dpk"), "--coord", &coord]);
+    assert!(err.is_none(), "{err:?}");
+    let r = radio.borrow();
+    let n = image.len().div_ceil(4096) as u64;
+    let mut want: Vec<u64> = (1..n).map(|i| 0xEA0000 + i * 4096).collect();
+    want.push(0xEA0000);
+    assert_eq!(want, r.commits);
+    let written = r.get(0xEA0000, image.len());
+    assert_eq!(written[6..8], rp::hint(COORD).to_le_bytes(), "flags carried");
+    assert_eq!(1, u32::from_le_bytes([written[8], written[9], written[10], written[11]]));
+    assert_eq!(written[64..], image[64..]);
+    assert!(lines
+        .iter()
+        .any(|l| l.starts_with("{\"plan\": {\"type\": \"ref\", \"slot\": 0, \"address\": \"0xea0000\"")));
+    assert!(lines.iter().any(|l| l.contains("\"type\": \"ref\"") && l.contains("\"state\": \"valid\"")));
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 0, \"seq\": 1"));
+    only_region_written(&r);
+}
+
+#[test]
+fn cps_a_map_pack_that_does_not_check_never_opens_the_port() {
+    let t = tmp();
+    // for another firmware's coordinate id
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    let (_, err) =
+        run(&radio, &["write", "--port", "COM9", "--pack", &pack_file(&t, &release_pack(), "r.dpk"), "--coord", "0x1"]);
+    assert!(err.unwrap().message.contains("not for this firmware"));
+    assert!(!radio.borrow().opened);
+    // structurally bad
+    let mut p = ref_payload(COORD, &two_rpts(), "x");
+    let d = rp::directory(&p).unwrap();
+    let k = d.get(rp::RPT_KEY).unwrap().off as usize;
+    p[k] ^= 1;
+    let (_, err) =
+        run(&radio, &["write", "--port", "COM9", "--pack", &pack_file(&t, &ref_image(&p, 0, "x", 0), "b.dpk")]);
+    assert!(err.unwrap().message.contains("does not check"));
+    // a RadioID pack over 192 KB (as 3.1 could build): refused for every firmware
+    let payload = vec![0u8; 200_000];
+    let mut h = dp::header(RADIO_ID, &[], "20261119", "big", 0, "t", 0).unwrap();
+    h[12..16].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    h[16..20].copy_from_slice(&ddm32_core::radio::monitor::crc32(&payload, 0).to_le_bytes());
+    let hc = ddm32_core::radio::monitor::crc32(&h[..60], 0);
+    h[60..64].copy_from_slice(&hc.to_le_bytes());
+    let big = [h, payload].concat();
+    let (_, err) = run(&radio, &["write", "--port", "COM9", "--pack", &pack_file(&t, &big, "big.dpk")]);
+    assert!(err.unwrap().message.contains("192 KB"));
+    assert!(!radio.borrow().opened);
+    assert!(radio.borrow().requests.is_empty());
+}
+
+#[test]
+fn cps_the_running_firmwares_map_slot_is_kept() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.1.");
+    let x = 0x0BAD_F00D;
+    // slot A: the running 1.1's pack (coordinate X), slot B: empty; the target (1.2, COORD) rejects A
+    radio.borrow_mut().put(0xEA0000, &ref_image(&ref_payload(x, &two_rpts(), "x"), 6, "build 1.1.0", 0));
+    let t = tmp();
+    let coord = format!("0x{COORD:08X}");
+    let known = format!("1.1.0=0x{x:08X},1.2.0=0x{COORD:08X}");
+    let (lines, err) = run(
+        &radio,
+        &[
+            "write",
+            "--port",
+            "COM9",
+            "--pack",
+            &pack_file(&t, &release_pack(), "r.dpk"),
+            "--coord",
+            &coord,
+            "--known-coords",
+            &known,
+        ],
+    );
+    assert!(err.is_none(), "{err:?}");
+    assert!(radio.borrow().commits.iter().all(|a| (0xEE0000..0xEF0000).contains(a)));
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 1, \"seq\": 7"));
+}
+
+#[test]
+fn cps_an_old_firmware_and_a_big_radioid_pack_are_said() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.0.");
+    // a 1.0.6 RadioID pack of 200 KB in slot B (its header at 0xEB0000)
+    let mut h = dp::header(RADIO_ID, &[], "20261119", "multi", 2, "t", 0).unwrap();
+    h[12..16].copy_from_slice(&200_000u32.to_le_bytes());
+    let hc = ddm32_core::radio::monitor::crc32(&h[..60], 0);
+    h[60..64].copy_from_slice(&hc.to_le_bytes());
+    radio.borrow_mut().put(0xEB0000, &h);
+    let t = tmp();
+    let (lines, err) = run(&radio, &["write", "--port", "COM9", "--pack", &pack_file(&t, &release_pack(), "r.dpk")]);
+    assert!(err.is_none(), "{err:?}");
+    assert!(lines.iter().any(|l| l == "{\"note\": \"ref_after_update\"}"));
+    assert!(lines.iter().any(|l| l == "{\"warning\": \"radioid_big\", \"slot\": 1}"));
+    // the read shows it as too big, not damaged
+    let (lines, _) = run(&radio, &["read", "--port", "COM9"]);
+    assert!(lines.iter().any(|l| l.contains("\"address\": \"0xeb0000\"") && l.contains("\"state\": \"big\"")));
+}
+
+#[test]
+fn cps_update_ref_asks_before_replacing_a_user_built_pack() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.1.");
+    let own = rpt_rec(0, 0, 430_100_000, 0, "TA9OWN", 1);
+    let mine = ref_image(&ref_payload(COORD, std::slice::from_ref(&own), "own list"), 3, "refpack.py own", 0);
+    radio.borrow_mut().put(0xEE0000, &mine);
+    let t = tmp();
+    let f = pack_file(&t, &release_pack(), "r.dpk");
+    let coord = format!("0x{COORD:08X}");
+    let known = format!("1.1.0=0x{COORD:08X}");
+    let base = ["update-ref", "--port", "COM9", "--pack", &f, "--coord", &coord, "--known-coords", &known];
+    // no choice: ASK, nothing written
+    let (lines, err) = run(&radio, &base);
+    assert!(err.is_none(), "{err:?}");
+    assert!(lines
+        .iter()
+        .any(|l| l.starts_with("{\"ask\"") && l.contains("\"keep\": true") && l.contains("\"rebuild\": true")));
+    assert_eq!("{\"result\": \"ASK\"}", lines.last().unwrap());
+    assert!(radio.borrow().commits.is_empty());
+    // keep: nothing written
+    let (lines, _) = run(&radio, &[&base[..], &["--choice", "keep"]].concat());
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"KEPT\""));
+    assert!(radio.borrow().commits.is_empty());
+    // rebuild: the release sections with both repeater lists, into slot A (B is the running firmware's), tagged as
+    // the user's (so the next update asks again)
+    let (lines, err) = run(&radio, &[&base[..], &["--choice", "rebuild"]].concat());
+    assert!(err.is_none(), "{err:?}");
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 0, \"seq\": 4"));
+    let r = radio.borrow();
+    assert!(r.commits.iter().all(|a| (0xEA0000..0xEB0000).contains(a)));
+    let len = u32::from_le_bytes(r.get(0xEA000C, 4).try_into().unwrap()) as usize;
+    let img = r.get(0xEA0000, 64 + len);
+    let (h, payload) = dp::parse(&img);
+    let h = h.unwrap();
+    assert_eq!((dp::TAG, rp::hint(COORD)), (h.tag.as_str(), h.flags));
+    let d = rp::directory(&payload).unwrap();
+    assert_eq!(3, d.count(rp::RPT));
+    assert!(d.bytes(&payload, rp::RPT).chunks(44).any(|c| c == own.as_slice()));
+    assert_eq!(r.get(0xEE0000, mine.len()), mine, "the user's pack is untouched");
+}
+
+#[test]
+fn cps_update_ref_replaces_a_release_pack_and_skips_the_same_one() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.1.");
+    // an older release pack with the TRAC rows: replaced without asking (owner decision 2026-11-26)
+    let old = ref_image(&ref_payload(COORD, &two_rpts()[..1], "own+RadioID.net"), 2, "build 1.1.0", 0);
+    radio.borrow_mut().put(0xEA0000, &old);
+    let t = tmp();
+    let f = pack_file(&t, &release_pack(), "r.dpk");
+    let coord = format!("0x{COORD:08X}");
+    let (lines, err) = run(&radio, &["update-ref", "--port", "COM9", "--pack", &f, "--coord", &coord]);
+    assert!(err.is_none(), "{err:?}");
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 1, \"seq\": 3"));
+    let n = radio.borrow().commits.len();
+    // again: the radio has it, nothing written
+    let (lines, err) = run(&radio, &["update-ref", "--port", "COM9", "--pack", &f, "--coord", &coord]);
+    assert!(err.is_none(), "{err:?}");
+    assert_eq!("{\"result\": \"SAME\"}", lines.last().unwrap());
+    assert_eq!(n, radio.borrow().commits.len());
+    // update-ref takes only a map pack and its coordinate id
+    let (_, err) = run(&radio, &["update-ref", "--port", "COM9", "--pack", &f]);
+    assert!(err.is_some());
+    let (_, err) = run(&radio, &["update-ref", "--port", "COM9", "--pack", &f, "--coord", &coord, "--choice", "maybe"]);
+    assert_eq!(Some("2".to_string()), err.map(|e| e.message));
+}
+
+#[test]
+fn cps_version_and_coordinate_arguments() {
+    use ddm32_core::radio::cps::{parse_coord, parse_known_coords, running_rules, running_version};
+    assert_eq!(Some((1, 1)), running_version("ddm32-plus-1.1."));
+    assert_eq!(Some((1, 0)), running_version("ddm32-plus-1.0."));
+    assert_eq!(Some((1, 10)), running_version("ddm32-plus-1.10"));
+    assert_eq!(None, running_version("ddm32plus-b4"));
+    assert_eq!(None, running_version("open25-classic"));
+    assert_eq!(Some(0x1A2B3C4D), parse_coord("0x1A2B3C4D"));
+    assert_eq!(None, parse_coord("0x123456789"));
+    let k = parse_known_coords("1.1.0=0x11, 1.1.1=0x12,1.2.0=0x20").unwrap();
+    assert_eq!(rp::Running::MapPack(vec![0x11, 0x12]), running_rules(Some((1, 1)), &k));
+    assert_eq!(rp::Running::MapPack(vec![]), running_rules(Some((1, 3)), &k));
+    assert_eq!(rp::Running::NoMapPack, running_rules(Some((1, 0)), &k));
+    assert_eq!(rp::Running::Unknown, running_rules(None, &k));
+    assert!(parse_known_coords("1.1.0").is_err());
 }

@@ -61,6 +61,19 @@ export global App {
     in-out property <bool> test-confirm-open;
     in property <string> test-confirm-text;
     callback test-confirm-yes();
+    // the wizard's map pack step (docs/mappack-design.md E.3): the release has one, it goes first (over DDM32 Plus)
+    // or after the firmware, it was written in this session; the user-built pack question
+    in property <bool> map-available;
+    in property <bool> map-first;
+    in property <bool> map-done;
+    in property <string> map-text;
+    in property <string> map-kind: "info";
+    in-out property <bool> map-ask-open;
+    in property <string> map-ask-text;
+    in property <bool> map-ask-keep;
+    in property <bool> map-ask-rebuild;
+    callback map-write();
+    callback map-choose(string);
     // the wizard: 0 version, 1 backup choice, 2 backup, 3 check, 4 install, 5 done
     in-out property <int> step: 0;
     in property <[VersionRow]> versions;
@@ -173,6 +186,9 @@ export global Packs {
     in property <string> chosen-text;
     in property <bool> radioid-pack;
     in property <bool> air-pack;
+    // the map pack (type 3): what is chosen (a release's .dpk or a file), and whether one is
+    in property <string> map-result;
+    in property <bool> map-pack;
     in property <string> result;
     in property <string> result-kind: "info";
     in property <float> progress;
@@ -197,6 +213,8 @@ export global Packs {
     callback build-air();
     callback write-radioid();
     callback write-air();
+    callback write-map();
+    callback load-map();
     callback write-yes();
     callback load-dpk();
 }

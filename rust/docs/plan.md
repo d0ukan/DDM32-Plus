@@ -141,6 +141,20 @@ pages"; `tests/parity.rs`, screenshots, a11y and hidpi passes extended):
   box (pickers instead). Not tried: the keep-awake helpers on a real Linux / Mac, the window place on a multi-monitor
   PC with mixed DPI.
 
+### Done 2026-11-26 (3.2.0, branch mappack-rs): the map pack (docs/mappack-design.md)
+
+- Core: pack type 3 (`datapacks/refpack.rs`): layout 2 slots (RadioID 192 KB, map 0xEA0000 / 0xEE0000), the
+  firmware's structural check (C.2, version items -> "other"), slot judging as `scan_type`, the slot choice of R3
+  (never the running firmware's slot; sequence above every checked header), the header `flags` carried (S-A), the
+  user-built pack rule (S-B: tag not "build VERSION"; owner decision 2026-11-26 option (b): the repeater source says
+  nothing about who built it) and the rebuild (release sections + both repeater lists). The manifest's `ref_pack`
+  (schema 1; a higher schema is ignored), its download and check (`client::download_ref_pack`), `verify-manifest`
+  walking it. The data pack tool: three types in `read` (JSON "ref", "state"), type 3 in `write`, `update-ref`.
+- Window: the third row on Data packs, the wizard's map card (step 1 over DDM32 Plus, step 5 after a stock install),
+  the user-built pack question, the start-up question's line.
+- Host-tested only. To check with the firmware job: the MAP_META offsets (assumed, refpack.rs), the CPS `git` text
+  of a 1.1 build, a real release pack from `tools/refpack.py` through `files::check_image`. Radio rows: MP2, MP9.
+
 ### Still to do in stage 2
 
 - Done 2026-11-21 (third run): keyboard order, Enter on the primary button, screen reader names, 150 % / 200 %

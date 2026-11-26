@@ -380,7 +380,11 @@ fn a_backup_shows_its_packs() {
             && lines[1].ends_with("IN FORCE"),
         "{lines:?}"
     );
-    assert!(lines[2].ends_with("empty") && lines[3].starts_with("Air band slot 0") && lines.len() == 5, "{lines:?}");
+    assert!(
+        lines[2].ends_with("empty") && lines[3].starts_with("Map pack slot 0 (0xea0000)") && lines.len() == 7,
+        "{lines:?}"
+    );
+    assert!(lines[5].starts_with("Air band slot 0"), "{lines:?}");
     // not verified: said so, nothing read
     std::fs::remove_file(b.join("backup-manifest.json")).unwrap();
     assert_eq!(Err("not a verified backup".to_string()), packs::backup_lines("en", &b));
