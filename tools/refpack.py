@@ -298,15 +298,23 @@ def validate(p, flags=0, k=None):
         if v[:7] != want or v[7] != PROVINCES or s[PROV][1] != PROVINCES or v[8] != nr or v[9] != ns or v[10] != nd \
                 or s[DFIRST][1] != PROVINCES + 1 or s[DNFIRST][1] != PROVINCES or not npn or not ndn:
             return 'bad', 'map meta'
+        nxt = 0     # rings consecutive and disjoint, together exactly the steps (no step walked twice)
         for r in range(nr):
             _, _, first, count = struct.unpack_from('<hhHH', rings, 8 * r)
-            if count == 0 or first + count > ns:
+            if count == 0 or first != nxt:
                 return 'bad', f'ring {r}'
+            nxt = first + count
+        if nxt != ns:
+            return 'bad', 'rings do not cover the steps exactly'
         provs, _ = sec(PROV)
+        nxt = 0     # provinces' rings consecutive and disjoint in province order, together exactly the rings
         for q in range(PROVINCES):
             fr, rc, _, name, _, _, x0, y0, x1, y1 = struct.unpack_from('<HBBH6h', provs, 18 * q)
-            if fr + rc > nr or name >= npn or x0 > x1 or y0 > y1:
+            if fr != nxt or name >= npn or x0 > x1 or y0 > y1:
                 return 'bad', f'province {q}'
+            nxt = fr + rc
+        if nxt != nr:
+            return 'bad', 'provinces do not cover the rings exactly'
         if pnames[-1] != 0 or dnames[-1] != 0:
             return 'bad', 'name blob without its NUL'
         first = struct.unpack(f'<{PROVINCES + 1}H', sec(DFIRST)[0])

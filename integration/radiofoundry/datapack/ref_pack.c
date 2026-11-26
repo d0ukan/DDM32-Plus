@@ -90,22 +90,32 @@ static bool map_rules(uint32_t pa, const sec_t *s, uint8_t *b)
 	    le16(b + 26) != dists || S(REF_S_DFIRST).n != PROVS + 1u || S(REF_S_DNFIRST).n != PROVS || pnames == 0u ||
 	    dnames == 0u)
 		return false;
-	/* rings: first + count inside the steps (u32: map.c walks them with uint16_t), at least one step */
+	/* rings: consecutive and disjoint, at least one step each, together exactly the steps (ring r starts where ring
+	 * r - 1 ended): no ring is walked twice, so a map draw visits each step once whatever a pack holds */
+	uint32_t next = 0;
 	for (uint32_t r = 0; r < rings; r++) {
 		if (!dpk_raw(pa + S(REF_S_RING).off + 8u * r, b, 8))
 			return false;
 		uint32_t first = le16(b + 4), count = le16(b + 6);
-		if (count == 0u || first + count > steps)
+		if (count == 0u || first != next)
 			return false;
+		next = first + count;
 	}
-	/* provinces: their rings, their name, their box */
+	if (next != steps)
+		return false;
+	/* provinces: their rings consecutive and disjoint in province order, together exactly the rings; their name, their
+	 * box */
+	next = 0;
 	for (uint32_t p = 0; p < PROVS; p++) {
 		if (!dpk_raw(pa + S(REF_S_PROV).off + 18u * p, b, 18))
 			return false;
-		if ((uint32_t)le16(b) + b[2] > rings || le16(b + 4) >= pnames || (int16_t)le16(b + 10) > (int16_t)le16(b + 14) ||
+		if (le16(b) != next || le16(b + 4) >= pnames || (int16_t)le16(b + 10) > (int16_t)le16(b + 14) ||
 		    (int16_t)le16(b + 12) > (int16_t)le16(b + 16))
 			return false;
+		next = (uint32_t)le16(b) + b[2];
 	}
+	if (next != rings)
+		return false;
 	/* the name blobs end with a NUL */
 	if (!dpk_raw(pa + S(REF_S_PNAME).off + pnames - 1u, b, 1) || b[0] != 0u ||
 	    !dpk_raw(pa + S(REF_S_DNAME).off + dnames - 1u, b + 1, 1) || b[1] != 0u)

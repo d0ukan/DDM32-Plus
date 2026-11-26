@@ -43,7 +43,22 @@ def refpack_tests(ROOT, APP, OUT, flags, host):
               ROOT / 'integration/radiofoundry/air/airfield_data.c', ROOT / 'build/rpt/rpt_data.c']
     run(['clang', *flags, *cfg, '-I' + str(core / 'ui'), tp / 'test_refpack.c', *common, '-lm', '-o',
          OUT / 'test_refpack'], cwd=ROOT)
-    run([OUT / 'test_refpack'], cwd=ROOT)
+    # S1 (verifier 2026-11-26): every province pointing at 255 overlapping rings of all 22,000 steps passed the old
+    # rules (454 million step visits per map draw); rings and provinces must be consecutive and disjoint
+    m0 = refpack.load_map()
+    k0 = m0['k']
+    nst, nr = 22000, 255
+    amp_rings = [(k0['TURKEY_MAP_XMIN'], k0['TURKEY_MAP_YMIN'], 0, nst) for _ in range(nr)]
+    amp_provs = [tuple([0, nr] + list(p[2:6]) + [k0['TURKEY_MAP_XMIN'], k0['TURKEY_MAP_YMIN'], k0['TURKEY_MAP_XMAX'],
+                                                 k0['TURKEY_MAP_YMAX']]) for p in m0['provs']]
+    amp = refpack.payload(k0, refpack.sections(dict(m0, rings=amp_rings, steps=[(1, 0), (-1, 0)] * (nst // 2),
+                                                    provs=amp_provs)))
+    verdict = refpack.validate(amp, refpack.hint(k0), k0)
+    assert verdict[0] == 'bad', verdict
+    shared = dict(m0, provs=[tuple([m0['provs'][0][0]] + list(p[1:])) for p in m0['provs']])
+    assert refpack.validate(refpack.payload(k0, refpack.sections(shared)), 0, k0)[0] == 'bad'
+    (OUT / 'refpack_amplified.bin').write_bytes(amp)
+    run([OUT / 'test_refpack', OUT / 'refpack_amplified.bin'], cwd=ROOT)
     # T3: the same bytes from Python and from C
     run(['clang', *flags, *cfg, '-I' + str(core / 'ui'), tp / 'refpack_dump.c', *common, '-lm', '-o',
          OUT / 'refpack_dump'], cwd=ROOT)

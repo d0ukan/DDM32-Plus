@@ -59,6 +59,7 @@ static uint8_t *entry(uint8_t *p, uint16_t id)
 
 static uint32_t rd32(const uint8_t *p) { return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static void wr32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v, p[1] = (uint8_t)(v >> 8), p[2] = (uint8_t)(v >> 16), p[3] = (uint8_t)(v >> 24); }
+static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
 static void wr16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v, p[1] = (uint8_t)(v >> 8); }
 static uint8_t *sec(uint8_t *p, uint16_t id) { return p + rd32(entry(p, id) + 4); }
 static uint32_t cnt(uint8_t *p, uint16_t id) { return rd32(entry(p, id) + 8); }
@@ -190,6 +191,18 @@ static void test_validate(void)
 	BAD("province ring past the rings");
 	wr16(sec(work, REF_S_PROV) + 4, (uint16_t)cnt(work, REF_S_PNAME));	/* its name past the blob */
 	BAD("province name past the blob");
+	/* S1 (verifier): rings and provinces consecutive and disjoint, so a draw walks each step once */
+	wr16(sec(work, REF_S_RING) + 8u + 4u, 0);			/* ring 1 starts where ring 0 starts: they overlap */
+	BAD("overlapping rings");
+	wr16(sec(work, REF_S_RING) + 6, (uint16_t)(rd16(sec(work, REF_S_RING) + 6) + 1u));	/* ring 0 runs into ring 1 */
+	BAD("ring 0 running into ring 1");
+	wr16(sec(work, REF_S_RING) + 8u * (cnt(work, REF_S_RING) - 1u) + 6u,
+	     (uint16_t)(rd16(sec(work, REF_S_RING) + 8u * (cnt(work, REF_S_RING) - 1u) + 6u) - 1u));	/* the steps' tail unused */
+	BAD("rings not covering the steps");
+	wr16(sec(work, REF_S_PROV) + 18u * 1u, 0);			/* province 1 shares province 0's rings */
+	BAD("provinces sharing rings");
+	sec(work, REF_S_PROV)[18u * 80u + 2u] = 0;			/* province 80 without its ring: one left over */
+	BAD("provinces not covering the rings");
 	wr16(sec(work, REF_S_DFIRST) + 2u * 5u, 0);		/* first[] goes down */
 	BAD("district first decreasing");
 	wr16(sec(work, REF_S_DFIRST) + 2u * 81u, (uint16_t)(cnt(work, REF_S_DPOS) - 1u));
@@ -440,7 +453,20 @@ static void test_equal(void)
 	CHECK(read_bytes <= 40u * 1024u);
 }
 
-int main(void)
+/* S1: a pack whose provinces all point at every ring and every ring at all the steps (tools/test_datapack.py makes
+ * it with refpack.py): CRC-valid and well placed, refused so one map draw can never walk the steps many times */
+static void test_amplified(const char *path)
+{
+	static uint8_t p[REFPACK_MAX];
+	FILE *f = fopen(path, "rb");
+	size_t n = f != NULL ? fread(p, 1, sizeof p, f) : 0u;
+	if (f != NULL)
+		fclose(f);
+	CHECK(n > 1000u && verdict(p, n, ref_hint()) == DPK_BAD);
+	printf("  amplified pack (%zu B: every province all rings, every ring all steps): refused\n", n);
+}
+
+int main(int argc, char **argv)
 {
 	sim_flash_create(0x1000000u, NULL);
 	gf = sim_flash;
@@ -449,6 +475,8 @@ int main(void)
 	CHECK(full_n > 40000u && full_n <= REFPACK_MAX);
 	test_write();
 	test_validate();
+	if (argc > 1)
+		test_amplified(argv[1]);
 	test_sanitise();
 	test_slots();
 	test_race();
