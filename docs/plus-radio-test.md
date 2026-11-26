@@ -1045,3 +1045,23 @@ decision 2026-11-26 (H.5 option (b)): the TRAC list ships, so MP7's TRAC repeate
 | MP10 | Boot time with both map slots written (after MP9) | at most ~0.15-0.2 s longer than 1.0.6 |
 | MP11 | DOTA: send the map pack to a second radio (if available) | ~7-9 min, accepted, in force; a pack for another version: "Map pack for another version", nothing erased |
 | MP12 (optional) | Downgrade to 1.0.6 and back | RadioID kept both ways; the map pack in force again on 1.1 |
+
+## Auto airfield scan and auto repeater scan (branch `autoscan`, docs/autoscan-design.md)
+
+Each serial / flash / RF step needs the owner's approval in chat (AGENTS.md rule 1). Host-tested only so far. Needs
+the map pack (MP2) and a GPS fix. PTT rows transmit: only on the owner's licensed bands and repeaters.
+
+| Row | Do | Expect |
+|---|---|---|
+| AS1 | Tools > Repeater scan at home, GPS fixed | "Repeater scan on"; Home: the ring, FM letters first, labels "CALL 12km", the nearest within 60 km as Tools > Repeaters lists them |
+| AS2 | Let it run 5 min near an active FM and an active DMR repeater | both heard on their letters; the DMR letter's slot as listed; Busy / age marks as on any ring |
+| AS3 | A call on letter D (not the selected one), PTT during it and again in the hang time | "Talking on D"; repeater D answers (input, access tone); nothing keyed on A |
+| AS4 | PTT with nothing heard | transmits on the selected letter (the pill), as in multi-watch |
+| AS5 | PTT on a DMR letter | the listed slot, your DMR VFO talk group (or TG 9) |
+| AS6 | Drive 20+ km | a letter changes at most about once a minute ("+CALL 9km"); none during a call or its hang time; the labels' km follow |
+| AS7 | Mixed ring 4 FM + 2 DMR: a DMR over on the first DMR letter after the FM ones, 10 tries | heard 10/10 (review M5); note the ring's round time |
+| AS8 | Back twice | "Repeater scan off"; VFOs, channel and your own watch as before; it does not come back by itself |
+| AS9 | GPS off, then on without a fix, then a fix | refused "GPS is off"; "on: waiting for GPS"; the ring at the fix |
+| AS10 | Tools > Air scan near an airport | AM letters, "LTxx TWR" labels, no ATIS; PTT refused (AM) |
+| AS11 | During a scan start DOTA (receive) or cross-band | the scan ends ("... off"), the session runs; after it the radio is as before the scan; the beacon and satellite hold work again (no stuck air state) |
+| AS12 | During a scan write a new map pack (programmer); then the scan's held digit on a VFO | the letters chosen again from the new pack; the digit starts / stops the scan in VFO mode |

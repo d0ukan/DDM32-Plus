@@ -5413,7 +5413,7 @@ radio does not have (Battery without a voltmeter, the SOS key entry) shows in th
 old toast. Design choice: a flat list of ten rows, no sub-page (a page of its own would cost a screen definition).
 
 **Stored** in one appended field, `settings_t.hold_tool[12]` (10 bytes, 2 spare for the size to stay a multiple of 4):
-0 none, else the tool's number in Tools (its enum index + 1; Battery 41; the zone offer is not offered). The record grows
+0 none, else the tool's number in Tools (its enum index + 1; Battery 41, 43 since the auto scans; the zone offer is not offered). The record grows
 from 392 to 404 B, page 1 only (still two pages: 168 of 236 B in page 1); no field moves. A record from before has
 no such bytes: `settings_init` starts from `settings_defaults`, so an older record, a fresh radio and a factory reset
 all read hold 4 = ISS (code 40, `SETTINGS_HOLD_ISS`) and the rest none. Firmware from before clamps the page it reads
@@ -5483,3 +5483,54 @@ channel filtering another, an unlisted one stays muted, the count bounds the lis
 `tests/plus/test_p25rxgl.c` (`tools/test_p25rxgl.py` in `classic-test`: the real codeplug over a simulated flash, list
 / Any / None and the talkgroup over a save and a reboot, the record byte, the filter rule, the talkgroups taken, the
 worker hand-over faked). Host-tested only; not run on the radio. Budget and design: `docs/rx-group-list-budget.md`.
+
+## Auto airfield scan and auto repeater scan (`CONFIG_AUTO_SCAN`, branch `autoscan`)
+
+Design and review resolution: `docs/autoscan-design.md`. Tools > **Air scan** ("Hava tarama", tool 42, AM-capable
+radios) and Tools > **Repeater scan** ("Röle tarama", tool 43), after ISS: Battery moves from 41 to 43 (a hold key
+stored as Battery now opens Air scan; set it again in Settings > Keys). Each shows On / Off; OK toggles and goes to
+Home; a digit held on Home can start / stop either (Settings > Keys, none by default; it works on a VFO too, not while
+a frequency is typed). Needs the map pack and the GPS (refused with a toast without them; the scan never switches the
+GPS on). RAM only: off after a power cycle.
+
+- **What it watches.** The nearest repeaters of the map pack (FM and DMR together, a position, RX in the radio's
+  bands) within 60 km, or the airfield frequencies within 100 km (each airfield's best first, round robin: TWR, APP /
+  DEP, AFIS / INFO / CTAF, GND, the rest; ATIS left out; a frequency once), at most six, on the multi-watch ring: each
+  letter its own VFO, FM letters before DMR ones. Home's rows show a label on line 1 ("ELMADAG 12km", "LTAI TWR"),
+  mode and frequency on line 2. Two letters make dual watch's pair; fewer than two: no ring, the user's state as it
+  was, the scan waits ("Repeater scan: none within 60 km" / "1 repeater only, waiting").
+- **Letters.** FM: the output, 12.5 / 25 kHz as listed, RX tone off, TX = the listed input, the access tone as the TX
+  tone (the settings of Tools > Repeaters' tune). DMR: the listed colour code and slot (unknown or both: slot 1), the
+  user's DMR VFO talk target as it was at the start (none chosen: TG 9). Air: AM, receive only (as the air watch).
+- **Refresh.** Looked at once a second; after the first fix, every 30 s at most and only after moving 1 km (air: 3 km).
+  A letter goes beyond 110 % of the radius; a new one replaces the farthest only when 20 % and 2 km nearer (the auto
+  repeater's rule): no flapping. Only changed letters are retuned ("+YM2KA 9km"). Never while a call comes in, the ring
+  holds a signal or waits after one, or the radio transmits: the radio core refuses such a replacement too and the UI
+  asks again once it is quiet. A new map pack: everything chosen again; a pack without the kind's data: off.
+- **PTT.** While the ring holds a letter or waits after its call (the Dual watch delay), PTT talks on that letter (the
+  one you hear) and the PTT pill moves there; with nothing heard, on the selected letter as in multi-watch. No new TX
+  rule: an air letter is refused as always, an input outside the bands by the band check. This applies to an
+  airfield's Watch all too (its letters refuse TX anyway).
+- **Stops.** Back twice, # 5, the watch key, the same tool or digit again, an airfield's Watch all, a zone / VFO scan
+  or dual watch, DOTA, cross-band, a power off. "Repeater scan off" / "Air scan off"; the user's VFOs, position and
+  watch come back. A stopped scan stays stopped. The Change-letter pickers are refused while it runs ("The scan picks
+  its letters: stop it first"); Up / Down step the selected letter's VFO until a refresh replaces it. The auto
+  repeater's offers wait while a scan is on.
+- **Fixes to the air watch on the way** (review M3, M5, m9): DOTA and cross-band end the air state before they take
+  the radio (`air_session_end`; before, its end request was dropped and `sm->air` stayed set until a power cycle:
+  nothing noted, the beacon refused); a zone / VFO scan or dual watch asked for ends it first (the UI's end no longer
+  stops the new scan); the faster ring counts a stop's dwell from the end of a slow retune (FM <-> DMR ~170 ms: the
+  first DMR letter after FM gets its whole window), as the zone scan does since v1.0.3.
+
+Files: `integration/radiofoundry/map/autoscan.{c,h}` (selection, portable), `map/ui_autoscan.c` (the UI task's side),
+`air/ui_airwatch.inc` / `air/radio_airwatch.inc` (letter kinds, replacement, talk back, session end),
+`tools/plus_autoscan.py` (Tools entries, hooks; the last prepare). RREQ_AIR_VFO's arg: bits 0-2 letter, 3-4 kind,
+5 narrow, 6 replace, 7 ATIS, 8-13 FM tone index + 1 or DMR CC / slot, 14-31 offset in 1.25 kHz (signed). Not in this
+version: NXDN repeaters (no rows and no RAN in the map pack), a "CC unknown" mark (the list's CC 1 is used as given), a
+hold cap for a busy DMR repeater.
+
+Host tests: `tests/plus/test_autoscan.c` (`tools/test_autoscan.py`: selection against brute force over the country,
+merge, a drive without flapping, when a refresh is due; the radio core's hooks in the prepared source),
+`tests/plus/test_airwatch_radio.inc` (FM / DMR letters, PTT on the held and waited-on letter, replacement refused under
+a call, a zone scan during it), `tests/plus/test_ui_air.c` (the ring with labels, stop, moving, none / one, GPS, air
+scan, map pack changes, DOTA; English and Turkish). Host-tested only (docs/plus-radio-test.md AS1 ... AS12).

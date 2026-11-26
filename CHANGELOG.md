@@ -3,6 +3,24 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased
+
+Host-tested only; not yet run on the radio (docs/plus-radio-test.md AS1 ... AS12).
+
+- **Auto airfield scan and auto repeater scan** (Tools > Air scan, Tools > Repeater scan, or a held digit set in
+  Settings > Keys; docs/plus.md, docs/autoscan-design.md). With the map pack and a GPS fix the multi-watch ring watches
+  the six nearest repeaters (FM and DMR, within 60 km) or airfield frequencies (within 100 km, TWR / APP first, no
+  ATIS), each letter its own VFO with a label on Home ("CALL 12km", "LTAI TWR"), and follows you as you drive (every
+  30 s at most, after 1 km / 3 km, never during a call). PTT during a call or its hang time talks on the letter you
+  hear; otherwise on the selected one. FM letters transmit to the repeater's input with its access tone, DMR letters
+  on the listed slot to your DMR VFO talk group; air letters stay receive only. Off at power on.
+- **Tool numbers**: Air scan is 42 and Repeater scan 43; Battery moves from 41 to 43. A hold key stored as Battery now
+  opens Air scan: set it again in Settings > Keys.
+- **Fixes** (air watch and multi-watch): DOTA and cross-band started during an airfield watch left the radio in the
+  air state until a power cycle (nothing noted, the beacon and satellite hold refused); a zone scan started during it
+  could be stopped again by the watch's end; on a mixed FM / DMR ring the first DMR letter after an FM one lost most of
+  its listening time to the mode switch. PTT during an airfield watch now picks the letter heard (still refused: AM).
+
 ## v1.1.0 (2026-11-26, with programmer 3.2.0)
 
 Firmware 1.1.0 and programmer 3.2.0 (owner decision 2026-11-26). Host-tested only; not yet run on the radio.
