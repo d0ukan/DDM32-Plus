@@ -703,11 +703,69 @@ fn verifier_findings_on_the_slot_choice() {
     // SF4: a 1.1.x patch build whose id the program does not know: the slot valid under its own id is kept
     let patch = 0x0BAD_F00D;
     let images = [slot(&ref_payload(patch, &two_rpts(), "x"), 7, "build 1.1.1"), slot(&release, 3, "build 1.1.0")];
-    assert_eq!(
-        Err("both map slots may be in use by the running firmware; nothing is written".to_string()),
-        rp::choose_slot(&images, &run11, &target, &mine, &[], false)
-    );
+    assert_eq!(Err(rp::BOTH_IN_USE.to_string()), rp::choose_slot(&images, &run11, &target, &mine, &[], false));
     // when that id is known to be another version's, it is not protected
     let run11b = Running::MapPack(vec![COORD], vec![patch]);
     assert_eq!(w(0, 8), rp::choose_slot(&images, &run11b, &target, &mine, &[], false));
+}
+
+#[test]
+fn reverification_findings() {
+    let target = rules();
+    // SF-A: the rings cover exactly the steps, the provinces exactly the rings
+    let mut s = ref_sections(&two_rpts(), "x");
+    s[3].2.extend([1, 1]); // one step more than the rings use
+    s[0].2[rp::META_STEPS..rp::META_STEPS + 2].copy_from_slice(&82u16.to_le_bytes());
+    assert!(is_bad(rp::validate(&rp::assemble(COORD, &s).unwrap(), 0, &target)), "a step no ring uses");
+    let mut s = ref_sections(&two_rpts(), "x");
+    s[1].2[80 * 18 + 2] = 0; // the last province's ring count 1 -> 0
+    assert!(is_bad(rp::validate(&rp::assemble(COORD, &s).unwrap(), 0, &target)), "a ring no province uses");
+    // SF-B: a 1.3 radio whose own id the program does not know: ids of other versions may still be in force
+    let x = 0x0BAD_F00D;
+    let a5 = slot(&ref_payload(x, &two_rpts(), "x"), 5, "build 1.1.0");
+    let mut b9 = slot(&good(), 9, "build 1.2.0");
+    *b9.last_mut().unwrap() ^= 1;
+    let w = |slot, seq| Ok(SlotChoice::Write { slot, seq });
+    assert_eq!(
+        w(1, 10),
+        rp::choose_slot(
+            &[a5.clone(), b9.clone()],
+            &Running::MapPack(vec![], vec![x, COORD]),
+            &target,
+            &good(),
+            &[],
+            false
+        )
+    );
+    // with the version's own id known, other versions' ids are not the running one
+    assert_eq!(
+        w(0, 10),
+        rp::choose_slot(&[a5, b9], &Running::MapPack(vec![0x5555], vec![x, COORD]), &target, &good(), &[], false)
+    );
+    // N-a: the refusal says what to do
+    assert!(rp::BOTH_IN_USE.contains("check for updates online"));
+}
+
+/// SF-A on the real public pack (when present): its last ring or province shortened is BAD, as the firmware says.
+#[test]
+fn the_real_pack_shortened_is_bad() {
+    let path = std::env::var("DDM32_REF_PACK")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("E:/GIT-REPO/ddm32-wt/mp-scripts/ddm32-ref-public.dpk"));
+    let Ok(data) = std::fs::read(&path) else { return };
+    let payload = data[64..].to_vec();
+    let r = Rules::new(Some(rp::COORD_1_1));
+    assert!(rp::validate(&payload, 0x1001, &r).is_valid());
+    let d = rp::directory(&payload).unwrap();
+    let rings = d.get(rp::RINGS).unwrap();
+    let last_ring = rings.off as usize + 8 * (rings.count as usize - 1);
+    let mut p = payload.clone();
+    let n = u16::from_le_bytes([p[last_ring + 6], p[last_ring + 7]]);
+    p[last_ring + 6..last_ring + 8].copy_from_slice(&(n - 1).to_le_bytes());
+    assert!(is_bad(rp::validate(&p, 0x1001, &r)), "last ring {n} -> {}", n - 1);
+    let provs = d.get(rp::PROVINCES).unwrap();
+    let last_prov = provs.off as usize + 18 * 80;
+    let mut p = payload;
+    p[last_prov + 2] -= 1;
+    assert!(is_bad(rp::validate(&p, 0x1001, &r)), "last province one ring less");
 }

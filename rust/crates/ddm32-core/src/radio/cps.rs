@@ -665,7 +665,8 @@ fn data_pack_run(
     }
     let (image, ph) = pack.unwrap();
     if ph.ptype != REF {
-        return write_pack(&mut c, &image, &ph, line_text, ctx);
+        let big_live = !matches!(running, Running::MapPack(..));
+        return write_pack(&mut c, &image, &ph, big_live, line_text, ctx);
     }
     let target = Rules::new(target_coord(opts.coord, &running, &image[HEADER_SIZE..])?);
     if let refpack::Verdict::Bad(e) | refpack::Verdict::Other(e) =
@@ -771,6 +772,7 @@ fn write_pack(
     c: &mut CpsClient<'_>,
     image: &[u8],
     ph: &PackHeader,
+    big_live: bool,
     line_text: &str,
     ctx: &ToolContext<'_>,
 ) -> ToolResult<()> {
@@ -780,7 +782,8 @@ fn write_pack(
     for s in describe(ptype, &before) {
         (ctx.print)(&line(PyDict::new().with("slot", slot_json(&s))));
     }
-    let (slot, seq) = if ptype == RADIO_ID { radioid_slot(&before)? } else { (dp::inactive_slot(ptype, &before), 0) };
+    let (slot, seq) =
+        if ptype == RADIO_ID { radioid_slot(&before, big_live)? } else { (dp::inactive_slot(ptype, &before), 0) };
     let seq = if ptype == RADIO_ID { seq } else { dp::next_seq(&before).map_err(pe)? };
     let payload = &image[HEADER_SIZE..];
     let target = dp::image(ptype, payload, &ph.date, &ph.name, seq, &ph.tag, ph.flags).map_err(pe)?;
@@ -788,13 +791,14 @@ fn write_pack(
     write_into(c, &w, &target, line_text, ctx, &|after: &[Vec<u8>]| dp::active_slot(ptype, after) == Some(slot))
 }
 
-/// A RadioID write's slot (N1): a slot whose header checks but whose pack is over 192 KB (a 1.0.x pack: only its
-/// header is read) counts as a valid pack of its sequence, since a 1.0.x firmware may have it in force; the new pack
-/// goes into the other slot, with a sequence above both.
-fn radioid_slot(images: &[Vec<u8>]) -> ToolResult<(usize, u32)> {
+/// A RadioID write's slot (N1): on a firmware before 1.1 (or one the tool cannot tell) a slot whose header checks
+/// but whose pack is over 192 KB (only its header is read) counts as a valid pack of its sequence, since that firmware
+/// may have it in force; on 1.1+ such a pack is not used (DPK_BIG) and the slot 1.1 uses stays the one in force. The
+/// new pack goes into the other slot, with a sequence above both.
+pub fn radioid_slot(images: &[Vec<u8>], big_live: bool) -> ToolResult<(usize, u32)> {
     let live = |img: &Vec<u8>| -> Option<u32> {
         let h = dp::parse(img).0?;
-        let big = h.ptype == RADIO_ID && h.length as usize > dp::RADIO_ID_PAYLOAD_MAX;
+        let big = big_live && h.ptype == RADIO_ID && h.length as usize > dp::RADIO_ID_PAYLOAD_MAX;
         (h.ptype == RADIO_ID && (h.crc_ok || big)).then_some(h.seq)
     };
     let mut best: Option<(usize, u32)> = None;

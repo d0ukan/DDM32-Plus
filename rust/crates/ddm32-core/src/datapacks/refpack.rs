@@ -337,6 +337,9 @@ fn map_rules(p: &[u8], d: &Directory, fw_coord: u32) -> Result<(), String> {
         }
         next_step += count;
     }
+    if next_step != steps {
+        return Err(format!("the rings cover {next_step} of {steps} steps"));
+    }
     let pb = d.bytes(p, PROVINCES);
     let mut next_ring = 0u32;
     for i in 0..provinces as usize {
@@ -357,6 +360,9 @@ fn map_rules(p: &[u8], d: &Directory, fw_coord: u32) -> Result<(), String> {
         if lei16(r, 10) > lei16(r, 14) || lei16(r, 12) > lei16(r, 16) {
             return Err(format!("province {i}: min > max"));
         }
+    }
+    if next_ring != rings {
+        return Err(format!("the provinces cover {next_ring} of {rings} rings"));
     }
     // rule 4
     if d.count(DIST_FIRST) != provinces + 1 || d.count(DIST_NAME_FIRST) != provinces {
@@ -645,7 +651,8 @@ pub fn protected(images: &[Vec<u8>], running: &Running) -> Vec<usize> {
                     .iter()
                     .filter_map(|img| checked_header(img).filter(|h| h.crc_ok).map(|_| dp::parse(img).1))
                     .filter_map(|p| directory(&p).ok().map(|d| d.coord))
-                    .filter(|c| !foreign.contains(c)),
+                    // ids known as other versions' are left out only when the program knows this version's ids
+                    .filter(|c| coords.is_empty() || !foreign.contains(c)),
             );
             for c in candidates {
                 if let Some(s) = in_force(images, &Rules::new(Some(c))) {
@@ -672,6 +679,9 @@ pub enum SlotChoice {
         slot: usize,
     },
 }
+
+/// The refusal when both slots may be the running firmware's: why, and what the user can do.
+pub const BOTH_IN_USE: &str = "both map slots may be in use by the running firmware; nothing is written. The program      does not know the map pack id of the radio's firmware version: check for updates online (the release list names      the ids) and try again, or install the firmware again first";
 
 /// The code of the refusal when the only slot left would destroy a RadioID pack over 192 KB (its tail lies in that
 /// map slot); the tool writes it only with --allow-radioid-loss.
@@ -718,7 +728,7 @@ pub fn choose_slot(
         *cands.iter().min_by_key(|s| (checked_header(&images[**s]).map_or(0, |h| h.seq), **s)).unwrap()
     };
     if free.is_empty() {
-        return Err("both map slots may be in use by the running firmware; nothing is written".into());
+        return Err(BOTH_IN_USE.into());
     }
     let safe: Vec<usize> = free.iter().copied().filter(|s| !avoid.contains(s)).collect();
     let slot = if !safe.is_empty() {

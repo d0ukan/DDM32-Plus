@@ -165,6 +165,9 @@ pages"; `tests/parity.rs`, screenshots, a11y and hidpi passes extended):
   write counts a header-checked pack over 192 KB as a live pack; the map pack refusals have Turkish texts.
 - The firmware's later rule mirrored: province ring ranges and ring step ranges consecutive and disjoint (a crafted
   pack with shared ranges is refused).
+- Re-verification: the rings cover exactly the steps and the provinces exactly the rings; other versions' ids are
+  left out of the running firmware's possible ids only when its own id is known; a RadioID pack over 192 KB counts
+  as live for the slot choice only below 1.1; the "both slots in use" refusal says what to do.
 - Host-tested only. Still unconfirmed on the radio: the CPS `git` text of a 1.1 build ("ddm32-plus-1.1."). Radio
   rows: MP2, MP9.
 

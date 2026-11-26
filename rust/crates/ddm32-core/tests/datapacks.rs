@@ -1256,3 +1256,24 @@ fn cps_n1_a_radioid_write_never_takes_a_big_pack_in_force() {
     assert!(radio.borrow().commits.iter().all(|a| (0xE70000..0xEA0000).contains(a)));
     assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 0, \"seq\": 10"), "{lines:?}");
 }
+
+#[test]
+fn cps_nb_a_big_radioid_pack_counts_as_live_only_before_1_1() {
+    use ddm32_core::radio::cps::radioid_slot;
+    let images = vec![radioid_image(10, 2, "used"), big_radioid_header(9)];
+    // 1.0.x (or not known): the big pack may be in force: the other slot, above it
+    assert_eq!((0, 10), radioid_slot(&images, true).unwrap());
+    // 1.1+: the big pack is not used (DPK_BIG): slot A is the one in force and stays
+    assert_eq!((1, 3), radioid_slot(&images, false).unwrap());
+    // through the tool on a 1.1 radio
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.1.");
+    radio.borrow_mut().put(0xE70000, &images[0]);
+    radio.borrow_mut().put(0xEB0000, &images[1]);
+    let t = tmp();
+    let (lines, err) =
+        run(&radio, &["write", "--port", "COM9", "--pack", &pack_file(&t, &radioid_image(20, 0, "new"), "n.dpk")]);
+    assert!(err.is_none(), "{err:?}");
+    assert!(radio.borrow().commits.iter().all(|a| (0xEB0000..0xEE0000).contains(a)));
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 1, \"seq\": 3"), "{lines:?}");
+}
