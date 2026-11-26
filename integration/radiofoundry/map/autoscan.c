@@ -230,6 +230,44 @@ uint8_t as_merge(as_pick_t cur[], uint8_t n, const as_pick_t cand[], uint8_t nc,
 	return n;
 }
 
+uint8_t as_place(as_pick_t cur[], uint8_t n, const as_pick_t want[], uint8_t m)
+{
+	uint8_t kept = 0, taken = 0, gone = 0;	/* bit k: cur[k] stays; bit j: want[j] placed; bit k: place k empty */
+	if (n > AS_MAX)
+		n = AS_MAX;
+	if (m > AS_MAX)
+		m = AS_MAX;
+	for (uint8_t k = 0; k < n; k++)
+		for (uint8_t j = 0; j < m; j++)
+			if (!((taken >> j) & 1u) && want[j].id == cur[k].id) {
+				cur[k].d_m = want[j].d_m;
+				kept |= (uint8_t)(1u << k);
+				taken |= (uint8_t)(1u << j);
+				break;
+			}
+	uint8_t j = 0;
+	for (uint8_t k = 0; k < n; k++) {	/* a place whose letter left: the next new one */
+		if ((kept >> k) & 1u)
+			continue;
+		while (j < m && ((taken >> j) & 1u))
+			j++;
+		if (j < m) {
+			cur[k] = want[j];
+			taken |= (uint8_t)(1u << j);
+		} else {
+			gone |= (uint8_t)(1u << k);
+		}
+	}
+	for (; j < m && n < AS_MAX; j++)	/* more: after the last */
+		if (!((taken >> j) & 1u))
+			cur[n++] = want[j];
+	uint8_t c = 0;	/* places left empty: closed up (fewer letters: a new ring) */
+	for (uint8_t k = 0; k < n; k++)
+		if (!((gone >> k) & 1u))
+			cur[c++] = cur[k];
+	return c;
+}
+
 void as_group(as_pick_t l[], uint8_t n)
 {
 	for (uint8_t k = 1; k < n && k < AS_MAX; k++) {	/* each non-DMR letter moves before the DMR ones ahead of it */

@@ -15,6 +15,7 @@ typedef struct {
 	uint32_t hz[6];
 	uint8_t atis;			/* the VFOs asked for as an ATIS (UI_AIR_ATIS) */
 	uint32_t arg[6];		/* each VFO's last request bits (DDM32 Plus auto scan: UI_AIR_*) */
+	uint16_t tone[6];		/* ... and access tone (Hz x 10, 0 none) */
 	int replaced, refused;		/* refreshes (UI_AIR_REPLACE) taken, refused */
 	int refuse;			/* the next this many refreshes refused anyway (the ring held by the time the radio core
 				 * read them, after the UI saw it quiet) */

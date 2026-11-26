@@ -64,7 +64,7 @@ uint32_t air_sim_vfo_hz(uint8_t idx)
 	return c.rx_hz;
 }
 
-void ui_svc_air_vfo(uint32_t arg, uint32_t hz)
+void ui_svc_air_vfo(uint32_t arg, uint32_t hz, uint16_t tone10)
 {
 	air_sim.vfo_calls++;
 	bool atis = (arg & UI_AIR_ATIS) != 0;
@@ -72,6 +72,7 @@ void ui_svc_air_vfo(uint32_t arg, uint32_t hz)
 	if (idx >= 6)
 		return;
 	air_sim.arg[idx] = arg;
+	air_sim.tone[idx] = tone10;
 	/* DDM32 Plus auto scan: a refresh is refused under a call, its wait and a transmission, and after the end, as the
 	 * radio core does (radio_airwatch.inc) */
 	if ((arg & UI_AIR_REPLACE) != 0 && air_sim.refuse > 0) {
@@ -81,7 +82,8 @@ void ui_svc_air_vfo(uint32_t arg, uint32_t hz)
 	}
 	if ((arg & UI_AIR_REPLACE) != 0 && (!air_kept.kept || view.state == RS_TX ||
 					      (view.scan == 3 && (view.scan_phase == SCAN_PH_HOLD ||
-								  view.scan_phase == SCAN_PH_RESUME)))) {
+								  view.scan_phase == SCAN_PH_RESUME ||
+								  view.scan_phase == SCAN_PH_PROBE)))) {
 		air_sim.refused++;
 		return;
 	}
@@ -120,8 +122,8 @@ void ui_svc_air_vfo(uint32_t arg, uint32_t hz)
 			f.ts = (uint8_t)((p >> 4) == 2u ? 2u : 1u);
 		} else {
 			f.bw = (arg & UI_AIR_NARROW) != 0 ? RADIO_BW_12K5 : RADIO_BW_25K;
-			if (p != 0 && p <= TONES_CTCSS_COUNT)
-				f.tx_tone = (subtone_t){ TONE_CTCSS, tones_ctcss[p - 1u] };
+			if (tone10 != 0)
+				f.tx_tone = (subtone_t){ TONE_CTCSS, tone10 };
 		}
 	}
 	sim_vx_ok[idx] = false;

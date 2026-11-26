@@ -5496,17 +5496,20 @@ GPS on). RAM only: off after a power cycle.
 - **What it watches.** The nearest repeaters of the map pack (FM and DMR together, a position, RX in the radio's
   bands) within 60 km, or the airfield frequencies within 100 km (each airfield's best first, round robin: TWR, APP /
   DEP, AFIS / INFO / CTAF, GND, the rest; ATIS left out; a frequency once), at most six, on the multi-watch ring: each
-  letter its own VFO, FM letters before DMR ones. Home's rows show a label on line 1 ("ELMADAG 12km", "LTAI TWR"),
+  letter its own VFO, FM letters before DMR ones when the ring is first built. Home's rows show a label on line 1 ("ELMADAG 12km", "LTAI TWR"),
   mode and frequency on line 2. Two letters make dual watch's pair; fewer than two: no ring, the user's state as it
   was, the scan waits ("Repeater scan: none within 60 km" / "1 repeater only, waiting").
 - **Letters.** FM: the output, 12.5 / 25 kHz as listed, RX tone off, TX = the listed input, the access tone as the TX
-  tone (the settings of Tools > Repeaters' tune). DMR: the listed colour code and slot (unknown or both: slot 1), the
+  tone as listed, also one outside the CTCSS table (the settings of Tools > Repeaters' tune). DMR: the listed colour code and slot (unknown or both: slot 1), the
   user's DMR VFO talk target as it was at the start (none chosen: TG 9). Air: AM, receive only (as the air watch).
 - **Refresh.** Looked at once a second; after the first fix, every 30 s at most and only after moving 1 km (air: 3 km).
   A letter goes beyond 110 % of the radius; a new one replaces the farthest only when 20 % and 2 km nearer (the auto
-  repeater's rule): no flapping. Only changed letters are retuned ("+YM2KA 9km"). Never while a call comes in, the ring
-  holds a signal or waits after one, or the radio transmits: the radio core refuses such a replacement too and the UI
-  asks again once it is quiet. A new map pack: everything chosen again; a pack without the kind's data: off.
+  repeater's rule): no flapping. A refresh replaces letters in place: only a letter whose repeater left changes, no
+  other letter moves (no regrouping), so the selected letter keeps its repeater unless that one left; new ones go after
+  the last; fewer letters close up and the selection follows its repeater. Only changed letters are retuned
+  ("+YM2KA 9km"). Never while a call comes in, the ring
+  holds a signal, looks at one or waits after one, or the radio transmits: the radio core refuses such a replacement
+  too and the UI asks again once it is quiet (checked on the whole letter: RX, TX, mode, tone, colour code, slot). A new map pack: everything chosen again; a pack without the kind's data: off.
 - **PTT.** While the ring holds a letter or waits after its call (the Dual watch delay), PTT talks on that letter (the
   one you hear) and the PTT pill moves there; with nothing heard, on the selected letter as in multi-watch. No new TX
   rule: an air letter is refused as always, an input outside the bands by the band check. This applies to an
@@ -5525,7 +5528,8 @@ GPS on). RAM only: off after a power cycle.
 Files: `integration/radiofoundry/map/autoscan.{c,h}` (selection, portable), `map/ui_autoscan.c` (the UI task's side),
 `air/ui_airwatch.inc` / `air/radio_airwatch.inc` (letter kinds, replacement, talk back, session end),
 `tools/plus_autoscan.py` (Tools entries, hooks; the last prepare). RREQ_AIR_VFO's arg: bits 0-2 letter, 3-4 kind,
-5 narrow, 6 replace, 7 ATIS, 8-13 FM tone index + 1 or DMR CC / slot, 14-31 offset in 1.25 kHz (signed). Not in this
+5 narrow, 6 replace, 7 ATIS, 8-13 DMR CC / slot, 14-31 offset in 1.25 kHz (signed); arg2: an air letter's
+frequency, a repeater letter's RX in 1.25 kHz steps (bits 0-19) and its access tone in Hz x 10 (bits 20-31). Not in this
 version: NXDN repeaters (no rows and no RAN in the map pack), a "CC unknown" mark (the list's CC 1 is used as given), a
 hold cap for a busy DMR repeater.
 

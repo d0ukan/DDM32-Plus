@@ -30,8 +30,9 @@
 enum { AIR_ATIS_HOLD_MS = 5000, AIR_ATIS_COOL_MS = 60000 };
 enum { AIR_K_AM, AIR_K_FM, AIR_K_DMR };
 
-// A VFO for letter request arg on hz: a fresh VFO (FM, so AM in the air band), simplex; a repeater's as listed
-static void air_vfo_fill(channel_t *c, uint32_t arg, uint32_t hz)
+// A VFO for letter request arg on hz: a fresh VFO (FM, so AM in the air band), simplex; a repeater's as listed (tone10:
+// an FM letter's access tone, Hz x 10 as the list has it, 0 none: as Tools > Repeaters' tune sets it)
+static void air_vfo_fill(channel_t *c, uint32_t arg, uint32_t hz, uint16_t tone10)
 {
 	vfo_defaults(c);
 	c->rx_hz = c->tx_hz = hz;
@@ -48,8 +49,8 @@ static void air_vfo_fill(channel_t *c, uint32_t arg, uint32_t hz)
 	}
 	c->mode = RADIO_MODE_FM;
 	c->bw = (arg & RADIO_AIR_NARROW) != 0 ? RADIO_BW_12K5 : RADIO_BW_25K;
-	if (p != 0 && p <= TONES_CTCSS_COUNT)
-		c->tx_tone = (subtone_t){ TONE_CTCSS, tones_ctcss[p - 1u] };	// the access tone; the RX tone stays off
+	if (tone10 != 0)
+		c->tx_tone = (subtone_t){ TONE_CTCSS, tone10 };	// the access tone; the RX tone stays off
 }
 
 // The ring holds a signal or waits after one (a letter the user hears)
@@ -60,15 +61,17 @@ static bool air_held(const radio_sm_t *sm)
 
 // RREQ_AIR_VFO: VFO idx (0..5) takes hz. What the receiver is tuned to stays (the ring that follows tunes), unless
 // that VFO is on view: it is tuned again
-static void __attribute__((noinline)) air_vfo(radio_sm_t *sm, uint32_t arg, uint32_t hz, uint32_t now_ms)
+static void __attribute__((noinline)) air_vfo(radio_sm_t *sm, uint32_t arg, uint32_t hz, uint16_t tone10,
+					      uint32_t now_ms)
 {
 	bool atis = (arg & RADIO_AIR_ATIS) != 0;
 	uint8_t idx = (uint8_t)(arg & 7u), kind = (uint8_t)((arg >> RADIO_AIR_KIND_SHIFT) & 3u);
 	if (idx >= RADIO_DUAL_SLOTS || kind > AIR_K_DMR || radio_am_band(hz) != (kind == AIR_K_AM) ||
 	    !board_in_band(hz, false))
 		return;
-	if ((arg & RADIO_AIR_REPLACE) != 0 && (!sm->air || air_held(sm)))
-		return;		// a refresh: never under a call (the UI asks again), never after the end
+	if ((arg & RADIO_AIR_REPLACE) != 0 &&
+	    (!sm->air || air_held(sm) || (dual_running(sm) && sm->scan.phase == SCAN_PH_PROBE)))
+		return;		// a refresh: never under a call or a signal being looked at (the UI asks again), never after the end
 	if (!sm->air) {
 		if (scan_on(&sm->scan))
 			scan_stop(sm, true, now_ms);	// a scan or the user's watch: back where it started (dual
@@ -87,17 +90,18 @@ static void __attribute__((noinline)) air_vfo(radio_sm_t *sm, uint32_t arg, uint
 		sm->air_atis &= (uint8_t)~(1u << idx);
 	sm->dual_keep[idx].valid = false;		// a letter that changed: its changes for now went with it
 	dual_busy_set(sm, (uint8_t)(sm->view.dual_busy & ~(1u << idx)));
-	uint32_t talk = kind == AIR_K_DMR ? sm->air_talk : 0;
+	// A DMR letter: the user's DMR VFO target at the start, TG 9 when it had none
+	uint32_t talk = kind != AIR_K_DMR ? 0u : (sm->air_talk & 0x7FFFFFFFu) != 0 ? sm->air_talk : 9u;
 	channel_t c;
 	if (idx == vfox_in_use(sm)) {
-		air_vfo_fill(&sm->vfo_ch, arg, hz);
+		air_vfo_fill(&sm->vfo_ch, arg, hz, tone10);
 		sm->vfo_seeded = true;
 		sm->vfo_talk_id = talk & 0x7FFFFFFFu;
 		sm->vfo_talk_private = (talk & 0x80000000u) != 0;
 		vfox_retune(sm, now_ms);		// on view: tuned again (else only kept)
 		return;
 	}
-	air_vfo_fill(&c, arg, hz);
+	air_vfo_fill(&c, arg, hz, tone10);
 	if (idx >= 2) {
 		vfox_slot_put(&sm->vfox_x[idx - 2u], &c, talk, true);
 	} else if (sm->vfox_at >= 2 && idx == sm->vfo_idx) {
@@ -224,8 +228,15 @@ static void air_request(radio_sm_t *sm, const radio_req_t *req, uint32_t now_ms)
 {
 	if (sm->view.state == RS_TX || sm->hotspot || sm->ptt)
 		return;
-	if (req->type == RREQ_AIR_VFO)
-		air_vfo(sm, (uint32_t)req->arg, req->arg2, now_ms);
+	if (req->type == RREQ_AIR_VFO) {
+		uint32_t arg = (uint32_t)req->arg, hz = req->arg2;
+		uint16_t tone10 = 0;
+		if ((arg & (RADIO_AIR_FM | RADIO_AIR_DMR)) != 0) {	// a repeater letter: radio_air_arg2's packing
+			hz = (req->arg2 & 0xFFFFFu) * 1250u;
+			tone10 = (uint16_t)(req->arg2 >> 20);
+		}
+		air_vfo(sm, arg, hz, tone10, now_ms);
+	}
 	else
 		air_end(sm, now_ms);
 }

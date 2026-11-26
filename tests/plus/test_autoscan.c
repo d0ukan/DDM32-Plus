@@ -267,6 +267,56 @@ static void test_merge(void)
 	       "FM before DMR\n");
 }
 
+/* The refresh in place: only a letter that left changes, the selected one included; more after the last; fewer close
+ * up in order */
+static bool ids(const as_pick_t l[], uint8_t n, const uint16_t want[], uint8_t m)
+{
+	if (n != m)
+		return false;
+	for (uint8_t k = 0; k < n; k++)
+		if (l[k].id != want[k])
+			return false;
+	return true;
+}
+
+static void test_place(void)
+{
+	snprintf(tag, sizeof tag, "place");
+	as_pick_t cur[AS_MAX], want[AS_MAX];
+	/* From nothing: the new set in its order */
+	want[0] = P(1, AS_M_FM, 1000);
+	want[1] = P(2, AS_M_FM, 2000);
+	want[2] = P(3, AS_M_DMR, 3000);
+	uint8_t n = as_place(cur, 0, want, 3);
+	CHECK(ids(cur, n, (const uint16_t[]){ 1, 2, 3 }, 3));
+	/* The middle one left, a DMR one came (the set reordered FM first): only place 1 changes */
+	want[0] = P(9, AS_M_FM, 500);
+	want[1] = P(1, AS_M_FM, 900);
+	want[2] = P(3, AS_M_DMR, 2500);
+	n = as_place(cur, n, want, 3);
+	CHECK(ids(cur, n, (const uint16_t[]){ 1, 9, 3 }, 3) && cur[0].d_m == 900 && cur[2].d_m == 2500);
+	/* Two more: after the last, the others where they were */
+	want[3] = P(4, AS_M_DMR, 4000);
+	want[4] = P(5, AS_M_FM, 4500);
+	n = as_place(cur, n, want, 5);
+	CHECK(ids(cur, n, (const uint16_t[]){ 1, 9, 3, 4, 5 }, 5));
+	/* The same set in another order: nothing moves */
+	as_pick_t rev[5] = { want[4], want[3], want[2], want[1], want[0] };
+	n = as_place(cur, n, rev, 5);
+	CHECK(ids(cur, n, (const uint16_t[]){ 1, 9, 3, 4, 5 }, 5));
+	/* Two left, one came: the first empty place takes it, the other closes up (fewer letters: a new ring) */
+	want[0] = P(1, AS_M_FM, 900);
+	want[1] = P(7, AS_M_FM, 950);
+	want[2] = P(4, AS_M_DMR, 4000);
+	want[3] = P(5, AS_M_FM, 4500);
+	n = as_place(cur, n, want, 4);
+	CHECK(ids(cur, n, (const uint16_t[]){ 1, 7, 4, 5 }, 4));
+	/* None left: nothing */
+	n = as_place(cur, n, want, 0);
+	CHECK(n == 0);
+	printf("auto scan: the refresh in place: only a letter that left changes, new ones after the last, fewer close up\n");
+}
+
 /* A drive from Ankara to Kirikkale and back, a refresh every 1 km: the letters change rarely, never back and forth */
 static void test_drive(void)
 {
@@ -275,26 +325,40 @@ static void test_drive(void)
 	uint8_t n = 0;
 	uint16_t prev_ids[AS_MAX] = { 0 };
 	uint8_t prev_n = 0;
-	int changes = 0, flips = 0, steps = 0;
+	int changes = 0, flips = 0, steps = 0, moved = 0;
 	static uint16_t gone[64];
 	int ngone = 0;
 	for (int pass = 0; pass < 2; pass++)
 		for (int s = 0; s <= 70; s++, steps++) {
 			double t = (pass == 0 ? s : 70 - s) / 70.0;
 			int32_t lat = e7(39.9208 + t * (39.8468 - 39.9208)), lon = e7(32.8541 + t * (33.5153 - 32.8541));
-			for (uint8_t k = 0; k < n; k++)
+			/* as ui_autoscan.c choose() does: the new set (merged, grouped only from nothing), then in place */
+			as_pick_t want[AS_MAX];
+			for (uint8_t k = 0; k < n; k++) {
 				cur[k].d_m = as_rpt_dist(cur[k].id, lat, lon);
+				want[k] = cur[k];
+			}
 			uint8_t nc = as_pick_rpt(lat, lon, AS_RPT_RADIUS_M, band_rpt, cand, AS_MAX);
-			n = as_merge(cur, n, cand, nc, AS_RPT_RADIUS_M / 100u * AS_KEEP_PCT);
-			as_group(cur, n);
+			uint8_t m = as_merge(want, n, cand, nc, AS_RPT_RADIUS_M / 100u * AS_KEEP_PCT);
+			if (n == 0)
+				as_group(want, m);
+			n = as_place(cur, n, want, m);
 			for (uint8_t k = 0; k < n; k++) {
 				CHECK(cur[k].d_m <= AS_RPT_RADIUS_M / 100u * AS_KEEP_PCT);
 				for (uint8_t q = 0; q < k; q++)
 					CHECK(cur[q].id != cur[k].id);
 			}
-			if (pass == 0)
+			if (steps == 0)	/* the ring built from nothing: FM before DMR */
 				for (uint8_t k = 1; k < n; k++)
 					CHECK(cur[k - 1].mode <= cur[k].mode || cur[k - 1].mode != AS_M_DMR);
+			/* in place: a letter still chosen is where it was (the selected one too), unless fewer close up */
+			for (uint8_t q = 0; q < prev_n && n >= prev_n; q++) {
+				bool still = false;
+				for (uint8_t k = 0; k < n; k++)
+					still = still || cur[k].id == prev_ids[q];
+				CHECK(!still || cur[q].id == prev_ids[q]);
+				moved += still && cur[q].id != prev_ids[q];
+			}
 			/* a repeater that left and came back within the same pass would be a flap */
 			for (uint8_t q = 0; q < prev_n; q++) {
 				bool kept = false;
@@ -319,8 +383,9 @@ static void test_drive(void)
 			for (uint8_t k = 0; k < n; k++)
 				prev_ids[k] = cur[k].id;
 		}
-	CHECK(flips == 0 && changes < steps);
-	printf("auto scan: a 2 x 70 km drive, a refresh each km: %d letters came in, none left and came back\n", changes);
+	CHECK(flips == 0 && changes < steps && moved == 0);
+	printf("auto scan: a 2 x 70 km drive, a refresh each km: %d letters came in, none left and came back, none moved\n",
+	       changes);
 }
 
 static void test_due(void)
@@ -366,6 +431,7 @@ int main(void)
 	test_pick_rpt();
 	test_pick_air();
 	test_merge();
+	test_place();
 	test_drive();
 	test_due();
 	/* A repeater index the pack doesn't have (a new, smaller pack): gone */

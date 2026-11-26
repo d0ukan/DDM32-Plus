@@ -13,7 +13,9 @@ Host-tested only; not yet run on the radio (docs/plus-radio-test.md AS1 ... AS12
   ATIS), each letter its own VFO with a label on Home ("CALL 12km", "LTAI TWR"), and follows you as you drive (every
   30 s at most, after 1 km / 3 km, never during a call). PTT during a call or its hang time talks on the letter you
   hear; otherwise on the selected one. FM letters transmit to the repeater's input with its access tone, DMR letters
-  on the listed slot to your DMR VFO talk group; air letters stay receive only. Off at power on.
+  on the listed slot to your DMR VFO talk group (TG 9 without one); air letters stay receive only. A refresh replaces
+  only the letters whose repeater left, in place: the others, the selected one included, stay where they are. Off at
+  power on.
 - **Tool numbers**: Air scan is 42 and Repeater scan 43, after Battery; every other tool keeps its number, so a stored
   hold key keeps its tool.
 - **Fixes** (air watch and multi-watch): DOTA and cross-band started during an airfield watch left the radio in the

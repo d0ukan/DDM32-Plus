@@ -511,12 +511,81 @@ static void as_retry(void)
 		bool dmr = (a & UI_AIR_DMR) != 0;
 		check(c.rx_hz == hz && c.tx_hz == (uint32_t)((int32_t)hz + ((int32_t)a >> UI_AIR_OFF_SHIFT) * 1250) &&
 			      c.mode == (dmr ? RADIO_MODE_DMR : RADIO_MODE_FM) &&
-			      (dmr ? c.color_code == (p & 0x0Fu) : (p == 0) == (c.tx_tone.type == TONE_NONE)),
+			      (dmr ? c.color_code == (p & 0x0Fu)
+				   : air_sim.tone[k] == 0 ? c.tx_tone.type == TONE_NONE
+							  : c.tx_tone.type == TONE_CTCSS && c.tx_tone.value == air_sim.tone[k]),
 		      "each letter whole on its VFO");
 	}
 	int calls = air_sim.vfo_calls;
 	run("wait:3000");
 	check(air_sim.vfo_calls == calls, "nothing asked once taken");
+}
+
+/* Driving from Ankara towards Kirikkale, a refresh every 10 km: a letter changes only when its repeater left the
+ * selection (in place: no other letter moves, so the selected letter keeps its repeater unless that one left); while
+ * the count holds, the other letters keep their VFOs (lead decision after the verifier's review) */
+static void as_inplace(void)
+{
+	start("AS refresh in place");
+	gps(39.9208, 32.8541);
+	ui_autoscan_toggle(AS_RPT);
+	run("wait:1500");
+	check(ui_dual_ring() >= 3, "a ring");
+	int changed = 0;
+	for (int s = 1; s <= 7; s++) {
+		uint8_t n0 = ui_dual_ring();
+		uint32_t hz0[6], arg0[6];
+		uint16_t tone0[6];
+		for (uint8_t k = 0; k < n0; k++) {
+			hz0[k] = air_sim.hz[k];
+			arg0[k] = air_sim.arg[k] & ~UI_AIR_REPLACE;
+			tone0[k] = air_sim.tone[k];
+		}
+		char sel0 = ui_dual_ring_sel();
+		double t = s / 7.0;
+		gps(39.9208 + t * (39.8468 - 39.9208), 32.8541 + t * (33.5153 - 32.8541));
+		run("wait:31000");
+		uint8_t n1 = ui_dual_ring();
+		for (uint8_t k = 0; k < n0 && k < n1 && n1 >= n0; k++) {
+			bool same = air_sim.hz[k] == hz0[k] && (air_sim.arg[k] & ~UI_AIR_REPLACE) == arg0[k] &&
+				    air_sim.tone[k] == tone0[k];
+			if (same)
+				continue;
+			changed++;
+			bool still = false;	/* the letter's old repeater anywhere on the ring now: it moved */
+			for (uint8_t q = 0; q < n1; q++)
+				still = still || (air_sim.hz[q] == hz0[k] &&
+						  (air_sim.arg[q] & ~UI_AIR_REPLACE) == arg0[k] && air_sim.tone[q] == tone0[k]);
+			check(!still, "only a letter whose repeater left changes");
+		}
+		if (sel0 != '-' && n1 >= n0)
+			check(ui_dual_ring_sel() == sel0, "the selected letter stays selected");
+	}
+	check(changed > 0, "the drive replaced letters");
+}
+
+/* The Tools rows of the scans: their names are never shortened (English and Turkish; the whole list is stepped
+ * through, every row drawn selected and not) */
+static int as_short;
+static void as_fit_hook(const char *src, const char *out)
+{
+	if (strcmp(src, tr("Air scan")) == 0 || strcmp(src, tr("Repeater scan")) == 0) {
+		printf("FAIL %s (%s): \"%s\" shortened to \"%s\"\n", name, turkish ? "tr" : "en", src, out);
+		as_short++;
+	}
+}
+
+static void as_tools_rows(void)
+{
+	start("AS Tools rows");
+	sim_set_fit_hook(as_fit_hook);
+	ui_push(SCR_TOOLS, 0);
+	run("wait:200");
+	for (int i = 0; i < 60; i++)
+		run("down wait:50");
+	sim_set_fit_hook(NULL);
+	check(as_short == 0, "the scans' names whole");
+	layout();
 }
 
 /* None within 60 km: no ring, the user's state as it was, the scan waits; one only: the same; then a place with more:
@@ -637,7 +706,7 @@ static const case_fn all[] = {
 	aw_watch, aw_four, aw_stop, aw_user_ring, aw_pair, aw_one, aw_refused, aw_reboot,
 #endif
 #if CONFIG_AUTO_SCAN
-	as_rpt, as_move, as_retry, as_few, as_gps, as_air, as_pack, as_session,
+	as_rpt, as_move, as_retry, as_inplace, as_tools_rows, as_few, as_gps, as_air, as_pack, as_session,
 #endif
 };
 

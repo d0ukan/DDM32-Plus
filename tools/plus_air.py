@@ -48,11 +48,11 @@ def prepare_air(transform, install):
          '#if CONFIG_AIR_WATCH\n'
          '// DDM32 Plus air watch (radio_airwatch.inc): VFO idx (0..5, a ring letter\'s own) takes an air band frequency;\n'
          '// the first since the last end keeps the user\'s state as a power off does. The end brings it back\n'
-         'void radio_req_air_vfo(uint32_t arg, uint32_t hz);\n'
+         'void radio_req_air_vfo(uint32_t arg, uint32_t hz, uint16_t tone10);\n'
          'void radio_req_air_end(void);\n'
          '// arg: the VFO (bits 0-2) and these. DDM32 Plus auto scan (radio_airwatch.inc): the letter\'s kind, AM (the air\n'
-         '// band, 0), FM or DMR (a repeater as listed); bits 8-13 FM: the TX tone (tones_ctcss index + 1, 0 none), DMR:\n'
-         '// colour code (8-11) and slot (12-13); bits 14-31 TX - RX in 1.25 kHz steps, signed\n'
+         '// band, 0), FM or DMR (a repeater as listed); bits 8-13 DMR: colour code (8-11) and slot (12-13); bits 14-31\n'
+         '// TX - RX in 1.25 kHz steps, signed. tone10: an FM letter\'s access tone as listed (Hz x 10, 0 none)\n'
          '#define RADIO_AIR_KIND_SHIFT\t3\n'
          '#define RADIO_AIR_FM\t0x08u\n'
          '#define RADIO_AIR_DMR\t0x10u\n'
@@ -61,6 +61,12 @@ def prepare_air(transform, install):
          '#define RADIO_AIR_ATIS\t0x80u\t// idx | this: an ATIS (its letter held 5 s at most, then passed over 60 s)\n'
          '#define RADIO_AIR_P_SHIFT\t8\n'
          '#define RADIO_AIR_OFF_SHIFT\t14\n'
+         '// The request\'s arg2: an air letter\'s frequency; a repeater letter\'s RX in 1.25 kHz steps (bits 0-19) and its\n'
+         '// access tone (bits 20-31). 0 (refused by the band check): one it can\'t carry (RX off that grid)\n'
+         'static inline uint32_t radio_air_arg2(uint32_t arg, uint32_t hz, uint16_t tone10)\n{\n'
+         '\tif ((arg & (RADIO_AIR_FM | RADIO_AIR_DMR)) == 0)\n\t\treturn hz;\n'
+         '\tif (hz % 1250u != 0u || hz / 1250u > 0xFFFFFu || tone10 > 0xFFFu)\n\t\treturn 0;\n'
+         '\treturn hz / 1250u | (uint32_t)tone10 << 20;\n}\n'
          '#endif\n'),
     ])
     transform('core/radio/radio_sm.h', [
@@ -83,8 +89,8 @@ def prepare_air(transform, install):
         ('bool radio_mwatch_take(radio_dual_ref_t ref[], uint8_t *n, uint8_t *sel)\n{\n',
          '#if CONFIG_AIR_WATCH\n'
          '// DDM32 Plus air watch: up to six of these and the ring at once; waits a little for room rather than lose one\n'
-         'void radio_req_air_vfo(uint32_t arg, uint32_t hz)\n{\n'
-         '\tpost_pair(RREQ_AIR_VFO, (int32_t)arg, hz, pdMS_TO_TICKS(20));\n}\n\n'
+         'void radio_req_air_vfo(uint32_t arg, uint32_t hz, uint16_t tone10)\n{\n'
+         '\tpost_pair(RREQ_AIR_VFO, (int32_t)arg, radio_air_arg2(arg, hz, tone10), pdMS_TO_TICKS(20));\n}\n\n'
          'void radio_req_air_end(void)\n{\n'
          '\tpost_pair(RREQ_AIR_END, 0, 0, pdMS_TO_TICKS(20));\n}\n'
          '#endif\n'
@@ -132,7 +138,7 @@ def prepare_air(transform, install):
          'bool ui_svc_mwatch(const ui_dual_ref_t ref[], uint8_t n, uint8_t sel);\n'
          '#if CONFIG_AIR_WATCH\n'
          '// DDM32 Plus air watch: VFO idx (0..5) takes hz, the user\'s state kept (radio_req_air_vfo); the end brings it back\n'
-         'void ui_svc_air_vfo(uint32_t arg, uint32_t hz);\n'
+         'void ui_svc_air_vfo(uint32_t arg, uint32_t hz, uint16_t tone10);\n'
          'void ui_svc_air_end(void);\n'
          '#define UI_AIR_ATIS\t0x80u\t// idx | this: an ATIS (RADIO_AIR_ATIS)\n'
          '#define UI_AIR_FM\t0x08u\t// DDM32 Plus auto scan: the RADIO_AIR_* bits (radio.h)\n'
@@ -147,7 +153,7 @@ def prepare_air(transform, install):
         ('WEAK bool ui_svc_mwatch(const ui_dual_ref_t ref[], uint8_t n, uint8_t sel) { (void)ref; (void)n; (void)sel; return false; }\n',
          'WEAK bool ui_svc_mwatch(const ui_dual_ref_t ref[], uint8_t n, uint8_t sel) { (void)ref; (void)n; (void)sel; return false; }\n'
          '#if CONFIG_AIR_WATCH\n'
-         'WEAK void ui_svc_air_vfo(uint32_t arg, uint32_t hz) { (void)arg; (void)hz; }\n'
+         'WEAK void ui_svc_air_vfo(uint32_t arg, uint32_t hz, uint16_t tone10) { (void)arg; (void)hz; (void)tone10; }\n'
          'WEAK void ui_svc_air_end(void) {}\n'
          '#endif\n'),
     ])
@@ -158,7 +164,7 @@ def prepare_air(transform, install):
          '_Static_assert(UI_AIR_FM == RADIO_AIR_FM && UI_AIR_DMR == RADIO_AIR_DMR && UI_AIR_NARROW == RADIO_AIR_NARROW &&\n'
          '\t       UI_AIR_REPLACE == RADIO_AIR_REPLACE && UI_AIR_P_SHIFT == RADIO_AIR_P_SHIFT &&\n'
          '\t       UI_AIR_OFF_SHIFT == RADIO_AIR_OFF_SHIFT, "ui_svc.h: the letter bits are the radio core\'s");\n'
-         'void ui_svc_air_vfo(uint32_t arg, uint32_t hz)\n{\n\tradio_req_air_vfo(arg, hz);\n}\n\n'
+         'void ui_svc_air_vfo(uint32_t arg, uint32_t hz, uint16_t tone10)\n{\n\tradio_req_air_vfo(arg, hz, tone10);\n}\n\n'
          'void ui_svc_air_end(void)\n{\n\tradio_req_air_end();\n}\n'
          '#endif\n\n'
          'bool ui_svc_mwatch(const ui_dual_ref_t ref[], uint8_t n, uint8_t sel)\n{\n'),

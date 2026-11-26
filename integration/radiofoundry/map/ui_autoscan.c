@@ -24,7 +24,6 @@
 #include "i18n.h"
 #include "radio/radio_am.h"
 #include "radio/scan.h"
-#include "radio/tones.h"
 #include "storage/ref_pack.h"
 #include "ui/autoscan.h"
 #include "ui/rpt.h"
@@ -38,6 +37,7 @@ static char as_label[18];	/* a letter's label (mw_row's name holds 16) */
 static char as_msg[sizeof as_label + 1];	/* "+" and a label: the toast (ui_toast keeps the pointer) */
 static as_pick_t as_cand[AS_MAX], as_fields[AS_MAX];
 static uint32_t as_arg[AS_MAX];
+static uint16_t as_tone[AS_MAX];	/* each FM letter's access tone, Hz x 10 (0 none; the list's value as it is) */
 
 static bool band_rpt(uint32_t hz) { return board_in_band(hz, false) && !radio_am_band(hz); }
 static bool band_air(uint32_t hz) { return board_in_band(hz, false) && radio_am_band(hz) && radio_am_capable(); }
@@ -71,29 +71,24 @@ static bool have_data(uint8_t kind)
 	return kind == AS_AIR ? air_nfields() != 0u : rpt_count() != 0u;
 }
 
-static uint8_t tone_index(uint16_t ctcss10)
+/* Letter p: its RX, its request bits (UI_AIR_*), its access tone and its label into as_label. False: the pack doesn't
+ * give it (a repeater's RX off the 1.25 kHz grid too: the request carries it in those steps; the map pack's own rule) */
+static bool __attribute__((noinline)) letter(const as_pick_t *p, uint32_t *hz, uint32_t *arg, uint16_t *tone)
 {
-	for (uint8_t i = 0; i < TONES_CTCSS_COUNT; i++)
-		if (tones_ctcss[i] == ctcss10)
-			return (uint8_t)(i + 1u);
-	return 0;	/* not a tone of the table: none (the list's tone is the access tone; nothing to receive) */
-}
-
-/* Letter p: its RX, its request bits (UI_AIR_*) and its label into as_label. False: the pack doesn't give it */
-static bool __attribute__((noinline)) letter(const as_pick_t *p, uint32_t *hz, uint32_t *arg)
-{
+	*tone = 0;
 	sbuf_t b;
 	sb_init(&b, as_label, sizeof as_label);
 	if (as.kind == AS_RPT) {
 		const rpt_entry_t *e = rpt_get(p->id);
 		rpt_tune_t t;
-		if (e == NULL || !rpt_tune_plan(e, &t))
+		if (e == NULL || !rpt_tune_plan(e, &t) || t.rx_hz % 1250u != 0u)
 			return false;
 		*hz = t.rx_hz;
+		*tone = t.ctcss10;	/* as Tools > Repeaters' tune: the value as listed (0 for DMR) */
 		uint32_t off = ((uint32_t)(int32_t)e->off & 0x3FFFFu) << UI_AIR_OFF_SHIFT;
 		*arg = t.dmr ? UI_AIR_DMR | (uint32_t)(t.cc & 0x0Fu) << UI_AIR_P_SHIFT | (uint32_t)(t.ts & 3u) << (UI_AIR_P_SHIFT + 4) |
 			       off
-			     : UI_AIR_FM | (t.narrow ? UI_AIR_NARROW : 0u) | (uint32_t)tone_index(t.ctcss10) << UI_AIR_P_SHIFT | off;
+			     : UI_AIR_FM | (t.narrow ? UI_AIR_NARROW : 0u) | off;
 		sb_str(&b, e->name);
 		sb_chr(&b, ' ');
 		sb_u32(&b, p->d_m == UINT32_MAX ? 0u : (p->d_m + 500u) / 1000u, 1);
@@ -185,7 +180,7 @@ static void __attribute__((noinline)) put(uint8_t old_n, const uint16_t old_id[]
 {
 	uint8_t n = 0;
 	for (uint8_t k = 0; k < as.n; k++)	/* a row the pack doesn't give (it changed under us): left out */
-		if (letter(&as.l[k], &as.hz[n], &as_arg[n]))
+		if (letter(&as.l[k], &as.hz[n], &as_arg[n], &as_tone[n]))
 			as.l[n++] = as.l[k];
 	as.n = n;
 	if (n < 2) {
@@ -196,9 +191,16 @@ static void __attribute__((noinline)) put(uint8_t old_n, const uint16_t old_id[]
 	bool ring = ui_dual_auto_kind() == as.kind;
 	uint8_t first = AS_MAX;	/* the first letter that came in (its toast) */
 	if (!ring || n != old_n) {
+		uint8_t sel = 0;	/* the letter selected before (ours): selected where it is now */
+		if (ring && old_n != 0xFFu) {
+			uint8_t was = ui_dual_auto_sel();
+			for (uint8_t k = 0; k < n && was < old_n; k++)
+				if (as.l[k].id == old_id[was])
+					sel = k;
+		}
 		for (uint8_t k = 0; k < n; k++)
 			as_arg[k] |= ring ? UI_AIR_REPLACE : 0u;	/* the radio's air state is ours already */
-		if (!ui_dual_auto_ring(as.hz, as_arg, n, as.kind)) {
+		if (!ui_dual_auto_ring(as.hz, as_arg, as_tone, n, as.kind, sel)) {
 			as.pend = 0;
 			return;		/* (a toast said why) as_due tries again later */
 		}
@@ -207,7 +209,7 @@ static void __attribute__((noinline)) put(uint8_t old_n, const uint16_t old_id[]
 		for (uint8_t k = 0; k < n; k++) {
 			if (as.l[k].id == old_id[k])
 				continue;
-			ui_dual_auto_set(k, as.hz[k], as_arg[k]);
+			ui_dual_auto_set(k, as.hz[k], as_arg[k], as_tone[k]);
 			as.pend |= (uint8_t)(1u << k);
 			if (first == AS_MAX)
 				first = k;
@@ -215,7 +217,8 @@ static void __attribute__((noinline)) put(uint8_t old_n, const uint16_t old_id[]
 	}
 	for (uint8_t k = 0; k < n; k++) {
 		uint32_t hz, arg;
-		if (letter(&as.l[k], &hz, &arg))
+		uint16_t tone;
+		if (letter(&as.l[k], &hz, &arg, &tone))
 			ui_dual_auto_label(k, as_label);
 		if (k == first) {	/* "+TA2XYZ 12km": the one that came in */
 			sbuf_t b;
@@ -235,31 +238,35 @@ static void retry(void)
 	for (uint8_t k = 0; k < as.n; k++) {
 		if (!((as.pend >> k) & 1u))
 			continue;
-		uint32_t hz, arg;
-		if (ui_dual_auto_has(k, as.hz[k], as_arg[k]))
+		if (ui_dual_auto_has(k, as.hz[k], as_arg[k], as_tone[k]))
 			as.pend &= (uint8_t)~(1u << k);
-		else if (letter(&as.l[k], &hz, &arg))
-			ui_dual_auto_set(k, hz, arg);
+		else
+			ui_dual_auto_set(k, as.hz[k], as_arg[k], as_tone[k]);
 	}
 }
 
-/* The selection from (lat, lon): the letters kept, refreshed (full: from nothing) */
+/* The selection from (lat, lon) (full: from nothing): the new set, then onto the letters in place (as_place: a refresh
+ * never moves a letter; the FM-before-DMR order only for a ring built from nothing) */
 static void __attribute__((noinline)) choose(int32_t lat, int32_t lon, bool full)
 {
-	uint8_t n = full ? 0 : as.n;
+	uint8_t n = full ? 0 : as.n, m;
 	if (as.kind == AS_RPT) {
-		for (uint8_t k = 0; k < n; k++)
+		for (uint8_t k = 0; k < n; k++) {
 			as.l[k].d_m = as_rpt_dist(as.l[k].id, lat, lon);
+			as_fields[k] = as.l[k];	/* (the repeater scan's own copy: the airfields' array is free) */
+		}
 		uint8_t nc = as_pick_rpt(lat, lon, AS_RPT_RADIUS_M, band_rpt, as_cand, AS_MAX);
-		n = as_merge(as.l, n, as_cand, nc, AS_RPT_RADIUS_M / 100u * AS_KEEP_PCT);
-		as_group(as.l, n);
-		as.n = n;
+		m = as_merge(as_fields, n, as_cand, nc, AS_RPT_RADIUS_M / 100u * AS_KEEP_PCT);
+		if (n == 0)
+			as_group(as_fields, m);
+		as.n = as_place(as.l, n, as_fields, m);
 		return;
 	}
 	uint8_t nf = as_letter_fields(as.l, n, lat, lon, as_fields);
 	uint8_t nc = as_pick_fields(lat, lon, AS_AIR_RADIUS_M, band_air, as_cand, AS_MAX);
 	nf = as_merge(as_fields, nf, as_cand, nc, AS_AIR_RADIUS_M / 100u * AS_KEEP_PCT);
-	as.n = as_air_letters(as_fields, nf, band_air, as.l, AS_MAX);
+	m = as_air_letters(as_fields, nf, band_air, as_cand, AS_MAX);	/* (the candidates are spent) */
+	as.n = as_place(as.l, n, as_cand, m);
 }
 
 bool ui_autoscan_tick(uint32_t now_ms)

@@ -60,8 +60,13 @@ uint32_t as_field_dist(uint16_t f, int32_t lat_e7, int32_t lon_e7);
  * goes; a candidate not in cur fills a free place, else replaces the farthest letter (its place) when AS_GAIN_PCT and
  * AS_GAIN_M nearer. Returns the new count (cur rewritten, the kept letters in their places, compacted) */
 uint8_t as_merge(as_pick_t cur[], uint8_t n, const as_pick_t cand[], uint8_t nc, uint32_t keep_m);
-/* The ring's order: AM / FM letters before DMR ones, each group in its order (stable) */
+/* The ring's order: AM / FM letters before DMR ones, each group in its order (stable); only when the ring is first
+ * built (a refresh never moves a letter: as_place) */
 void as_group(as_pick_t l[], uint8_t n);
+/* The refresh onto the ring: cur[0..n) the letters now, want[0..m) the new set. A letter in both keeps its place (its
+ * distance updated); a place whose letter left takes the next new one (want's order); more new ones go after the last;
+ * places still empty close up (the only case a letter moves: fewer letters, a new ring). Returns the new count */
+uint8_t as_place(as_pick_t cur[], uint8_t n, const as_pick_t want[], uint8_t m);
 
 /* The scan's state (ui_autoscan.c keeps one, RAM only) */
 typedef struct {
@@ -91,12 +96,16 @@ void ui_autoscan_toggle(uint8_t kind);
 uint8_t ui_autoscan_on(void);		/* the kind running, AS_OFF none */
 bool ui_autoscan_tick(uint32_t now_ms);	/* every UI tick (ui_app.c): once a second; true: draw again */
 void ui_autoscan_ended(void);		/* the ring stopped some other way (the user, DOTA ...): off, toast */
-/* ui_airwatch.inc: the ring of the scan (kind): letter k its own VFO on hz[k], arg[k] (UI_AIR_* kind bits), the user's
- * watch kept (as the air watch). False (a toast says why): it can't */
-bool ui_dual_auto_ring(const uint32_t hz[], const uint32_t arg[], uint8_t n, uint8_t kind);
-void ui_dual_auto_set(uint8_t k, uint32_t hz, uint32_t arg);	/* letter k replaced (UI_AIR_REPLACE) */
+/* ui_airwatch.inc: the ring of the scan (kind): letter k its own VFO on hz[k], arg[k] (UI_AIR_* kind bits) and tone[k]
+ * (an FM letter's access tone, Hz x 10, 0 none), the user's watch kept (as the air watch); sel the selected letter (a
+ * new ring of ours: the one selected before, where it is now). False (a toast says why): it can't */
+bool ui_dual_auto_ring(const uint32_t hz[], const uint32_t arg[], const uint16_t tone[], uint8_t n, uint8_t kind,
+		       uint8_t sel);
+void ui_dual_auto_set(uint8_t k, uint32_t hz, uint32_t arg, uint16_t tone);	/* letter k replaced (UI_AIR_REPLACE) */
 void ui_dual_auto_label(uint8_t k, const char *label);	/* Home's label of letter k */
-bool ui_dual_auto_has(uint8_t k, uint32_t hz, uint32_t arg);	/* the radio's VFO k is letter (hz, arg): RX, TX, tone ... */
+/* The radio's VFO k is the letter (hz, arg, tone): RX, TX, mode, tone, colour code and slot */
+bool ui_dual_auto_has(uint8_t k, uint32_t hz, uint32_t arg, uint16_t tone);
+uint8_t ui_dual_auto_sel(void);	/* the selected letter of the ring (0 A) */
 void ui_dual_auto_end(void);	/* the scan's own end (fewer than two letters, map pack gone): the user's watch back */
 uint8_t ui_dual_auto_kind(void);	/* the scan kind the ring runs for, AS_OFF none (or the airfield watch) */
 #endif
