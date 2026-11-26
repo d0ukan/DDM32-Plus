@@ -2205,14 +2205,25 @@ def prepare_map(transform, install):
     """Offline Turkey map (CONFIG_MAP, needs NAV: GPS, APRS stations and waypoints): Tools > Map (docs/map.md).
     Natural Earth 5.1.1 admin-1 (public domain), names in ISO-8859-9 for the Turkish fonts (tools/turkey_map.py);
     the 973 districts as points from GeoNames (CC BY 4.0, tools/turkey_districts.py); the built-in repeaters
-    (CONFIG_REPEATERS) as triangles, # picks the nearest to the centre, OK opens its details."""
+    (CONFIG_REPEATERS) as triangles, # picks the nearest to the centre, OK opens its details. Since 1.1 the tables are
+    the map pack's (data pack type 3 on the data chip, tools/refpack.py, docs/mappack-design.md): the generated
+    turkey_*_data.c are no longer installed (the headers stay for the types and the coordinate constants; the host
+    tests and refpack.py read the .c files where they are committed)."""
     install('core/ui/map.h', 'integration/radiofoundry/map/map.h')
     install('core/ui/map.c', 'integration/radiofoundry/map/map.c')
     install('core/ui/turkey_map_data.h', 'integration/radiofoundry/map/turkey_map_data.h')
-    install('core/ui/turkey_map_data.c', 'integration/radiofoundry/map/turkey_map_data.c')
     install('core/ui/turkey_district_data.h', 'integration/radiofoundry/map/turkey_district_data.h')
-    install('core/ui/turkey_district_data.c', 'integration/radiofoundry/map/turkey_district_data.c')
     install('core/ui/ui_map.c', 'integration/radiofoundry/map/ui_map.c')
+    # The map's cheap frames (docs/mappack-design.md C.4) need to know that the last frame drawn was the map's own
+    transform('core/ui/ui_app.h', [
+        ('void ui_app_draw(void);\n',
+         'void ui_app_draw(void);\n#if CONFIG_MAP\nuint32_t ui_app_draws(void);\t// DDM32 Plus map: the frames drawn so far\n'
+         '#endif\n'),
+    ])
+    transform('core/ui/ui_app.c', [
+        ('static uint32_t draws;\n',
+         'static uint32_t draws;\n#if CONFIG_MAP\nuint32_t ui_app_draws(void)\n{\n\treturn draws;\n}\n#endif\n'),
+    ])
     transform('config/features.mk', [
         ('CONFIG_NAV ?= n\nFEATURES += NAV\n', 'CONFIG_NAV ?= n\nFEATURES += NAV\nCONFIG_MAP ?= n\nFEATURES += MAP\n'
          'ifeq ($(CONFIG_MAP),y)\nifneq ($(CONFIG_NAV),y)\n$(error MAP needs NAV=y)\nendif\nendif\n'),
@@ -4050,6 +4061,10 @@ def prepare_dpmr(transform, install):
     ])
 
 
+RPT_SOURCES = {}	# prepare_repeaters: the repeater sources of the map pack and of the flash refusal set (the manifest)
+RPT_FREQ_ROWS = []	# prepare_repeaters: the rows the flash refusal set was made from (the build's T15 check)
+
+
 def prepare_repeaters(transform, install):
     """Repeater list (CONFIG_REPEATERS, needs APRS for the position, docs/plus.md): Tools > Repeaters lists the
     built-in repeaters nearest first from the position APRS uses (or by frequency without one), with distance and
@@ -4057,29 +4072,57 @@ def prepare_repeaters(transform, install):
     jumps to the nearest. The table is made by tools/rpt_list.py at every prepare from research-data/rptrs.json
     (RadioID.net's repeater list, git-ignored, or $RPT_JSON; country $RPT_COUNTRY, default Turkey) and / or the
     owner's research-data/repeaters.csv ($RPT_CSV); neither: the committed fictional sample, said in the build
-    output. Program flash only; a few bytes of RAM for the screen (the order is walked, not stored)."""
+    output.
+
+    Since 1.1 (docs/mappack-design.md C.7, E.1) the table (build/rpt/rpt_data.c) is not linked: it goes into the map
+    pack (tools/refpack.py, at the end of the build) and the host tests. The firmware links only the TX refusal set
+    (build/rpt/rpt_freqs.c: every repeater's output and input frequency, nothing else), which cross-band and DOTA use
+    with or without a map pack. Which inputs feed each, by the owner's H.5 answer (option (b), 2026-11-26: both
+    sources in both): $RPT_PACK_SOURCES (the pack's records) and $RPT_FREQ_SOURCES (the flash set), each a list of
+    "own" (the CSV, the owner's TRAC list) and "radioid", default "own,radioid" (what is present). Both are recorded in
+    the build manifest (RPT_SOURCES below) for the release gate (pc/release/make_release.py)."""
     import os
     from pathlib import Path
     from tools import rpt_list
+    global RPT_SOURCES, RPT_FREQ_ROWS
     root = Path(__file__).resolve().parents[1]
     data = root / 'research-data'
     csv_path = Path(os.environ.get('RPT_CSV') or data / 'repeaters.csv')
     json_path = Path(os.environ.get('RPT_JSON') or data / 'rptrs.json')
-    csv_arg = str(csv_path) if csv_path.is_file() else None
-    json_arg = str(json_path) if json_path.is_file() else None
     countries = [c.strip() for c in os.environ.get('RPT_COUNTRY', 'Turkey').split(',') if c.strip()]
+
+    def inputs(var):
+        use = rpt_list.sources_split(os.environ.get(var, 'own,radioid'))
+        return (str(csv_path) if 'own' in use and csv_path.is_file() else None,
+                str(json_path) if 'radioid' in use and json_path.is_file() else None)
+    csv_arg, json_arg = inputs('RPT_PACK_SOURCES')
+    fcsv, fjson = inputs('RPT_FREQ_SOURCES')
     gen = root / 'build' / 'rpt' / 'rpt_data.c'
+    fgen = root / 'build' / 'rpt' / 'rpt_freqs.c'
     try:
         text, stats = rpt_list.generate(csv_arg, json_arg, countries)
+        if (fcsv, fjson) == (csv_arg, json_arg):
+            ftext, fstats = rpt_list.freqs_c(stats['rows'], stats['source']), stats
+        elif fcsv is None and fjson is None:
+            ftext, fstats = rpt_list.freqs_c([], 'none'), {'source': 'none', 'sample': False}
+        else:
+            _, fstats = rpt_list.generate(fcsv, fjson, countries)
+            ftext = rpt_list.freqs_c(fstats['rows'], fstats['source'])
     except (rpt_list.RptError, OSError) as e:
         raise SystemExit(f'rpt_list: {e}')
     print(rpt_list.describe(stats, csv_arg is None and json_arg is None), flush=True)
+    RPT_SOURCES = {'pack': stats['source'], 'pack_sample': bool(stats['sample']), 'pack_count': stats['count'],
+                   'freq': fstats['source'], 'freq_sample': bool(fstats['sample']),
+                   'pack_switch': os.environ.get('RPT_PACK_SOURCES', 'own,radioid'),
+                   'freq_switch': os.environ.get('RPT_FREQ_SOURCES', 'own,radioid')}
+    RPT_FREQ_ROWS = fstats.get('rows', [])
     gen.parent.mkdir(parents=True, exist_ok=True)
-    if not gen.exists() or gen.read_text(encoding='ascii') != text:
-        gen.write_text(text, encoding='ascii', newline='\n')
+    for path, content in ((gen, text), (fgen, ftext)):
+        if not path.exists() or path.read_text(encoding='ascii') != content:
+            path.write_text(content, encoding='ascii', newline='\n')
     install('core/ui/rpt.h', 'integration/radiofoundry/rpt/rpt.h')
     install('core/ui/rpt.c', 'integration/radiofoundry/rpt/rpt.c')
-    install('core/ui/rpt_data.c', 'build/rpt/rpt_data.c')
+    install('core/ui/rpt_freqs.c', 'build/rpt/rpt_freqs.c')
     install('core/ui/ui_rpt.c', 'integration/radiofoundry/rpt/ui_rpt.c')
     transform('config/features.mk', [
         ('CONFIG_ID_DB ?= n\n',

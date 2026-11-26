@@ -53,11 +53,14 @@ def prepare_brand(transform):
          '\tsb_str(&b, TR("License: "));\n\tsb_str(&b, "MIT, (c) 2026 Open25-DM32 contributors\\n");\n'),
         ('\treturn t;\n}\n\nstatic void about_enter(void)\n',
          '#if CONFIG_REPEATERS\n'
-         '\t// DDM32 Plus: where the built-in repeater list comes from (tools/rpt_list.py: "own" = the TRAC list)\n'
+         '\t// DDM32 Plus: where the map pack\'s repeater list comes from (tools/rpt_list.py: "own" = the TRAC list);\n'
+         '\t// "none" without a map pack (the TX refusals keep their own frequency set in program flash)\n'
          '\tsb_chr(&b, \'\\n\');\n'
          '\tsb_str(&b, TR("Repeater data: "));\n'
-         '\tbool rid = strstr(rpt_info.source, "RadioID") != NULL, own = strncmp(rpt_info.source, "own", 3) == 0;\n'
-         '\tsb_str(&b, rpt_info.sample ? "sample" : rid && own ? "RadioID.net, TRAC" : rid ? "RadioID.net" : "TRAC");\n'
+         '\trpt_info_t ri;\n'
+         '\tbool have = rpt_info_get(&ri);\n'
+         '\tbool rid = strstr(ri.source, "RadioID") != NULL, own = strncmp(ri.source, "own", 3) == 0;\n'
+         '\tsb_str(&b, !have ? TR("none") : ri.sample ? "sample" : rid && own ? "RadioID.net, TRAC" : rid ? "RadioID.net" : "TRAC");\n'
          '#endif\n'
          '\treturn t;\n}\n\nstatic void about_enter(void)\n'),
     ])
@@ -70,6 +73,20 @@ def public_command(command):
     if not ids or ids[-1] != 'CONFIG_ID_DB=n':
         raise SystemExit('public build: CONFIG_ID_DB must be n (the RadioID.net user database never ships)')
     return command
+
+
+# The tables that moved into the map pack (docs/mappack-design.md E.1): none may be in a Plus ELF
+TABLE_SYMBOLS = ('turkey_map_provinces', 'turkey_map_rings', 'turkey_map_steps', 'turkey_map_names',
+                 'turkey_district_pos', 'turkey_district_first', 'turkey_district_name_first', 'turkey_district_names',
+                 'rpt_table', 'rpt_info', 'air_fields', 'air_freqs', 'air_field_count')
+
+
+def table_audit(nm_text):
+    """csky-elf-nm output of a Plus ELF: refuses one that still links a table the map pack now holds."""
+    found = sorted({w[-1] for w in (line.split() for line in nm_text.splitlines()) if w and w[-1] in TABLE_SYMBOLS})
+    if found:
+        raise SystemExit('Plus build: a map pack table is still in the image (%s)' % ', '.join(found))
+    return {'map_pack_tables_absent': True}
 
 
 def public_audit(nm_text):
@@ -97,6 +114,15 @@ def self_test():
         except SystemExit:
             ok += 1
     assert ok == 3 + len(IDDB_SYMBOLS), 'public_audit missed an ID database symbol'
+    # the map pack's tables (T13): a clean ELF passes, each table symbol is refused
+    tclean = '00001000 T main\n00002000 T rpt_count\n00003000 t air_get\n00004000 T rpt_freq_listed\n'
+    assert table_audit(tclean) == {'map_pack_tables_absent': True}
+    for sym in TABLE_SYMBOLS:
+        try:
+            table_audit(tclean + '0001a2b0 00002c3a R %s\n' % sym)
+        except SystemExit:
+            ok += 1
+    assert ok == 3 + len(IDDB_SYMBOLS) + len(TABLE_SYMBOLS), 'table_audit missed a map pack table'
     # The public build itself, when this tree has one: its ELF holds no ID database, and its manifest says so
     import json
     import subprocess

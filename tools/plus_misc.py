@@ -48,7 +48,7 @@ def prepare_screens(transform, install):
     install('core/ui/airfield.h', 'integration/radiofoundry/air/airfield.h')
     install('core/ui/airfield.c', 'integration/radiofoundry/air/airfield.c')
     install('core/ui/airfield_data.h', 'integration/radiofoundry/air/airfield_data.h')
-    install('core/ui/airfield_data.c', 'integration/radiofoundry/air/airfield_data.c')
+    # (airfield_data.c is the map pack's since 1.1: tools/refpack.py and the host tests read it where it is committed)
     install('core/ui/ui_airfield.c', 'integration/radiofoundry/air/ui_airfield.c')
     install('core/radio/marine.h', 'integration/radiofoundry/marine/marine.h')
     install('core/radio/marine.c', 'integration/radiofoundry/marine/marine.c')

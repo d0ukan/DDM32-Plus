@@ -604,6 +604,21 @@ def main():
     global PLUS_FILES
     PLUS_FILES = args.plus or (args.prepare_only and not args.classic)	# the host tests' prepare: every file
     prepare()
+    if args.plus:
+        # DDM32 Plus map pack (docs/mappack-design.md T15): the TX refusal set this prepare generated must refuse
+        # exactly what the old loop over its rows refused, on every frequency the radio transmits on (no release can
+        # ship a set that differs from its rows)
+        from tools import refpack, rpt_list
+        fsets = tuple([int(v) for v in re.findall(r'(\d+)u,', refpack.c_array(
+            (ROOT / 'build/rpt/rpt_freqs.c').read_text(encoding='ascii'), name + '[]'))] if
+            int(re.search(name + r'_n = (\d+)u', (ROOT / 'build/rpt/rpt_freqs.c').read_text(encoding='ascii'))[1]) else []
+            for name in ('rpt_fq_vhf', 'rpt_fq_uhf'))
+        frows = plus_features.RPT_FREQ_ROWS
+        if fsets != rpt_list.freq_set(frows):
+            raise SystemExit('rpt_freqs.c is not the refusal set of its rows')
+        print(f'Repeater refusal set: {len(fsets[0]) + len(fsets[1])} frequencies of {len(frows)} repeaters '
+              f'({plus_features.RPT_SOURCES.get("freq")}), equal to the old check on '
+              f'{rpt_list.check_freq_set(frows, fsets)} frequencies', flush=True)
     if args.prepare_only:
         return
     if not (ROOT / "toolchain/csky-elf/lib/libc.a").exists():
@@ -834,6 +849,34 @@ def main():
         # DDM32 Plus public: no ID database table or code in the image (research-data/user.csv never ships)
         firstboot_audits.update(plus_brand.public_audit(
             subprocess.check_output([str(ROOT/"toolchain/bin/csky-elf-nm"),str(prefix.with_suffix(".elf"))],text=True)))
+    ref_pack = None
+    if args.plus:
+        # DDM32 Plus map pack (docs/mappack-design.md E.1): the map, district, repeater and airfield tables live on the
+        # data chip; none may be linked. The pack is made here from the same generator outputs (sequence 0), next to
+        # the image, and must rebuild byte-identical
+        firstboot_audits.update(plus_brand.table_audit(
+            subprocess.check_output([str(ROOT/"toolchain/bin/csky-elf-nm"),str(prefix.with_suffix(".elf"))],text=True)))
+        from tools import refpack
+        version = (ROOT/'VERSION').read_text(encoding='ascii').strip()
+        dpk = DEST / b / "ddm32-ref.dpk"
+        image = refpack.build(version, rpt=refpack.load_rpt_c(ROOT / 'build/rpt/rpt_data.c'))
+        if args.verify_rebuild and refpack.build(version, rpt=refpack.load_rpt_c(ROOT / 'build/rpt/rpt_data.c')) != image:
+            raise SystemExit("The map pack differs on a rebuild")
+        dpk.write_bytes(image)
+        info = refpack.rpt_info(image[64:])
+        ref_pack = {"file": str(dpk.relative_to(ROOT)), "sha256": hashlib.sha256(image).hexdigest(), "size": len(image),
+                    "pack_type": 3, "pack_format": 1, "dir_version": refpack.DIR_VERSION,
+                    "coord_crc": "0x%08x" % refpack.coord_id(refpack.defines(refpack.MAP_H)),
+                    "flags": "0x%04x" % refpack.hint(refpack.defines(refpack.MAP_H)),
+                    "date": image[20:28].decode('ascii'), "name": image[28:44].rstrip(b'\0').decode('ascii'),
+                    "rebuild_identical": args.verify_rebuild,
+                    "repeater_sources": {"pack": info[3] if info else "none", "pack_sample": bool(info and info[1]),
+                                         "freq_set": plus_features.RPT_SOURCES.get('freq', 'none'),
+                                         "freq_set_sample": plus_features.RPT_SOURCES.get('freq_sample', False),
+                                         "pack_switch": plus_features.RPT_SOURCES.get('pack_switch'),
+                                         "freq_switch": plus_features.RPT_SOURCES.get('freq_switch')}}
+        print(f'Map pack: {dpk} ({len(image)} bytes, repeaters "{ref_pack["repeater_sources"]["pack"]}", '
+              f'refusal set "{ref_pack["repeater_sources"]["freq_set"]}")', flush=True)
     if args.first_boot:
         symbols=subprocess.check_output([str(ROOT/"toolchain/bin/csky-elf-nm"),str(prefix.with_suffix(".elf"))],text=True)
         names={line.split()[-1] for line in symbols.splitlines() if line.split()}
@@ -869,6 +912,7 @@ def main():
     if args.plus:
         # DDM32 Plus: its own transforms and sources too
         inputs += sorted(p for p in (ROOT / "tools").glob("plus_*.py")) + [ROOT / "tools/turkish_ui.py",
+                  ROOT / "tools/refpack.py", ROOT / "tools/rpt_list.py", ROOT / "tools/datapack.py",
                   ROOT / "LICENSES/GPL-3.0.txt", ROOT / "LICENSING.md"] + [p for folder in
                   (ROOT / "src/ysf", ROOT / "src/nxdn", ROOT / "src/dpmr") for p in folder.rglob("*") if p.is_file()]
     manifest = {"kind": (("DDM32 Plus public build (Classic r13 base, no ID database)" if args.public else "DDM32 Plus development build (Classic r13 base)") + "; hardware qualification required" if args.plus else "Open25-DM32 Classic release candidate; hardware qualification required") if args.classic else "RadioFoundry P25 laboratory image",
@@ -878,6 +922,7 @@ def main():
         "codec_cache_reused":reused_codec,
         "audits": {"unresolved_symbols": [], "high_register_instructions": 0, "compiler_warnings": 0,**firstboot_audits},
         "forced_rebuild_identical": args.verify_rebuild,
+        "ref_pack": ref_pack,
         "codec_speed_build":args.speed_codec, "bench_enabled":not args.lean, "cpu_profile_enabled":args.cpu_profile, "dev_update_enabled":args.dev_update,
         "native_tx_bench_enabled":args.tx_bench, "classic_enabled":args.classic, "plus_enabled":args.plus, "public_enabled":args.public, "plus_features":list(PLUS_FEATURES) if args.plus else [], "feature_overrides":args.feature,
         "firstboot_flags":47 if args.tx_bench else 15 if args.dev_update else 31,

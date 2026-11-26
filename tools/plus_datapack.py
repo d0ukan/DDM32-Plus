@@ -12,6 +12,9 @@ PACK = 'integration/radiofoundry/datapack/'
 FILES = [
     ('core/storage/datapack.h', 'datapack.h'),
     ('core/storage/datapack.c', 'datapack.c'),
+    # the map pack (type 3, docs/mappack-design.md): its validation and the UI task's readers
+    ('core/storage/ref_pack.h', 'ref_pack.h'),
+    ('core/storage/ref_pack.c', 'ref_pack.c'),
     ('core/ui/air_pack.h', 'air_pack.h'),
     ('core/ui/air_pack.c', 'air_pack.c'),
 ]
@@ -52,14 +55,16 @@ def prepare_datapack(transform, install):
          '\t\t// DDM32 Plus: the user\'s RadioID data pack (docs/r14.md 7)\n#endif\n'
          '#if CONFIG_ID_DB\n\t} else if (!group && iddb_text(id, n->name, sizeof(n->name))) {\n'),
     ])
-    # Settings > About: each pack type's line ("RadioID pack: RadioID TR, 2026-11-17, 98 KB", "none", "damaged")
+    # Settings > About: each pack type's line ("RadioID pack: RadioID TR, 2026-11-17, 98 KB", "none", "damaged",
+    # "too big" for a 1.0.x RadioID pack over 192 KB, "for another version" for a map pack of another firmware)
     transform('core/ui/ui_menus.c', [
         ('#include "rfoundry_about.h"\n', '#include "rfoundry_about.h"\n' + ON + '#include "storage/datapack.h"\n#endif\n'),
         # The About text is built in the heap while the page draws, not in a static buffer: 752 bytes of static RAM
         # back for the whole radio (the page's text lives only during its draw; without room it says so)
         ('static const char *about_text(void)\n{\n\tstatic char t[640 + 48 * CONFIG_ID_DB];\t// DM32 Plus: the ID database line\n'
          '\tsbuf_t b;\n\tsb_init(&b, t, sizeof t);',
-         '#define ABOUT_BYTES\t(640u + 48u * CONFIG_ID_DB + 112u * CONFIG_DATAPACK)\t// DM32 Plus: the ID database, the packs\n'
+         # three pack lines (RadioID, air band, map pack), the longest Turkish state text each (heap, while About draws)
+         '#define ABOUT_BYTES\t(640u + 48u * CONFIG_ID_DB + 220u * CONFIG_DATAPACK)\t// DM32 Plus: the ID database, the packs\n'
          '#ifdef __csky__\n#include "FreeRTOS.h"\n#define about_alloc\tpvPortMalloc\n#define about_free\tvPortFree\n#else\n'
          '#include <stdlib.h>\n#define about_alloc\tmalloc\n#define about_free\tfree\n#endif\n'
          'static const char *about_text(char *t)\n{\n\tsbuf_t b;\n\tsb_init(&b, t, ABOUT_BYTES);'),
@@ -70,8 +75,11 @@ def prepare_datapack(transform, install):
         ('\tsb_str(&b, TR("AMBE+2 codec: DVSI (stock)"));',
          ON + '\tfor (uint8_t k = 1; k <= DPK_TYPES; k++) {\t// DDM32 Plus: the user data packs (docs/r14.md 7)\n'
          '\t\tchar d[40];\n'
-         '\t\tsb_str(&b, k == DPK_RADIOID ? TR("RadioID pack: ") : TR("Air band pack: "));\n'
-         '\t\tsb_str(&b, dpk_about(k, d, sizeof d) ? d : dpk_state(k) == DPK_BAD ? TR("damaged, not used") : TR("none"));\n'
+         '\t\tsb_str(&b, k == DPK_RADIOID ? TR("RadioID pack: ") : k == DPK_AIR ? TR("Air band pack: ") : TR("Map pack: "));\n'
+         '\t\tuint8_t st = dpk_state(k);\n'
+         '\t\tsb_str(&b, dpk_about(k, d, sizeof d) ? d : st == DPK_BAD ? TR("damaged, not used") :\n'
+         '\t\t       st == DPK_BIG ? TR("too big for this firmware, rebuild it") :\n'
+         '\t\t       st == DPK_OTHER ? TR("for another version, load the one for this firmware") : TR("none"));\n'
          '\t\tsb_chr(&b, \'\\n\');\n\t}\n#endif\n'
          '\tsb_str(&b, TR("AMBE+2 codec: DVSI (stock)"));'),
     ])

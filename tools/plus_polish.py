@@ -34,7 +34,7 @@ def prepare_polish(transform, install):
          'sb_str(&b, TR("Based on Open25-DM32 Classic"));\n\tsb_chr(&b, \'\\n\');'),
         ('sb_str(&b, "Based on RadioFoundry\\n");',
          'sb_str(&b, TR("Based on RadioFoundry"));\n\tsb_chr(&b, \'\\n\');'),
-        ('rpt_info.sample ? "sample" :', 'rpt_info.sample ? TR("sample") :'),
+        ('ri.sample ? "sample" :', 'ri.sample ? TR("sample") :'),
     ])
     # The simulator only (FONT_BOTH; the firmware is unchanged): SIM_TEXT_LARGE=1 draws lists and labels one font size
     # up (small 9x18 -> 12x24, tiny 8x16 -> 9x18), the measurement of a "Text size: Large" (docs/plus.md, round 16 item 4)

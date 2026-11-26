@@ -25,10 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import airfields, iddb  # noqa: E402
 
 MAGIC = b'DPK1'
-RADIOID, AIR = 1, 2
+RADIOID, AIR, REF = 1, 2, 3			# REF: the map pack (tools/refpack.py, docs/mappack-design.md)
 HDR = struct.Struct('<4sBBHIII8s16s16s')		# then the header's own CRC-32: 64 bytes
-SLOT = {RADIOID: 0x40000, AIR: 0x4000}		# datapack.c ID_SLOT / AIR_SLOT
-SLOT_ADDR = {RADIOID: (0xE70000, 0xEB0000), AIR: (0xEF0000, 0xEF4000)}
+# Layout 2 (firmware 1.1, docs/mappack-design.md A.1): datapack.c slots[]. RadioID keeps 1.0.x's slot starts with a
+# 192 KB limit (also safe for a 1.0.x radio: same starts); the map pack's slots were the tails of 1.0.x's 256 KB ones
+SLOT = {RADIOID: 0x30000, AIR: 0x4000, REF: 0x10000}
+SLOT_ADDR = {RADIOID: (0xE70000, 0xEB0000), AIR: (0xEF0000, 0xEF4000), REF: (0xEA0000, 0xEE0000)}
 SECTOR = 4096
 ID_CHARS = 16					# 6-bit characters a record's text, a multiple of 4
 AIR_FREQS = 64					# air_pack.h AIR_PACK_FREQS
@@ -43,14 +45,25 @@ def crc32(data):
     return zlib.crc32(data) & 0xFFFFFFFF		# = storage_crc32(0, ...)
 
 
-def header(ptype, payload, date, name, seq=0, tag=TAG):
+def header(ptype, payload, date, name, seq=0, tag=TAG, flags=0):
+    """flags: 0 for RadioID and air band; a map pack's version hint (refpack.py), 0 = no hint"""
     if not re.fullmatch(r'\d{8}', date):
         raise PackError(f'date {date!r}: YYYYMMDD')
     if len(payload) > SLOT[ptype] - 64:
         raise PackError(f'{len(payload)} bytes: the slot holds {SLOT[ptype] - 64}')
-    h = HDR.pack(MAGIC, ptype, 1, 0, seq, len(payload), crc32(payload), date.encode('ascii'),
+    h = HDR.pack(MAGIC, ptype, 1, flags & 0xFFFF, seq, len(payload), crc32(payload), date.encode('ascii'),
                  name.encode('ascii', 'replace')[:16], tag[:16])
     return h + struct.pack('<I', crc32(h))
+
+
+def reseq(image, seq):
+    """The same pack with another sequence (what a writer programs into the radio's slot): every other header field,
+    the map pack's flags too, carried from the .dpk"""
+    if len(image) < 64 or image[:4] != MAGIC:
+        raise PackError('not a data pack')
+    h = bytearray(image[:60])
+    struct.pack_into('<I', h, 8, seq)
+    return bytes(h) + struct.pack('<I', crc32(bytes(h))) + image[64:]
 
 
 def parse(image):
@@ -59,25 +72,60 @@ def parse(image):
         return None, b''
     magic, ptype, fmt, flags, seq, length, crc, date, name, tag = HDR.unpack_from(image)
     payload = image[64:64 + length]
-    return dict(type=ptype, fmt=fmt, seq=seq, len=length, crc=crc, date=date.decode('ascii', 'replace'),
+    return dict(type=ptype, fmt=fmt, flags=flags, seq=seq, len=length, crc=crc, date=date.decode('ascii', 'replace'),
                 name=name.rstrip(b'\0').decode('ascii', 'replace'), tag=tag.rstrip(b'\0').decode('ascii', 'replace'),
                 crc_ok=len(payload) == length and crc32(payload) == crc), payload
 
 
 def next_seq(images):
-    """The sequence a new pack gets: one more than the valid ones the radio's two slots hold"""
-    seqs = [h['seq'] for h, _ in map(parse, images) if h and h['crc_ok']]
+    """The sequence a new pack gets: one more than any the radio's two slots hold under a header that checks (valid or
+    rejected), so the new pack wins over both"""
+    seqs = [h['seq'] for h, _ in map(parse, images) if h]
     return max(seqs, default=0) + 1
 
 
+def slot_valid(ptype, image):
+    """Whether the firmware (1.1, layout 2) takes this slot image as a whole pack of the type: header, length, payload
+    CRC and, for a map pack, its structure and version (refpack.validate: the firmware's ref_validate rules)"""
+    h, payload = parse(image)
+    if not h or not h['crc_ok'] or h['type'] != ptype or h['fmt'] != 1 or h['len'] > SLOT[ptype] - 64:
+        return False
+    if ptype == REF:
+        from tools import refpack
+        return refpack.validate(payload, h['flags'])[0] == 'ok'
+    return True
+
+
 def inactive_slot(ptype, images):
-    """Which slot a new pack goes into: the one not in force (slot 0 when neither holds a valid pack)"""
+    """Which slot a new pack goes into: the one not in force (slot 0 when neither holds a valid pack). In force is the
+    valid slot with the higher sequence, by the firmware's own rules (slot_valid): a newer slot it rejects next to a
+    valid older one is the one overwritten"""
     best = None
     for i, img in enumerate(images):
         h, _ = parse(img)
-        if h and h['crc_ok'] and h['type'] == ptype and (best is None or h['seq'] > best[1]):
+        if h and slot_valid(ptype, img) and (best is None or h['seq'] > best[1]):
             best = (i, h['seq'])
     return 0 if best is None else 1 - best[0]
+
+
+def ref_write_slot(images, running_valid=None):
+    """Which map pack slot a writer overwrites (docs/mappack-design.md E.3), None: write nothing. images: both slots'
+    full images (None for one that could not be read in full: nothing is written). The slot in force for the RUNNING
+    firmware (running_valid: its slot check; default, when its rules are not known, header + payload CRC) is never
+    overwritten, so a failed firmware install that follows a pack-first update keeps its map; otherwise the target
+    firmware's own rules (slot_valid) decide, as inactive_slot: the rejected or empty slot, else the older valid one"""
+    if len(images) != 2 or any(img is None for img in images):
+        return None
+
+    def crc_ok(img):
+        h, _ = parse(img)
+        return bool(h and h['crc_ok'] and h['type'] == REF)
+    check = running_valid or crc_ok
+    run = [i for i, img in enumerate(images) if check(img)]
+    if run:
+        keep = max(run, key=lambda i: parse(images[i])[0]['seq'])
+        return 1 - keep
+    return inactive_slot(REF, images)
 
 
 def cps_plan(slot_addr, image):
@@ -211,6 +259,9 @@ def info(image):
         lines.append(f'{n} IDs, {chars} characters a record ({rec} bytes)')
     if h['type'] == AIR and len(payload) >= 4:
         lines.append(f"{struct.unpack_from('<H', payload)[0]} airfields")
+    if h['type'] == REF:
+        from tools import refpack
+        lines.append(refpack.describe(payload, h['flags']))
     return '\n'.join(lines)
 
 
