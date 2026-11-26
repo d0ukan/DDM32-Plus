@@ -22,7 +22,7 @@ Firmware (to be 1.1.0 with programmer 3.2.0, owner decision 2026-11-26). Host-te
   can only add refusals. Owner decision 2026-11-26: RadioID.net and the owner's TRAC list both ship, in the map pack's
   repeater list and in that set, as in 1.0.x (TRAC states no licence; the owner takes the responsibility).
 - The map is drawn again from the chip only when something on it changes, not on every RSSI or caller change.
-- Program flash: about 40 KB freed (measured, see docs/plus.md); static RAM about +0.5 KB.
+- Program flash: 41,120 B freed (public build 854,948 B, was 896,068 B); static RAM +544 B (206,752 B of 211,456 B).
 
 ## v1.0.6 (2026-11-26, with programmer 3.1.0)
 

@@ -3763,7 +3763,12 @@ flash. Code: `integration/radiofoundry/datapack/ref_pack.{c,h}` (validation, the
 | Step | What | Public FLASH B | Public RAM B (free) |
 |---|---|---:|---:|
 | base | v1.0.6 (`ddm25` 580a16d) | 896,068 | 206,208 (5,248) |
-| mappack | the map pack: tables out, readers, validation, refusal set, cheap frames, DOTA type 3, About | see CHANGELOG / ROADMAP (measured) | |
+| mappack | the map pack: tables out (47,163 B gross), readers, validation, refusal set (70 frequencies), cheap frames, DOTA type 3, About | 854,948 (**-41,120**; design estimate ~42 KB) | 206,752 (4,704: **+544**; design estimate ~405 B) |
+
+Stack (`--stack-check`): every task fits with the same deepest paths as v1.0.6 (start-up 312 B free, UI 184 B, host
+564 B, radio 316 B): `ref_validate` (its 64-byte buffer after `payload_crc`'s, never both live) under the boot scan, the
+DOTA storage job and the CPS close is not the deepest path of any of them. The release map pack: 50,724 B, SHA-256
+1ba0534e…477f4 for this tree's repeater list ("own+RadioID.net", 252 repeaters).
 
 ## Last calls (`CONFIG_LAST_CALLS`, ours; branch `r14-xband`, ROADMAP item 43)
 
