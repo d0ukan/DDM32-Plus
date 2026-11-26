@@ -17,6 +17,16 @@ Design only. Nothing here is built yet; no firmware, tool or programmer code cha
 | S6 release gate | a public release refuses repeater data from a source the owner has not cleared (default until H.5 is answered: no "own" = TRAC data) for both the pack and the flash set | E.2, E.5, H.5 |
 | N1-N5 | DOTA / programmer consistency for a > 192 KB RadioID pack; old-programmer PASS that erases a map slot; `min_firmware` meaning; implementation traps; `ref_pack` inside the firmware manifest entry; CRC coordinate id | B.4, C.2, E.2, E.3, F.5 |
 
+**Revision 3 (2026-11-26)** after the re-verification of b888de5 (no blocker, four should-fix items):
+
+| Finding | What changed | Where |
+|---|---|---|
+| R1 lookup rounding | the set is searched in steps but every comparison is in **Hz**, strict +-6,250 Hz exactly as ui_xband.c:41-43; no rounding of the asked frequency; underflow guarded; T15 sweeps the amateur bands in 10 Hz steps and every boundary +-1 Hz, on the real generated list in the build | C.7, G T15 |
+| R2 TRAC repeaters only in a user pack | `known_repeater` = flash set **OR** the pack's RPT records when the pack has them (only ever adds refusals); `--plus` and `--public` stay one image (RadioID.net set in both) | C.7, E.2 |
+| R3 "another version" | own state `DPK_OTHER`, separate from BAD, used the same way everywhere; how programmer 3.2 picks the slot to overwrite; a version hint in the header's `flags` so DOTA refuses before the transfer | B.2, C.2, D, E.3, G T5 |
+| R4 frame buffer | the buffer persists, so a cheap frame skips `gfx_clear` and repaints only outside the map area; everything drawn over the map goes into the map key | C.4 |
+| NITs | UI directory reload with raw `rd()`; boot figure in D; F section order; `ref_pack` version field and `--verify` walking the nested object; stack check of the validation buffer in every scanning task | C.3, D, E.2, F, F.4 |
+
 Owner decisions of 2026-11-26 this design implements:
 
 1. RadioID pack slots shrink from 2 x 256 KB to 2 x 192 KB (the owner's Turkey RadioID pack is ~98 KB).
@@ -39,8 +49,8 @@ programmer's `rust/crates/ddm32-core/src/datapacks/datapack.rs` and `radio/cps.r
 | Migration | **No firmware writes at boot or on update.** An existing RadioID pack (either slot) of up to 196,544 B payload is accepted unchanged: the owner does **not** reload RadioID. Map pack slots read "none" until the programmer (or DOTA) writes one. Downgrade to 1.0.6 keeps RadioID and air band packs valid |
 | Map pack | One new pack type `DPK_REF` = 3, format 1: a directory of up to 16 sections (map meta, provinces, rings, steps, province names, district positions / indexes / names, repeater info / records / key, airfields / frequencies / key). Read straight from the chip, no RAM copy; a 128-byte read window for sequential streams |
 | Size | ~50.7 KB payload, 13 sectors; slot payload max 65,472 B: **~14.8 KB headroom** (22.6 % of the slot, +29 % over today's data) |
-| Flash | Gross 47,163 B leaves program flash; reader + "no data" states ~3.0-4.5 KB and the repeater frequency set ~0.9-1.3 KB come back (estimate): **net ~42 KB freed (range 41.4-43.3 KB)** |
-| RAM | ~400 B static (window 136 B, UI directory copy 100 B, kept pack state 12 B, name buffers 48 B, three static record scratch copies 92 B) of the ~5.2 KB free |
+| Flash | Gross 47,163 B leaves program flash; reader + "no data" states + revision 3 items ~3.3-5.0 KB and the repeater frequency set ~0.6-1.3 KB come back (estimate): **net ~42 KB freed (range 40.9-43.3 KB)** |
+| RAM | ~405 B static (window 136 B, UI directory copy 100 B, kept pack state 12 B, name buffers 48 B, three static record scratch copies 92 B, map key 16 B) of the ~5.2 KB free |
 | TX refusals | cross-band and DOTA refuse listed repeater frequencies **with or without a map pack** (a frequency set in program flash, C.7) |
 | Marine | **Stays in program flash** (590 B): it feeds the radio core's TX refusal (`marine_hz`); moving it would put a SPI read on the PTT path and lose the refusal without a pack. Owner question H.1 |
 | Release | The firmware build makes `ddm32-ref-<version>.dpk` from the same generator outputs; it ships as a **separate signed release asset** (a `ref_pack` object inside the firmware's entry of `ddm32-manifest.json`). The firmware zip keeps its three files, so older programmers still install the firmware. A public release refuses repeater data the owner has not cleared (H.5) |
@@ -168,7 +178,11 @@ new RadioID B payload; there too it would never be read as a header (headers are
 would be lost.
 
 Type confusion is excluded by `h->type == type` (datapack.c:71): a RadioID header can never count as a map pack and
-the other way round. No extra layout-version field is needed. The reserved `flags` field (datapack.h:34) stays 0.
+the other way round. No extra layout-version field is needed for the layout. For type 3 only, the reserved `flags`
+field (datapack.h:34; ignored by 1.0.6, which checks only magic, type, format, length and CRC, datapack.c:71-72) carries
+a **version hint** (R3): bits 0-7 the directory version (1), bits 8-15 the low byte of the map coordinate CRC (C.2).
+It lets a DOTA receiver refuse a pack for another version from the HELLO's header, before the ~9 minute transfer
+(dota.c:836 gains the check: "Map pack for another version"). Types 1 and 2 keep `flags` 0.
 
 One small fix comes with it: `dpk_hdr_ok` computes `dpk_slot_size(type) - DPK_HDR` (datapack.c:72), which wraps to
 0xFFFFFFC0 for a type the build does not know (slot size 0). All callers pass a known type today (DOTA checks
@@ -262,17 +276,26 @@ airfield.h:44; the csky and host ABIs agree for these field types), so the reade
 and the existing math (rpt.c, airfield.c, map.c) keeps its code paths.
 
 Versioning: the pack header's `fmt` (datapack.h:33) is 1; the directory version is 1. **Unknown section ids are
-ignored** (a later pack can add e.g. a richer repeater record for NXDN RAN without breaking 1.1). A known id with a
-different `rec` makes that feature "pack for another version" (treated as no data for that feature). A new `fmt` value
+ignored** (a later pack can add e.g. a richer repeater record for NXDN RAN without breaking 1.1). A new `fmt` value
 is refused by 1.1 (`h->fmt == 1u`, datapack.c:71): reserved for an incompatible change.
+
+**"For another version" is its own state, `DPK_OTHER` (R3)**, separate from BAD, and means one thing everywhere: the
+pack's CRCs check and its directory is well formed, but it was built for a different firmware: a directory version
+other than 1, a **known section id with a different `rec`**, a map coordinate CRC that differs from the firmware's, or
+a `flags` version hint that disagrees. Such a slot is **never in force** (exactly like BAD for the slot choice: the
+other slot wins if valid) but About says "Map pack: for another version, load the one for this firmware" ("Harita
+paketi başka bir sürüm için, bu yazılımınkini yükleyin") instead of "damaged". If both slots are rejected, the type's
+state is OTHER when either slot is OTHER, else BAD (a newer version is the more useful message). BAD stays for a pack
+that breaks a structural rule (C.2 rules 1-6 apart from the version items) or fails a CRC.
 
 **Structural validation** (`ref_validate(slot_addr, len)`), all arithmetic in **uint32_t** (map.c:215 loops with a
 `uint16_t i`, so a `first + count` that wraps 16 bits must be refused, not trusted):
 
 1. Directory: magic, version 1, `n <= 16`, every entry `off % 4 == 0`, `off + rec * count <= len` (u32, overflow
-   checked: `count <= (len - off) / rec`), no two known sections overlap; a known id with a wrong `rec` fails.
-2. MAP_META counts equal the section counts; coordinate id equal (C.2 head); provinces == 81; rings, steps,
-   districts each < 65,536 (the firmware's index types).
+   checked: `count <= (len - off) / rec`), no two known sections overlap. Version items (-> `DPK_OTHER`, checked first):
+   directory version != 1, a known id with a different `rec`, the `flags` hint.
+2. MAP_META counts equal the section counts; provinces == 81; rings, steps, districts each < 65,536 (the firmware's
+   index types). Version item (-> `DPK_OTHER`): the coordinate CRC differs (C.2 head).
 3. Every ring: `first + count <= steps`, `count >= 1`. Every province: `first_ring + ring_count <= rings`,
    `name < PROV_NAMES` length, `min <= max`.
 4. Districts: DIST_FIRST has 82 entries, non-decreasing, `first[0] == 0`, `first[81] == DIST_POS count`; DIST_NAME_FIRST
@@ -284,10 +307,11 @@ is refused by 1.1 (`h->fmt == 1u`, datapack.c:71): reserved for an incompatible 
    count, `count <= 64` (`AIR_PACK_FREQS`).
 
 **All or nothing per slot (S1):** a slot whose sections present all validate is a valid slot; **any known section that
-fails makes the whole slot BAD**, even if the map part alone would be fine (simple and predictable: a builder bug or a
-crafted pack never mixes). A section that is absent is not a failure: that feature is just off (a release pack without
-repeater sections, H.5). Of two valid slots the higher sequence wins, as for the other types, so a bad newer pack
-never displaces a good older one.
+fails makes the whole slot rejected** - `DPK_OTHER` for a version item, BAD for anything else - even if the map part
+alone would be fine (simple and predictable: a builder bug, a pack for another version or a crafted pack never
+mixes). A section that is absent is not a failure: that feature is just off (a release pack without repeater sections,
+H.5). Of two valid slots the higher sequence wins, as for the other types, so a rejected newer pack never displaces a
+good older one.
 
 Where it runs (S1): (a) in `slot_ok` for type 3, after the payload CRC, so `scan_type` only ever picks a validated slot;
 (b) in `dpk_commit` for type 3, **after the payload CRC read-back and before the header is programmed**: a DOTA
@@ -320,8 +344,10 @@ New file `integration/radiofoundry/datapack/ref_pack.{c,h}` (installed as `core/
   UI task may be drawing. So the directory the readers use is **owned by the UI task**: a 100-byte copy (per needed
   section its offset u32 and count u16, the feature bits, and its generation = the slot address and `seq` it was
   loaded from). At the start of every UI use (`ref_has`, the first read of a draw), the UI compares
-  `dpk_active(DPK_REF)` (slot, seq) with its generation; on a change it reloads the directory (196 B, one `dpk_read`)
-  and drops the window. No other task ever writes the UI copy; the scan task only writes `cur[]`, which is already
+  `dpk_active(DPK_REF)` (slot, seq) with its generation; on a change it reloads the directory (196 B) with a raw
+  `rd()` from **the generation's own slot address** (not `dpk_read`, which follows whatever slot is in force at the
+  moment of the read and could mix two packs if another switch happens in between), and drops the window. The window's
+  refills likewise read from the generation's slot address. No other task ever writes the UI copy; the scan task only writes `cur[]`, which is already
   published in an order where a reader sees the old pack or the new one, never a half state.
 - What a draw in progress sees when a new pack takes over mid-draw: it keeps reading the **old** slot through its own
   cached directory (the old slot is not erased by a commit; it is erased only when the next pack starts writing into
@@ -374,16 +400,23 @@ build tree: frequent while receiving: RSSI, caller, call state) and at least eve
 change: ~37 ms of reads (+ the ~3 ms province test + districts at close zoom, ~53 ms in the worst case) several times
 a second during a call. Rule for the implementation:
 
-- The map screen keeps a **map key**: centre, zoom, the province drawn bright, the picked repeater / station, district
-  labels on / off, the track length and coverage flag, and the map pack generation (C.3).
-- The **map layer** (borders, province names, districts, repeater triangles: everything read from the pack) is read
-  from the chip only when the key changed since the last drawn frame **or** the screen was entered / uncovered. Between
-  such frames a dirty caused only by the radio view redraws the parts that do not need the pack (status strip, the
-  "here" / info line, our position mark) - via the UI core's partial redraw if it has one, else by keeping the map
-  layer's pixels: the implementer checks first whether the frame buffer survives between draws of the same screen
-  (`gfx` / `ui_app.c`); if it does not, the fallback is to redraw the map layer at most once per `REFRESH_MS` while the
-  key is unchanged and to draw the cheap parts on the other dirties (stale-for-a-second map pixels under unchanged
-  borders are invisible). Which of the two is possible is an implementation check, named here so it is not missed.
+- The frame buffer **persists** between draws (the build tree's `core/ui/gfx.c:15` `fb_words`,
+  `gfx_framebuffer` :191), but `map_draw_screen` starts with `gfx_clear(ui_col.bg)` (ui_map.c:542) and redraws
+  everything (top strip, map, names, repeaters, marks, info line, banner: ui_map.c:543-566).
+- The map screen keeps a **map key** of **everything drawn inside the map area** (the rectangle `layout()` gives the
+  map): centre and zoom, the province drawn bright (`here_province`), district labels on / off, the picked repeater
+  and picked APRS station (`pick`, `spick`, details shown), **our own position in map pixels** (not lat / lon: a GPS
+  wobble inside one pixel does not count), the **APRS station marks** in view (their count and a checksum of their
+  projected pixels and labels), the **track** (point count and newest point), the coverage flag, the map pack
+  generation (C.3), and whether a **toast or banner** overlaps the map area now or did on the last frame
+  (`ui_draw_banner`, ui_map.c:566, and the toast state).
+- **Full frame** (key changed, screen entered or uncovered, or a toast / banner appeared or went): as today -
+  `gfx_clear`, then the whole map layer read from the pack, the overlays, the info line.
+- **Cheap frame** (key unchanged: a radio view or battery change only): **no `gfx_clear`**; only the areas outside the
+  map rectangle are cleared and repainted (the top strip, `draw_info`'s line); nothing is read from the pack. Because
+  every pixel inside the map area comes only from things in the key, a cheap frame can never leave a trail there.
+- The key costs ~16 B of RAM (a 32-bit hash of the fields plus the map rectangle). If a later overlay is added inside
+  the map area, it must join the key (a comment at `draw_marks` says so; T10 covers it).
 - T10 and MP3 measure this **during RX traffic** (a DMR call with RadioID names being looked up), not on a quiet radio.
 
 **Mutex contention.** The data-chip mutex (flash_spi0.c:36-51) is taken **per read call**, not per draw, so another
@@ -436,15 +469,34 @@ pack itself over DOTA. So the TX refusals keep their own data in program flash, 
   removed; two `uint16_t` arrays in 1.25 kHz steps: VHF from 136 MHz (up to 174 MHz: 30,400 steps) and UHF from 400 MHz
   (up to 480 MHz: 64,000 steps); frequencies outside both bands are dropped (the radio cannot transmit there, and
   `xband_check_hz` / the band check refuse them already).
-- Size: 252 repeaters, 101 DMR + 151 FM, at most 504 frequencies, ~350-450 after merging shared ones: **~0.7-0.9 KB
-  data + ~150-250 B code** (binary search for the nearest entry, then the same +-6,250 Hz test as today) = **~0.9-1.3
-  KB**. Revision 1's saving shrinks by that.
-- `known_repeater(hz)` uses only this set, for cross-band **and** DOTA, with or without a pack, with the same result as
-  today (the same rows, the same tolerance). `rpt_freqs` holds only frequencies: no names, places or positions.
-- A host test proves equality: for every frequency from 136 to 480 MHz in 625 Hz steps, `known_repeater` on the set
-  equals the old loop over `rpt_table` (G T15).
-- It is derived from the same repeater rows, so it carries the same licence question as the pack's repeater sections
-  (H.5): the release gate (E.2) applies to it as well.
+- Size: with both sources (252 repeaters, 101 DMR + 151 FM, at most 504 frequencies, ~350-450 after merging shared
+  ones) **~0.7-0.9 KB data**; with RadioID.net only (H.5 (a): 101 DMR repeaters, <= 202 frequencies) **~0.4 KB**; plus
+  **~150-250 B code** (binary search, then the Hz test below). Revision 1's saving shrinks by ~0.6-1.3 KB.
+- **Lookup in Hz, never rounded (R1).** The asked frequency is not on any grid (DOTA takes a typed frequency in 100 Hz,
+  ui_dota.c:459; codeplug channels are in 10 Hz). So the steps are only the storage: the lookup binary-searches the
+  band's array for the first entry whose Hz value `base + step x 1,250` is `>= hz - 6,249` (computed in uint32 with
+  `hz < base + 6,250` handled first, so nothing underflows below 136 / 400 MHz; `hz` outside 136-174 / 400-480 MHz
+  returns "not listed" before any arithmetic), rebuilds that entry's frequency **in Hz** and applies today's test
+  exactly: `hz + 6250 > f && hz < f + 6250` (ui_xband.c:41-43), i.e. strictly within +-6,250 Hz. Inputs are stored only
+  when `rx + off x 1.25 kHz` is a whole step (always true: `off` is in 1.25 kHz units and RX is a 1.25 kHz multiple,
+  rpt_list.py `mhz_hz`), so the Hz rebuilt from a step equals the Hz the old loop computed.
+- **Flash set OR pack (R2).** `known_repeater(hz)` = the flash set **or**, when `ref_has(RPT)`, a pass over the pack's
+  RPT records with the old loop's test (one pass, ~13 ms, UI task: cross-band picks and Start, DOTA's frequency rows and
+  `begin()` all run in the UI task). The OR only ever adds refusals: a user-built pack with repeaters the release set
+  lacks (e.g. the owner's TRAC list under H.5 option (a)) makes cross-band and DOTA refuse them exactly as 1.0.x did;
+  without a pack the flash set still refuses what it holds. A pack can never remove a refusal.
+- **One image (R2).** `--plus` and `--public` keep building the same bytes (docs/plus.md 3662-3665): both compile the
+  frequency set from the repeater rows **the release may carry** (under option (a): RadioID.net only, from
+  `research-data/rptrs.json`); the owner's TRAC rows reach the owner's radio only through the owner's own map pack,
+  where the OR rule covers them. Chosen over a separate owner image because the owner's radio runs the public image
+  (docs/plus.md 3803-3804), a second image would need its own review hash (`PLUS_REVIEWED`) and its own tests, and the
+  OR rule gives the owner the same refusals as 1.0.x as soon as the owner's pack is loaded. Until then (MP1 state) only
+  the RadioID.net set and the band-plan segments refuse: the owner loads the pack in the same session as the update
+  (H.3 pack-first). If H.5 is answered (b), the set is built from both sources in both builds, as 1.0.x did.
+- A host test proves equality with the old loop (G T15). `rpt_freqs` holds only frequencies: no names, places or
+  positions.
+- It is derived from repeater rows, so it carries the same licence question as the pack's repeater sections (H.5): the
+  release gate (E.2) applies to it as well.
 
 ---
 
@@ -469,11 +521,11 @@ without the feature it shows one clear state. Texts (EN / TR, added to the Turki
 | Auto repeater (banner on Home) | ui_mapnav.c:41-66, `arpt_check` | toggling on: toast "No repeater data: load the map pack", stays off; Home itself unchanged |
 | Tools > Airfields, air watch (#) | ui_airfield.c:486 (`air_field_count == 0`) | the existing empty path, new text; the air watch cannot start (no frequencies) |
 | Air band data pack (user's AIP pack) | air_pack.c:19-46 | not applied (it names airfields of the table); About still shows it |
-| Cross-band and DOTA repeater-frequency refusal | ui_xband.c:73 `known_repeater`, used by ui_dota.c:117, 460, 479-489 | **unchanged with or without a pack**: the frequency set in program flash (C.7). Cross-band starts and DOTA sends / receives as today (so a map pack can be received over DOTA by a radio that has none) |
+| Cross-band and DOTA repeater-frequency refusal | ui_xband.c:73 `known_repeater`, used by ui_dota.c:117, 460, 479-489 | **works with or without a pack**: the frequency set in program flash, OR the pack's repeaters when it has them (C.7). Cross-band starts and DOTA sends / receives as today (so a map pack can be received over DOTA by a radio that has none) |
 | DOTA "What: Map pack" | ui_dota.c:130 | greyed "none", Send: "Nothing to send" (as the other packs) |
 | Tools > Marine VHF, marine TX refusal | marine.c | unaffected (stays in flash) |
 | Locator (Tools > Locator), Trip meter, GPS dashboard | fieldx/ui_locator.c, toolbox/tripm.c, ui_gpsdash.c | **unaffected**: checked, none of them reads the moved tables (they use only GPS math) |
-| Home, boot, codeplug, scan, all radio modes | | unaffected; boot adds the pack CRC check (~60 ms) only when a pack exists |
+| Home, boot, codeplug, scan, all radio modes | | unaffected; boot adds the map pack check only when a map slot holds a header: ~75-80 ms per slot, ~150 ms with both slots written (C.4, S5) |
 
 Damaged pack (CRC or validation fails): the same as none, About says "damaged, not used"; if the other slot holds a
 valid older pack, that one is used (two-slot rule).
@@ -496,6 +548,10 @@ valid older pack, that one is used (two-slot rule).
   `datapack.py` images; name "DDM32 TR <version>", date = the newest source date, tag "build <version>"), records its
   SHA-256 and size in `rfoundry_dm32.json`, and `--verify-rebuild` also requires the pack to rebuild byte-identical
   (no build time inside).
+- Under H.5 (a) the release build's pack and frequency set take repeater rows from `rptrs.json` only
+  (`refpack.py --rpt-sources radioid`; the gate in E.2 checks it). The owner's own pack with the TRAC rows is built by
+  the same tool with the owner's CSV (`--rpt-sources own,radioid`), stays on the owner's PC, and is written by the
+  programmer like any `.dpk`; the gate refuses it for a release.
 - The firmware no longer links the four data `.c` files; a new link audit (like `plus_brand.public_audit` for `iddb_*`)
   refuses an ELF holding `turkey_map_steps`, `turkey_district_names`, `rpt_table` or `air_fields`.
 
@@ -507,10 +563,14 @@ the whole release. Instead:
 
 - `pc/release/make_release.py` takes `--ref-pack build/.../ddm32-ref.dpk` and adds the pack **inside the firmware's
   entry** (N5: the pack belongs to that firmware version; a manifest listing several firmware versions keeps each
-  one's pack with it): `"firmware": [{..., "ref_pack": {"file": "ddm32-ref-1.1.0.dpk", "url": ..., "sha256": ...,
-  "size": ..., "pack_type": 3, "pack_format": 1, "date": "20261119", "min_firmware": "1.1.0"}}]`. The manifest is
-  signed as a whole (Ed25519, make_release.py:337-340), so the pack's SHA-256 is covered by the signature. `--verify`
-  (line 350+) checks the asset like the others.
+  one's pack with it): `"firmware": [{..., "ref_pack": {"schema": 1, "version": "1.1.0", "file":
+  "ddm32-ref-1.1.0.dpk", "url": ..., "sha256": ..., "size": ..., "pack_type": 3, "pack_format": 1, "dir_version": 1,
+  "coord_crc": "0x...", "date": "20261119", "min_firmware": "1.1.0"}}]`. `schema` versions the object itself
+  (programmer 3.2 accepts 1 and ignores an object with a higher schema, saying "update the programmer"); `version` is the
+  pack's own version (equal to the firmware's for now). Its own validator (`check_ref_pack` in both
+  `signed_manifest.py` and `signed_manifest.rs`): types, hex SHA-256, `0 < size <= 65,472 + 64`, `pack_type == 3`,
+  file name pattern. The manifest is signed as a whole (Ed25519, make_release.py:337-340), so the pack's SHA-256 is
+  covered by the signature. `--verify` (make_release.py:352) is extended to walk the nested object (F.5).
 - `min_firmware` means **the oldest firmware that uses the pack** (N3), not the oldest that may receive it: writing it
   to an older firmware is allowed and harmless (1.0.6 never reads 0xEA0000 / 0xEE0000), which is what the pack-first
   update order needs (H.3).
@@ -544,6 +604,16 @@ back, close with `C 5` so the firmware rescans.
   `RFOUNDRY_VERSION` "ddm32-plus-1.x" cut to 15 characters: cps_openfw.c memcpy, build_radiofoundry.py:645; to be
   confirmed on the radio). A map pack written to a 1.0.6 radio is harmless (1.0.6 ignores 0xEA0000), so the check is for
   the user, not for safety.
+- **Which slot to overwrite (R3).** The programmer must never overwrite the only pack the firmware actually uses. It
+  reads both slots in full (header + payload, as `read_slot` does, cps.rs:412-423) and applies **the firmware's own
+  rules** with the target firmware's parameters (directory version 1, coordinate CRC from the release's `ref_pack`
+  entry): per slot "valid" (CRCs + structure + version items all pass) or "rejected" (BAD or OTHER) or "empty". The
+  slot in force is the valid one with the higher sequence, exactly as `scan_type` decides; the new pack goes into
+  **the other slot**: the rejected or empty one, or the older valid one. So a newer-but-rejected slot next to a valid
+  older one is overwritten, never the valid one. Sequence = one more than the highest sequence of **any** slot with a
+  header that checks (valid or rejected), so the new pack wins over both. If the programmer cannot read a slot in full
+  it stops without writing. For a 1.0.6 radio (pack-first update) there is no type 3 in force: any rejected or empty
+  slot is taken, slot A when both are empty.
 - Install / update flow: after a firmware install of a release with `ref_pack`, a second step "Harita paketi" writes the
   pack (skipped when the radio's map pack in force has the same CRC and length). Order: H.3.
 - GUI `packs.rs`: a third row "Harita paketi" with the slot lines and a "Yükle" button (from the release folder or a
@@ -598,7 +668,7 @@ images, lines 169-174) apply to the new asset too.
 | map/mapnav.c, mapnav.h, ui_mapnav.c | auto repeater via key + `ref_rpt`; toggle refused without RPT |
 | rpt/rpt.c, rpt.h, ui_rpt.c | `rpt_count()`, key-based `key()` / `in_prov()`, `ref_rpt` for rows, info, tune, add channel; empty text |
 | air/airfield.c, airfield.h, ui_airfield.c, ui_airwatch.inc | `air_nfields()`, key-based order, `ref_air` |
-| xband/ui_xband.c | `known_repeater` on the flash frequency set (C.7); used unchanged by DOTA through `ui_xband_refusal` |
+| xband/ui_xband.c | `known_repeater` = the flash frequency set (Hz comparison) OR the pack's RPT records when present (C.7); used unchanged by DOTA through `ui_xband_refusal` |
 | dota/dota.c, dota.h, ui_dota.c | third pack type in What (`WHATS` / `what_i`, ui_dota.c:51-56, today "3 + rq.pack" for two types), labels, "Bad pack" result when `dpk_commit` refuses the structure |
 | marine/* | none (C.6) |
 | lang (Turkish table, tools/turkish_ui.py) | ~8 new strings |
@@ -611,20 +681,6 @@ output), `tools/plus_brand.py` (About's repeater source from the pack, lines 56-
 verify-rebuild), `tools/refpack.py` (new), `tools/datapack.py` (slot sizes, type 3: lines 30-31),
 `pc/release/make_release.py` (asset, release gate), `pc/radiotools/signed_manifest.py`. `.gitignore` allowlist entries
 for every new file.
-
-### F.5 Implementation traps found by the review (N4)
-
-- `cps.rs` `slot_json` (cps.rs:448) and the `plan` line (cps.rs:554) print every non-RadioID type as `"air"`; the
-  write filter (cps.rs:480-485) accepts only types 1-2. Both need a three-way type name ("radioid" / "air" / "ref").
-- Settings > About (plus_datapack.py:71-75) labels every non-RadioID type "Air band pack: "; it needs a label per type
-  ("Map pack: " / "Harita paketi: ") and the `DPK_BIG` and "for another version" texts. `ABOUT_BYTES` reserves
-  `112u * CONFIG_DATAPACK` (plus_datapack.py:62) for two lines; raise it to ~180 B for three lines with the longest
-  Turkish state text (heap only while About draws).
-- ui_dota.c:51-56: `WHATS` and `what_i` map "3 + rq.pack" for two types; the third needs its own row and label.
-- `air_freq()` returns a pointer to one static copy once the table is gone (C.5): callers must not hold two results.
-- The Rust and Python `inactive_slot` / `best` (datapack.rs:159-174) do not check the structure; for type 3 they must
-  treat a structurally bad slot as invalid, like the firmware, or they could pick the good slot as "inactive" and
-  overwrite it.
 
 ### F.2 Rust programmer (`firmware/rust`)
 
@@ -653,13 +709,36 @@ THIRD_PARTY.md, CHANGELOG).
 | Added: call sites (map, rpt, air, mapnav, xband, dota) pointer -> copy | ~800-1,400 | estimate |
 | Added: "no data" states, About line, strings EN + TR | ~600-900 | estimate |
 | Added: total of the reader side | ~3,000-4,500 | (validation grew with S1 / S3; still inside this range by estimate) |
-| Added: the repeater frequency set + lookup (C.7, B1) | ~900-1,300 | data ~0.7-0.9 KB, code ~0.15-0.25 KB |
-| **Net freed** | **~42 KB (41.4-43.3 KB)** | 47,163 - (3,900-5,800); 1.0.6 has 5,052 B free (CHANGELOG v1.0.6), so ~47 KB free after |
+| Added: revision 3 (`DPK_OTHER`, DOTA version-hint check, map key and cheap frame, pack OR pass in `known_repeater`) | ~300-500 | estimate |
+| Added: the repeater frequency set + lookup (C.7, B1) | ~600-1,300 | data: RadioID.net only (H.5 (a), 101 DMR repeaters, <= 202 frequencies) ~0.4 KB; both sources (b) ~0.7-0.9 KB; code ~0.15-0.25 KB |
+| **Net freed** | **~42 KB (40.9-43.3 KB)** | 47,163 - (3,900-6,300); 1.0.6 has 5,052 B free (CHANGELOG v1.0.6), so ~47 KB free after |
 
 Static RAM: window 128 + tag 8, UI directory copy ~100, `cur[]` grows by one type 12, name buffers 2 x 24, static
-record scratch rpt 44 + air 44 + air_freq 4: **~390 B**, of the ~5.2 KB free. No heap beyond About's ~70 B more while it
-draws. Stack: no new deep locals (static scratch; validation uses a 64-byte buffer like `payload_crc`, on the task
-that scans: start-up task, CPS, boot); the stack check must show every task's margin unchanged.
+record scratch rpt 44 + air 44 + air_freq 4, map key 16: **~405 B**, of the ~5.2 KB free. No heap beyond About's
+~70 B more while it draws.
+
+Stack: no new deep locals in the UI paths (static scratch). The validation's 64-byte read buffer (like
+`payload_crc`'s, datapack.c:78) lives on the stack of **every task that scans**: the start-up task at boot
+(`dpk_scan` after `storage_init`), the start-up task's DOTA storage job (`dpk_commit`, dota.c:294), and the task
+that runs the CPS close (`dpk_scan`, plus_datapack.py:84-86). The stack check (`--stack-check`, the `STACK_EDGES`
+lists in the prepares) must include `ref_validate` under each of these three entry points; the start-up task had only
+312-348 B free beyond the margin (docs/plus.md 3793 and 5370), so `ref_validate` must not nest under `payload_crc` (run them one
+after the other, each with its own 64-byte buffer, never both live).
+
+### F.5 Implementation traps found by the review (N4)
+
+- `cps.rs` `slot_json` (cps.rs:448) and the `plan` line (cps.rs:554) print every non-RadioID type as `"air"`; the
+  write filter (cps.rs:480-485) accepts only types 1-2. Both need a three-way type name ("radioid" / "air" / "ref").
+- Settings > About (plus_datapack.py:71-75) labels every non-RadioID type "Air band pack: "; it needs a label per type
+  ("Map pack: " / "Harita paketi: ") and the `DPK_BIG` and `DPK_OTHER` texts. `ABOUT_BYTES` reserves
+  `112u * CONFIG_DATAPACK` (plus_datapack.py:62) for two lines; raise it to ~200 B for three lines with the longest
+  Turkish state text ("başka bir sürüm için ...") (heap only while About draws).
+- ui_dota.c:51-56: `WHATS` and `what_i` map "3 + rq.pack" for two types; the third needs its own row and label.
+- `air_freq()` returns a pointer to one static copy once the table is gone (C.5): callers must not hold two results.
+- The Rust and Python `inactive_slot` / `best` (datapack.rs:159-174) do not check the structure; for type 3 they must
+  apply the firmware's rules (E.3 "Which slot to overwrite").
+- `make_release.py --verify` (make_release.py:352) walks only the top-level assets today; it must also walk each
+  firmware entry's nested `ref_pack` (size, SHA-256, and the pack's own header / structure check).
 
 ---
 
@@ -673,15 +752,17 @@ that scans: start-up task, CPS, boot); the stack check must show every task's ma
 | T2 | migration fixtures built with the **1.0.6 layout**: (a) 98 KB RadioID pack in old A -> in force, unchanged; (b) in old B with higher seq -> in force; (c) both; (d) 200 KB pack in old B -> `DPK_BIG`, A used if valid; (e) old A > 192 KB: map A tail holds its bytes -> map A NONE (not BAD); the image's bytes outside the region compared before / after: unchanged; no erase / program call happens during the scan | test_datapack.c |
 | T3 | `refpack.py` output == C serialisation of the compiled tables (gcc), section by section; deterministic (two runs identical) | tools/test_refpack.py (new) |
 | T4 | map pack: written through `dpk_begin/put/commit`, in force, then a second write into the other slot; power cut at 4 points -> old pack in force | test_refpack.c (new) |
-| T5 | validation: each structural rule of C.2 broken once with valid CRCs (section past the payload, `off + rec * count` overflowing u32, overlapping sections, ring `first + count` past steps and wrapping 16 bits, province ring past rings, province name offset past its blob, DIST_FIRST decreasing, `first[81] != DIST_POS` count, a district name offset past the blob, a province with fewer names than districts, a blob without its final NUL, RPT / RPT_KEY count mismatch, a key differing from its record, air `first + count` past freqs, air count > 64, unknown section id ignored, known id with wrong rec, wrong coordinate CRC, fmt 2) -> **the whole slot BAD**, no out-of-slot read (read hook asserts). Records with no NUL in name / city / code / date / source come out NUL-terminated (S3) | test_refpack.c |
+| T5 | validation: each structural rule of C.2 broken once with valid CRCs (section past the payload, `off + rec * count` overflowing u32, overlapping sections, ring `first + count` past steps and wrapping 16 bits, province ring past rings, province name offset past its blob, DIST_FIRST decreasing, `first[81] != DIST_POS` count, a district name offset past the blob, a province with fewer names than districts, a blob without its final NUL, RPT / RPT_KEY count mismatch, a key differing from its record, air `first + count` past freqs, air count > 64, unknown section id ignored, fmt 2) -> **the whole slot BAD**; the version items (directory version 2, a known id with a different rec, a wrong coordinate CRC, a disagreeing `flags` hint) -> **the whole slot `DPK_OTHER`**, About "for another version", the other valid slot in force; both slots rejected, one OTHER -> type state OTHER; no out-of-slot read in any case (read hook asserts). Records with no NUL in name / city / code / date / source come out NUL-terminated (S3) | test_refpack.c |
 | T5b | slot choice (S1): newer slot structurally bad + older good -> older in force; newer bad in the map part only -> older in force (all or nothing); a slot without RPT sections -> valid, MAP and AIR on, RPT off; DOTA receive of a CRC-valid but structurally bad pack -> `dpk_commit` refuses before the header write, the header sector stays erased, old pack in force | test_refpack.c, test_dota_pack.c |
-| T5c | race (S2): the UI's directory copy reloads when a commit from another "task" (simulated between two reads of one draw) changes the generation; a draw in progress stays bounded by its cached counts | test_refpack.c |
+| T5c | race (S2): the UI's directory copy reloads (raw reads from the generation's slot) when a commit from another "task" (simulated between two reads of one draw) changes the generation; a draw in progress stays bounded by its cached counts and keeps reading its own slot | test_refpack.c |
+| T5d | slot choice in the programmer (R3): newer slot OTHER / BAD + older valid -> the newer one is overwritten, with a sequence above both; both empty -> slot A; a slot that cannot be read in full -> no write. Same cases in Rust and Python | ddm32-core/tests/datapacks.rs, tools/test_datapack.py |
+| T5e | DOTA HELLO of a map pack whose `flags` hint or `fmt` differs -> refused at once ("Map pack for another version"), nothing erased | test_dota_pack.c |
 | T6 | map functions on the pack equal the flash tables: `map_draw` line list, `map_province_at` / `_near` on a grid of 5,000 points, district near / names, labels | test_map.c (both builds) |
 | T7 | repeaters: `rpt_next_in` / `rank` / `count` / `nearest_if` order identical to the flash table for 200 random positions and every province filter; `arpt_check` sequence on a recorded drive | test_rpt.c, test_mapnav.c |
 | T8 | airfields: order, provinces, air band pack match by code | test_airfield.c, test_airprov.c |
 | T9 | no pack / damaged pack / pack without RPT sections: every UI place of section D (map, here line, repeater overlay and pick, Repeaters, auto repeater toggle, Airfields, air watch, DOTA What row, About with three lines and the `DPK_BIG` text), EN + TR, layout-checked; **cross-band and DOTA still refuse a listed repeater's input and output without any pack** (B1) | test_ui_map.c (new), test_ui_rpt*.c, test_ui_airprov.c, test_ui_xband.c, test_ui_dota.c, test_ui_datapack.c |
-| T10 | read counting: a whole-country `map_draw` makes <= 300 flash reads; a repeater list redraw reads <= 40 KB (the window and key sections are used); **on the map screen, 20 radio view-serial changes with the map key unchanged read the pack at most once per `REFRESH_MS`** (S4) | test_refpack.c, test_ui_map.c |
-| T15 | the flash frequency set (C.7) equals the old `known_repeater` loop over `rpt_table` for every frequency 136-480 MHz in 625 Hz steps, for the sample list and a generated 400-repeater list | test_rpt.c, tools/test_rptprov.py |
+| T10 | read counting: a whole-country `map_draw` makes <= 300 flash reads; a repeater list redraw reads <= 40 KB (the window and key sections are used); **on the map screen, 20 radio view-serial changes with the map key unchanged read the pack zero times and never call `gfx_clear`; the framebuffer's map rectangle is byte-identical before and after; moving our position by one map pixel, a new APRS station mark, a track point, or a banner / toast appearing or going each force a full frame** (S4, R4) | test_refpack.c, test_ui_map.c |
+| T15 | the flash frequency set (C.7) equals the old `known_repeater` loop over the repeater rows: (1) for every frequency 136-174 and 400-480 MHz in 625 Hz steps; (2) **144-146 and 430-440 MHz in 10 Hz steps**; (3) **every entry's boundaries** `f - 6,250`, `f - 6,249`, `f + 6,249`, `f + 6,250` (Hz) for outputs and inputs; (4) 0, 135,999,999, 136,000,000, 136,006,249, 399,999,999, 400,000,000 and 480,000,001 Hz (no underflow, no false hit); (5) the OR rule: a pack with an extra repeater adds exactly its refusals, a pack can remove none. Run on the sample list, a generated 400-repeater list, **and in the build on the real generated `rpt_data.c` / `rpt_freqs.c` of that build** (a host check `tools/build_radiofoundry.py` runs after `prepare_repeaters`, so a release can never ship a set that differs from its rows) | test_rpt.c, tools/test_rptprov.py, build_radiofoundry.py |
 | T16 | release gate (S6): `make_release.py` refuses a public pack or build manifest whose repeater source is not in the allowed list (default: "own" refused), a sample pack, a pack that fails structure; accepts a RadioID.net-only pack | pc/release tests |
 | T11 | DOTA: a map pack over FM with 10 % loss; a 1.0.6-style receiver (DPK_TYPES 2) refuses type 3 without writing; a 1.1 receiver refuses a 200 KB RadioID pack | test_dota_pack.c |
 | T12 | marine TX refusal unchanged (no pack in the image) | test_marine.c |
@@ -698,7 +779,7 @@ that scans: start-up task, CPS, boot); the stack check must show every task's ma
 | MP4 | Tools > Repeaters scroll through a province and All | no visible lag (estimate ~30 ms a key) | yes |
 | MP5 | Auto repeater on while moving | offers as in 1.0.6 | yes |
 | MP6 | Airfields, air watch, with the user's air band pack | its frequencies still win | yes |
-| MP7 | Cross-band: a listed repeater's output as A; DOTA with a listed repeater's frequency; **both repeated before the map pack is loaded (MP1 state)** | refused "Repeater frequency" each time | yes |
+| MP7 | Cross-band: a RadioID.net repeater's output as A, and a TRAC-only repeater's output; DOTA with the same two frequencies; once before the owner's map pack is loaded (MP1 state) and once after | the RadioID.net one refused "Repeater frequency" both times; the TRAC-only one refused after the owner's pack is loaded (under H.5 (a) it is not refused before, unless outside-segment rules catch it) | yes |
 | MP8 | VFO on 156.800 (marine 16), PTT | refused as before | yes |
 | MP9 | Write the map pack again | the other slot, seq + 1, in force | yes |
 | MP10 | Boot time with both map slots written (after MP9) | at most ~0.15-0.2 s longer than 1.0.6 (estimate ~150 ms for two map packs) | yes |
@@ -718,12 +799,12 @@ time, and the `git` field check of E.3.
 | H.2 | **Update with an older programmer (3.1.0, or the retired C# 2.0)**: it installs 1.1 firmware but not the pack (it ignores `ref_pack`); map, repeaters, airfields and auto repeater say "load the map pack" until programmer 3.2 writes it (the cross-band / DOTA refusals keep working, C.7). An old programmer writing a > 192 KB RadioID pack can erase a map slot and still report PASS (B.4 N2) | coordinator's recommendation: release 1.1.0 with programmer 3.2.0 and a programmer self-update prompt; release notes "update the programmer first". Old programmers writing RadioID <= 192 KB keep working (same slot starts) |
 | H.3 | **Install order** | coordinator's recommendation, matching this design: update from 1.0.x with programmer 3.2: **pack first, then firmware** (1.0.6 ignores the map slot, so a failed firmware install leaves a working 1.0.6; `min_firmware` means "needed to use it", E.2); first install from stock: firmware first (no CPS before), then the pack |
 | H.4 | (revision 1: cross-band without a map pack) | **closed by B1**: the TX refusals use the flash frequency set (C.7); cross-band and DOTA behave the same with or without a pack. No owner question left here |
-| H.5 | **Repeater data in a public release (pack sections and the flash frequency set)**: TRAC states no licence; docs contradict (docs/plus.md:3381 vs :2201, THIRD_PARTY.md:64; E.5). The release gate (E.2) enforces the answer; until then it refuses "own" (TRAC) data in a public release, which differs from what 1.0.x releases shipped | (a) public release with RadioID.net repeaters only, the TRAC part built on the user's PC from their own copy (coordinator's recommendation); (b) keep what 1.0.x ships (both); (c) no repeaters in the release at all, all user-built (then the public frequency set is empty and only the band-plan segments refuse). The format supports all three |
+| H.5 | **Repeater data in a public release (pack sections and the flash frequency set)**: TRAC states no licence; docs contradict (docs/plus.md:3381 vs :2201, THIRD_PARTY.md:64; E.5). The release gate (E.2) enforces the answer; until then it refuses "own" (TRAC) data in a public release, which differs from what 1.0.x releases shipped | (a) public release with RadioID.net repeaters only, the TRAC part built on the user's PC from their own copy (coordinator's recommendation; **the design's default**). With the OR rule (C.7) the owner's own pack with TRAC rows restores the 1.0.x refusals on the owner's radio; until it is loaded (MP1 state) only the RadioID.net set and the band-plan segments refuse; `--plus` and `--public` stay one image; (b) keep what 1.0.x ships (both, in the release set and pack); (c) no repeaters in the release at all, all user-built (then the public frequency set is empty and only the band-plan segments refuse until a user pack is loaded). The format supports all three |
 | H.6 | RadioID reload | not needed for the owner (98 KB). Only a pack > 196,544 B (multi-country) must be rebuilt; About says so (`DPK_BIG`) |
 | H.7 | 64 KB map slot is fixed by the layout; headroom ~14.8 KB | enough for the planned scans; if repeaters grow past ~+250, split them into a pack type of their own in the free 32 KB later |
 | H.8 | SPI read speed is an estimate (byte-polled SSI, no measured figure) | if MP3 / MP4 show lag, enlarge the window or add a key for districts; worst case still a draw well under 0.2 s |
 | H.9 | Data-chip mutex stalls a map draw during a settings save (up to 0.4 s); the radio task's RadioID lookups wait at most one 128-B read for a map reader | accepted (UI only); the radio task never reads the map pack |
-| H.9b | Whether the UI core keeps the frame buffer between draws of one screen decides how the map avoids re-reading on every radio update (C.4, S4) | implementation check first; fallback: map layer at most once per second while its key is unchanged |
+| H.9b | (revision 2: does the frame buffer persist?) | **answered**: it does (gfx.c:15, :191); cheap frames skip `gfx_clear` (C.4). No owner question |
 | H.9c | Boot time grows ~150 ms with two map packs (S5) | accepted, or later check the losing slot only when it could win |
 | H.10 | Firmware-version check in the programmer uses the CPS info `git` text (15 characters) | confirm its content on the radio (read-only info command) before relying on it; it guards UX only |
 | H.11 | Version name: the map pack belongs to firmware 1.1.0 (a new minor version, since the release now has two parts) | owner picks the version |
