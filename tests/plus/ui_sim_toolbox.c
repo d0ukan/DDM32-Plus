@@ -5,7 +5,10 @@
  * messages, the beeps, and the heap the waterfall takes (counted, can be made to fail). The spectrum sweep is the
  * real engine (radio/spectrum.c): radio_req_spectrum starts and stops it, the test feeds its readings. */
 #define ui_svc_position sim_base_position
+#define sim_reset sim_base_reset	/* refpack_sim.inc: every reset gets the map pack */
 #include "sim/ui_sim.c"
+#undef sim_reset
+#include "refpack_sim.inc"
 #undef ui_svc_position
 #include <stdlib.h>
 #include "ui_sim_toolbox.h"

@@ -8,6 +8,7 @@
 #include <string.h>
 #include "ui/airfield.h"
 #include "ui/airfield_data.h"
+#include "refpack_fixture.h"
 
 static int failures;
 #define CHECK(c, what) do { if (!(c)) { failures++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, what); } } while (0)
@@ -53,6 +54,11 @@ static void walk(const air_here_t *h, uint8_t p)
 
 int main(void)
 {
+	/* the tables are the map pack's on the data chip since 1.1 (refpack_fixture.h) */
+	if (!refpack_fixture_install(REFPACK_AIR)) {
+		printf("FAIL: the map pack fixture\n");
+		return 1;
+	}
 	/* Every airfield in one group; the shipped table places all of them */
 	uint32_t sum = 0;
 	for (uint16_t p = 0; p <= AIR_PROVS; p++)

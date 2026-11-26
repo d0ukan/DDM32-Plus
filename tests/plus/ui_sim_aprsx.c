@@ -6,7 +6,10 @@
 #define ui_svc_aprs_station sim_base_aprs_station
 #define ui_svc_aprs_station_count sim_base_aprs_station_count
 #define ui_svc_emergency sim_base_emergency
+#define sim_reset sim_base_reset	/* refpack_sim.inc: every reset gets the map pack */
 #include "sim/ui_sim.c"
+#undef sim_reset
+#include "refpack_sim.inc"
 #undef ui_svc_position
 #undef ui_svc_aprs_station
 #undef ui_svc_aprs_station_count

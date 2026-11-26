@@ -8,7 +8,10 @@
 #define radio_req_vfo_tx sim_base_vfo_tx
 #define radio_req_bandwidth sim_base_bandwidth
 #define radio_req_tone sim_base_tone
+#define sim_reset sim_base_reset	/* refpack_sim.inc: every reset gets the map pack */
 #include "sim/ui_sim.c"
+#undef sim_reset
+#include "refpack_sim.inc"
 #undef radio_req_vfo
 #undef radio_req_vfo_set
 #undef radio_req_vfo_tx

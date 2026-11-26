@@ -735,7 +735,7 @@ static void receiver_done(void)
 static void pack_send(void)
 {
 	start("data pack: send the RadioID pack");
-	ok_run("down down left left");	/* What: One channel, then back round to the air band, the RadioID pack */
+	ok_run("down down left left left");	/* What: One channel, then back round past the map pack and the air band to the RadioID pack */
 	expect(T("shows=RadioID_pack shows=RadioID_TR shows=2026-11-17 shows=About", "shows=RadioID_paketi shows=RadioID_TR "
 		 "shows=2026-11-17 shows=Yakla"));
 	layout();
@@ -743,6 +743,10 @@ static void pack_send(void)
 	ok_run("right");		/* the air band pack: none */
 	expect(T("shows=Air_band_pack shows=none hides=RadioID_TR", "shows=Hava shows=yok hides=RadioID_TR"));
 	layout();
+	ok_run("right");		/* the map pack (firmware 1.1): none here either */
+	expect(T("shows=Map_pack shows=none hides=RadioID_TR", "shows=Harita shows=yok hides=RadioID_TR"));
+	layout();
+	ok_run("left");			/* back to the air band pack */
 	type_code("1 2 3 4");
 	ok_run("down ok");
 	expect(T("toast=Nothing_to_send", "toast=G"));

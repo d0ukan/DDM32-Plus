@@ -775,3 +775,14 @@ __pycache__/
 !/docs/holehunt-1.0.3.md
 # hole hunt of the v1.0.4 candidate (branch hh104)
 !/docs/holehunt-1.0.4.md
+# DDM32 Plus map pack (data pack type 3, docs/mappack-design.md)
+!/integration/radiofoundry/datapack/ref_pack.h
+!/integration/radiofoundry/datapack/ref_pack.c
+!/tools/refpack.py
+!/tools/refpack_host.py
+!/tests/plus/refpack_fixture.h
+!/tests/plus/refpack_fixture.c
+!/tests/plus/refpack_sim.inc
+!/tests/plus/refpack_dump.c
+!/tests/plus/test_refpack.c
+!/tests/plus/xband_rpt_freqs.c

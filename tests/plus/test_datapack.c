@@ -12,6 +12,7 @@
 #include "board.h"
 #include "ui/airfield.h"
 #include "ui/air_pack.h"
+#include "refpack_fixture.h"
 
 static int failures, checks;
 #define CHECK(c) do { checks++; if (!(c)) { failures++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -100,7 +101,27 @@ static void test_guard(void)
 	CHECK(!dpk_program(0xFFFFFFFCu, b, 8));	/* wraps */
 	CHECK(dpk_slot_addr(DPK_RADIOID, 0) == 0xE70000u && dpk_slot_addr(DPK_RADIOID, 1) == 0xEB0000u);
 	CHECK(dpk_slot_addr(DPK_AIR, 0) == 0xEF0000u && dpk_slot_addr(DPK_AIR, 1) == 0xEF4000u);
-	CHECK(dpk_slot_addr(DPK_AIR, 1) + dpk_slot_size(DPK_AIR) <= DPK_END && dpk_slot_addr(3, 0) == 0u);
+	CHECK(dpk_slot_addr(DPK_AIR, 1) + dpk_slot_size(DPK_AIR) <= DPK_END && dpk_slot_addr(4, 0) == 0u);
+	/* T1, layout 2 (docs/mappack-design.md A.1): RadioID keeps 1.0.x's starts in 192 KB, the map pack in the old tails;
+	 * every slot inside the region, 4 KB aligned, no two overlapping */
+	CHECK(dpk_slot_size(DPK_RADIOID) == 0x30000u && dpk_slot_size(DPK_REF) == 0x10000u && dpk_slot_size(DPK_AIR) == 0x4000u);
+	CHECK(dpk_slot_addr(DPK_REF, 0) == 0xEA0000u && dpk_slot_addr(DPK_REF, 1) == 0xEE0000u && dpk_slot_size(0) == 0u);
+	for (uint8_t t = 1; t <= DPK_TYPES; t++)
+		for (uint8_t s = 0; s < 2u; s++) {
+			uint32_t a = dpk_slot_addr(t, s), z = dpk_slot_size(t);
+			CHECK(a >= DPK_BASE && a % DPK_SECTOR == 0u && z <= DPK_END - a);
+			for (uint8_t t2 = 1; t2 <= DPK_TYPES; t2++)
+				for (uint8_t s2 = 0; s2 < 2u; s2++) {
+					uint32_t b2 = dpk_slot_addr(t2, s2), z2 = dpk_slot_size(t2);
+					CHECK((t2 == t && s2 == s) || a + z <= b2 || b2 + z2 <= a);
+				}
+		}
+	CHECK(!dpk_erase(0xE6F000u) && !dpk_erase(0xF00000u) && !dpk_program(0xE6FFFFu, b, 2));
+	/* the header check of a type the build does not know: no wrap of its slot size (0 - 64) */
+	dpk_hdr_t u = header(DPK_AIR, b, 8, "x");
+	u.type = 7;
+	dpk_seal(&u);
+	CHECK(!dpk_hdr_ok(&u, 7) && !dpk_hdr_ok(&u, 0));
 	/* a header claiming more than its slot holds is refused before anything is erased */
 	dpk_writer_t w;
 	dpk_hdr_t h = header(DPK_AIR, b, 8, "x");
@@ -266,7 +287,9 @@ static void test_air(void)
 	uint32_t a0 = dpk_slot_addr(DPK_AIR, 0), a1 = dpk_slot_addr(DPK_AIR, 1);
 	CHECK(dpk_erase(a0) && dpk_erase(a1));
 	dpk_scan();
-	CHECK(air_count(ltac) == air_fields[ltac].count && air_freq(ltac, 0) == &air_freqs[air_fields[ltac].first]);
+	CHECK(air_count(ltac) == air_fields[ltac].count && air_freq(ltac, 0) != NULL &&
+	      air_freq(ltac, 0)->ch == air_freqs[air_fields[ltac].first].ch &&
+	      air_freq(ltac, 0)->type == air_freqs[air_fields[ltac].first].type);	/* the map pack's copy of the table */
 	CHECK(air_freq(ltac, air_fields[ltac].count) == NULL);
 	/* a pack: LTAC with three frequencies, LTAB with none, an airfield the table lacks */
 	uint8_t p[64];
@@ -294,6 +317,82 @@ static void test_air(void)
 	sim_flash_data[dpk_slot_addr(DPK_AIR, 1) + DPK_HDR + 5] ^= 1u;
 	dpk_scan();
 	CHECK(dpk_state(DPK_AIR) == DPK_BAD && air_count(ltac) == air_fields[ltac].count);
+}
+
+/* --- T2: an upgraded 1.0.x radio (256 KB RadioID slots at 0xE70000 / 0xEB0000), nothing written by the scan --- */
+
+/* A 1.0.x slot image put straight on the chip (as 1.0.x's writer left it): header and payload */
+static void old_pack(uint32_t addr, uint32_t len, uint32_t seq, uint8_t fill)
+{
+	static uint8_t p[0x40000];
+	for (uint32_t i = 0; i < len; i++)
+		p[i] = (uint8_t)(fill + i * 13u);
+	dpk_hdr_t h = header(DPK_RADIOID, p, len, "RadioID TR");
+	h.seq = seq;
+	dpk_seal(&h);
+	memcpy(sim_flash_data + addr, &h, sizeof h);
+	memcpy(sim_flash_data + addr + DPK_HDR, p, len);
+}
+
+static void wipe_region(void)
+{
+	memset(sim_flash_data + DPK_BASE, 0xFF, DPK_END - DPK_BASE);
+	dpk_scan();
+}
+
+static void test_migration(void)
+{
+	uint32_t h0 = outside(), u0;
+	/* (a) the owner's case: a 98 KB pack in old slot A stays in force, unchanged */
+	wipe_region();
+	old_pack(0xE70000u, 98u * 1024u, 3, 1);
+	u0 = sim_flash_units();
+	dpk_scan();
+	CHECK(sim_flash_units() == u0);		/* the scan erases and programs nothing */
+	CHECK(dpk_state(DPK_RADIOID) == DPK_OK && dpk_active(DPK_RADIOID)->len == 98u * 1024u &&
+	      dpk_active_addr(DPK_RADIOID) == 0xE70000u);
+	CHECK(dpk_state(DPK_REF) == DPK_NONE);	/* the map pack slots: nothing committed there */
+	/* (b) another in old slot B with a higher sequence: B */
+	old_pack(0xEB0000u, 60u * 1024u, 4, 9);
+	dpk_scan();
+	CHECK(dpk_active_addr(DPK_RADIOID) == 0xEB0000u && dpk_active(DPK_RADIOID)->seq == 4u);
+	/* (d) a 200 KB pack in old B (longer than layout 2's slot): DPK_BIG, the valid A in force */
+	old_pack(0xEB0000u, 200u * 1024u, 5, 2);
+	dpk_scan();
+	CHECK(dpk_state(DPK_RADIOID) == DPK_OK && dpk_active_addr(DPK_RADIOID) == 0xE70000u);
+	CHECK(dpk_state(DPK_REF) == DPK_NONE);	/* B's payload runs over map B's start: no "DPK1" there */
+	memset(sim_flash_data + 0xE70000u, 0xFF, DPK_SECTOR);
+	dpk_scan();
+	CHECK(dpk_state(DPK_RADIOID) == DPK_BIG && dpk_active(DPK_RADIOID) == NULL);
+	char t[40];
+	CHECK(!dpk_about(DPK_RADIOID, t, sizeof t));
+	/* (e) old A over 192 KB: map A's start holds its payload bytes -> map pack NONE, not BAD */
+	wipe_region();
+	old_pack(0xE70000u, 220u * 1024u, 1, 5);
+	dpk_scan();
+	CHECK(dpk_state(DPK_REF) == DPK_NONE && dpk_state(DPK_RADIOID) == DPK_BIG);
+	/* a damaged header at a map slot start ("DPK1" but its CRC wrong) is BAD */
+	dpk_hdr_t bad = header(DPK_REF, (const uint8_t *)t, 4, "x");
+	bad.hcrc = 1;
+	memcpy(sim_flash_data + 0xEE0000u, &bad, sizeof bad);
+	dpk_scan();
+	CHECK(dpk_state(DPK_REF) == DPK_BAD);
+	/* a RadioID pack of 196,544 bytes (layout 2's limit) is taken, one byte more is DPK_BIG */
+	wipe_region();
+	old_pack(0xE70000u, 0x30000u - DPK_HDR, 1, 3);
+	dpk_scan();
+	CHECK(dpk_state(DPK_RADIOID) == DPK_OK);
+	old_pack(0xE70000u, 0x30000u - DPK_HDR + 1u, 1, 3);
+	dpk_scan();
+	CHECK(dpk_state(DPK_RADIOID) == DPK_BIG);
+	/* the firmware refuses such a pack from a writer too (DOTA from a 1.0.x radio, an old programmer's header) */
+	dpk_writer_t w;
+	dpk_hdr_t big = header(DPK_RADIOID, (const uint8_t *)t, 4, "x");
+	big.len = 200u * 1024u;
+	CHECK(!dpk_begin(&w, &big));
+	CHECK(outside() == h0);
+	wipe_region();
+	printf("  migration from 1.0.x: kept, DPK_BIG, map slots NONE, no write by the scan\n");
 }
 
 /* --- Images tools/datapack.py built (argv): written as the radio writes them, then read --- */
@@ -342,9 +441,11 @@ int main(int argc, char **argv)
 	test_broken();
 	test_cuts();
 	test_radioid();
+	CHECK(refpack_fixture_install(REFPACK_AIR));	/* the airfield table is the map pack's (docs/mappack-design.md) */
 	test_air();
 	if (argc == 3)
 		test_builder(argv[1], argv[2]);
+	test_migration();
 	CHECK(outside() == h0);		/* not one byte outside the region changed */
 	CHECK(sim_flash_violations() == 0);
 	printf("datapack store: %d checks, %d failures\n", checks, failures);

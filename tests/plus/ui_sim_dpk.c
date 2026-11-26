@@ -12,4 +12,6 @@ void dpk_sim_setup(void)
 	air_sim_setup();
 	sim_flash_create(0x1000000u, NULL);
 	board.flash = &sim_flash;
+	if (refpack_fixture_auto)	/* the new chip gets the map pack again (refpack_sim.inc) */
+		(void)refpack_fixture_install(REFPACK_ALL);
 }

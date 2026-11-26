@@ -9,6 +9,26 @@
 #include "map.h"
 #include "turkey_map_data.h"
 #include "turkey_district_data.h"
+#include "refpack_fixture.h"
+
+/* The names are copied out of the map pack since 1.1: a few rotating buffers for the checks below */
+static const char *pname(uint8_t p)
+{
+	static char b[4][MAP_NAME_MAX];
+	static unsigned k;
+	k = (k + 1u) % 4u;
+	map_province_name(p, b[k], sizeof b[k]);
+	return b[k];
+}
+
+static const char *dname(uint16_t d)
+{
+	static char b[4][MAP_NAME_MAX];
+	static unsigned k;
+	k = (k + 1u) % 4u;
+	map_district_name(d, b[k], sizeof b[k]);
+	return b[k];
+}
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { failures++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -107,9 +127,9 @@ static void test_data(void)
 		CHECK(pr->plate == p + 1u);
 		CHECK(pr->ring_count >= 1 && pr->first_ring == next_ring);
 		next_ring = (uint16_t)(next_ring + pr->ring_count);
-		CHECK(pr->name < sizeof turkey_map_names && map_province_name(p)[0]);
+		CHECK(pr->name < sizeof turkey_map_names && pname(p)[0]);
 		if (strcmp(TURKEY_MAP_CHARSET, "utf-8") == 0)
-			CHECK(utf8_ok(map_province_name(p)));
+			CHECK(utf8_ok(pname(p)));
 		CHECK(pr->min.x >= TURKEY_MAP_XMIN && pr->max.x <= TURKEY_MAP_XMAX && pr->min.y >= TURKEY_MAP_YMIN &&
 		      pr->max.y <= TURKEY_MAP_YMAX && pr->min.x < pr->max.x && pr->min.y < pr->max.y);
 		for (uint16_t r = pr->first_ring; r < pr->first_ring + pr->ring_count && r < TURKEY_MAP_RINGS; r++) {
@@ -135,7 +155,7 @@ static void test_data(void)
 		int32_t lon = TURKEY_MAP_LON0_E7 + pr->label.x * TURKEY_MAP_UNIT_E7 + TURKEY_MAP_UNIT_E7 / 2;
 		int at = map_province_at(lat, lon);
 		if (at != p)
-			printf("label of %s falls in %d\n", map_province_name(p), at);
+			printf("label of %s falls in %d\n", pname(p), at);
 		CHECK(at == p);
 	}
 	CHECK(next_ring == TURKEY_MAP_RINGS && next_step == TURKEY_MAP_STEPS);
@@ -147,18 +167,18 @@ static void test_data(void)
 		count++;
 	}
 	CHECK(count == 81 && off == sizeof turkey_map_names);
-	CHECK(strcmp(map_province_name(5), "Ankara") == 0 && map_province_plate(5) == 6);
+	CHECK(strcmp(pname(5), "Ankara") == 0 && map_province_plate(5) == 6);
 	if (strcmp(TURKEY_MAP_CHARSET, "utf-8") == 0) {
-		CHECK(strcmp(map_province_name(33), "\xC4\xB0stanbul") == 0);
-		CHECK(strcmp(map_province_name(62), "\xC5\x9E" "anl\xC4\xB1urfa") == 0);
-		CHECK(strcmp(map_province_name(80), "D\xC3\xBC" "zce") == 0);
+		CHECK(strcmp(pname(33), "\xC4\xB0stanbul") == 0);
+		CHECK(strcmp(pname(62), "\xC5\x9E" "anl\xC4\xB1urfa") == 0);
+		CHECK(strcmp(pname(80), "D\xC3\xBC" "zce") == 0);
 	} else if (strcmp(TURKEY_MAP_CHARSET, "iso-8859-9") == 0) {
-		CHECK(strcmp(map_province_name(33), "\xDDstanbul") == 0);
-		CHECK(strcmp(map_province_name(62), "\xDE" "anl\xFDurfa") == 0);
+		CHECK(strcmp(pname(33), "\xDDstanbul") == 0);
+		CHECK(strcmp(pname(62), "\xDE" "anl\xFDurfa") == 0);
 	} else {
-		CHECK(strcmp(map_province_name(33), "Istanbul") == 0);
+		CHECK(strcmp(pname(33), "Istanbul") == 0);
 	}
-	CHECK(strcmp(map_province_name(81), "") == 0 && map_province_plate(200) == 0);
+	CHECK(strcmp(pname(81), "") == 0 && map_province_plate(200) == 0);
 }
 
 static void test_cities(void)
@@ -363,7 +383,7 @@ static void test_render(const char *pgm)
 static uint16_t district_named(uint8_t province, const char *name)
 {
 	for (uint16_t d = turkey_district_first[province]; d < turkey_district_first[province + 1u]; d++)
-		if (strcmp(map_district_name(d), name) == 0)
+		if (strcmp(dname(d), name) == 0)
 			return d;
 	return MAP_DISTRICT_NONE;
 }
@@ -379,7 +399,7 @@ static bool province_within(int32_t lat, int32_t lon, uint8_t p, int km)
 			if (map_province_at(la, lo) == p)
 				return true;
 		}
-	printf("  no %s within %d km\n", map_province_name(p), km);
+	printf("  no %s within %d km\n", pname(p), km);
 	return false;
 }
 
@@ -393,7 +413,7 @@ static void pt_fn(void *ctx, int x, int y, uint16_t district, const char *name)
 	pt_ctx_t *c = ctx;
 	c->calls++;
 	if (x < c->v.x || x >= c->v.x + c->v.w || y < c->v.y || y >= c->v.y + c->v.h || district >= TURKEY_DISTRICTS ||
-	    name != map_district_name(district))
+	    strcmp(name, dname(district)) != 0)
 		c->bad++;
 }
 
@@ -417,14 +437,15 @@ static void test_districts(void)
 		CHECK(b >= a + 3u && b <= a + 39u);
 		CHECK(turkey_district_name_first[p] == off);
 		for (uint16_t d = a; d < b; d++) {
-			const char *name = map_district_name(d);
-			CHECK(name == &turkey_district_names[off] && name[0] != '\0');
+			char name[MAP_NAME_MAX];
+			memcpy(name, dname(d), sizeof name);
+			CHECK(strcmp(name, &turkey_district_names[off]) == 0 && name[0] != '\0');
 			off += strlen(name) + 1u;
 			CHECK(map_district_province(d) == p);
 			if (strcmp(TURKEY_DISTRICT_CHARSET, "utf-8") == 0)
 				CHECK(utf8_ok(name));
 			for (uint16_t e = a; e < d; e++)
-				CHECK(strcmp(map_district_name(e), name) != 0);	/* unique in the province */
+				CHECK(strcmp(dname(e), name) != 0);	/* unique in the province */
 			/* the centre lies in its own province, or (towns on a border or a shore: Natural Earth's outlines
 			 * are ~1 km coarse and drop small islands) its province is at most 12 km away */
 			int32_t lat, lon;
@@ -438,7 +459,7 @@ static void test_districts(void)
 	printf("district centres off their simplified province: %d (all within 12 km)\n", outside);
 	CHECK(outside <= 20);
 	CHECK(off == sizeof turkey_district_names);
-	CHECK(map_district_province(TURKEY_DISTRICTS) == 0xFF && map_district_name(TURKEY_DISTRICTS)[0] == '\0');
+	CHECK(map_district_province(TURKEY_DISTRICTS) == 0xFF && dname(TURKEY_DISTRICTS)[0] == '\0');
 
 	/* known names (official spellings) and the nearest-centre lookup */
 	bool iso = strcmp(TURKEY_DISTRICT_CHARSET, "iso-8859-9") == 0, utf = strcmp(TURKEY_DISTRICT_CHARSET, "utf-8") == 0;
@@ -504,6 +525,11 @@ static void test_occ(void)
 
 int main(int argc, char **argv)
 {
+	/* the tables are the map pack's on the data chip since 1.1 (refpack_fixture.h) */
+	if (!refpack_fixture_install(REFPACK_MAP)) {
+		printf("FAIL: the map pack fixture\n");
+		return 1;
+	}
 	test_data();
 	test_cities();
 	test_projection();

@@ -7,7 +7,8 @@ import subprocess
 
 
 def run(args, **kw):
-    return subprocess.run([str(a) for a in args], check=True, **kw)
+    import refpack_host	# the map pack's reader, its fixture and the tables (tools/refpack_host.py)
+    return subprocess.run([str(a) for a in refpack_host.patch([str(a) for a in args])], check=True, **kw)
 
 
 def main(ROOT, APP, OUT, flags, host):
@@ -21,7 +22,80 @@ def main(ROOT, APP, OUT, flags, host):
          '-o', OUT / 'test_datapack'], cwd=ROOT)
     images = builder_tests(ROOT, OUT)
     run([OUT / 'test_datapack', *images], cwd=ROOT)
+    refpack_tests(ROOT, APP, OUT, flags, host)
     ui_tests(ROOT, APP, OUT, host)
+
+
+def refpack_tests(ROOT, APP, OUT, flags, host):
+    """The map pack (docs/mappack-design.md G.1): T3 tools/refpack.py's payload equals the C serialisation of the
+    compiled tables, section by section, and is deterministic; T4, T5, T5b, T5c, T6-T8, T10 on the simulated chip
+    (tests/plus/test_refpack.c); T5d / T14 tools/datapack.py's slot choice and flags carry"""
+    import struct
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from tools import datapack as dp, refpack
+    tp = ROOT / 'tests/plus'
+    core = APP / 'core'
+    cfg = ['-DCONFIG_DATAPACK=1', '-DCONFIG_MAP=1', '-DCONFIG_REPEATERS=1', '-DCONFIG_AIRFIELDS=1', '-DCONFIG_APRS=1']
+    common = [core / 'ui/map.c', core / 'ui/rpt.c', core / 'ui/airfield.c', core / 'aprs/aprs_fmt.c',
+              ROOT / 'integration/radiofoundry/map/turkey_map_data.c',
+              ROOT / 'integration/radiofoundry/map/turkey_district_data.c',
+              ROOT / 'integration/radiofoundry/air/airfield_data.c', ROOT / 'build/rpt/rpt_data.c']
+    run(['clang', *flags, *cfg, '-I' + str(core / 'ui'), tp / 'test_refpack.c', *common, '-lm', '-o',
+         OUT / 'test_refpack'], cwd=ROOT)
+    run([OUT / 'test_refpack'], cwd=ROOT)
+    # T3: the same bytes from Python and from C
+    run(['clang', *flags, *cfg, '-I' + str(core / 'ui'), tp / 'refpack_dump.c', *common, '-lm', '-o',
+         OUT / 'refpack_dump'], cwd=ROOT)
+    c_bytes = OUT / 'refpack_c.bin'
+    run([OUT / 'refpack_dump', c_bytes], cwd=ROOT)
+    rpt = refpack.load_rpt_c(ROOT / 'build/rpt/rpt_data.c')
+    m, a = refpack.load_map(), refpack.load_air()
+    secs = refpack.sections(m, a, rpt)
+    py = refpack.payload(m['k'], secs)
+    cb = c_bytes.read_bytes()
+    for i, rec, off, count in refpack.directory(py):
+        c_ent = [e for e in refpack.directory(cb) if e[0] == i]
+        assert c_ent and c_ent[0][1:] == (rec, off, count), (i, c_ent)
+        assert cb[off:off + rec * count] == py[off:off + rec * count], f'section {i} ({refpack.NAMES[i]}) differs'
+    assert py == cb and refpack.payload(m['k'], refpack.sections(refpack.load_map(), refpack.load_air(), rpt)) == py
+    assert refpack.validate(py)[0] == 'ok'
+    img = refpack.build('9.9.9', rpt=rpt)
+    assert img == refpack.build('9.9.9', rpt=rpt) and img[64:] == py and dp.parse(img)[0]['flags'] == refpack.hint(m['k'])
+    print(f'  refpack.py: {len(py)}-byte payload equal to the C tables section by section, deterministic')
+    # the Python rules agree with the firmware's on a few broken packs (the C test has them all)
+    bad = bytearray(py)
+    ent = [e for e in refpack.directory(py) if e[0] == refpack.STEP][0]
+    struct.pack_into('<I', bad, refpack.HEAD + refpack.ENTRY * refpack.directory(py).index(ent) + 8, 40000)
+    assert refpack.validate(bytes(bad))[0] == 'bad' and refpack.validate(py, refpack.hint(m['k']) ^ 0x100)[0] == 'other'
+    bad = bytearray(py)
+    bad[4] = 2
+    assert refpack.validate(bytes(bad))[0] == 'other' and refpack.validate(py, 0)[0] == 'ok'
+    # T5d / T14 (Python side): the slot a writer takes, the sequence, the flags carried into the header it rebuilds
+    good = img
+    empty = b'\xff' * 64
+    other = bytearray(img[64:])
+    other[4] = 2
+    other_img = dp.header(dp.REF, bytes(other), '20261119', 'x', seq=9, flags=refpack.hint(m['k'])) + bytes(other)
+    old = dp.reseq(good, 3)
+    assert dp.inactive_slot(dp.REF, [empty, empty]) == 0
+    assert dp.inactive_slot(dp.REF, [old, other_img]) == 1		# the newer OTHER is overwritten, not the valid one
+    assert dp.next_seq([old, other_img]) == 10			# above both
+    assert dp.ref_write_slot([old, None]) is None			# a slot not read in full: nothing written
+    # across versions: the running firmware's slot (here by CRC only) is kept even when the target rejects both
+    other_old = dp.header(dp.REF, bytes(other), '20261119', 'x', seq=2, flags=refpack.hint(m['k'])) + bytes(other)
+    assert dp.ref_write_slot([other_old, other_img]) == 0 and dp.ref_write_slot([old, empty]) == 1
+    # flags: a hint survives the writer's new sequence byte for byte; 0 (an older writer) is valid; a wrong one is not
+    re = dp.reseq(good, 7)
+    assert re[6:8] == good[6:8] and dp.parse(re)[0]['seq'] == 7 and dp.slot_valid(dp.REF, re)
+    zero = dp.header(dp.REF, py, '20261119', 'x', seq=1) + py
+    assert dp.parse(zero)[0]['flags'] == 0 and dp.slot_valid(dp.REF, zero)
+    wrong = dp.header(dp.REF, py, '20261119', 'x', seq=1, flags=refpack.hint(m['k']) ^ 0x100) + py
+    assert not dp.slot_valid(dp.REF, wrong)
+    assert dp.SLOT[dp.RADIOID] == 0x30000 and dp.SLOT_ADDR[dp.REF] == (0xEA0000, 0xEE0000)
+    plan = dp.cps_plan(0xEA0000, img)
+    assert len(plan) == (len(img) + 4095) // 4096 and plan[-1][0] == 0xEA0000 and plan[-1][1][:4] == b'DPK1'
+    print(f'  datapack.py: map pack slot choice, sequence, flags carried; {len(plan)} sectors, header last')
 
 
 def ui_tests(ROOT, APP, OUT, host):

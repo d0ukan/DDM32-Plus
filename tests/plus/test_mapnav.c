@@ -16,6 +16,7 @@
 #include "ui/mapnav.h"
 #include "ui/rpt.h"
 #include "turkey_map_data.h"
+#include "refpack_fixture.h"
 
 static int failures, checks;
 #define CHECK(c) do { checks++; if (!(c)) { failures++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -462,6 +463,11 @@ static void test_auto_repeater(void)
 
 int main(void)
 {
+	/* the tables are the map pack's on the data chip since 1.1 (refpack_fixture.h) */
+	if (!refpack_fixture_install(REFPACK_MAP | REFPACK_RPT)) {
+		printf("FAIL: the map pack fixture\n");
+		return 1;
+	}
 	test_math();
 	test_stations();
 	test_track();

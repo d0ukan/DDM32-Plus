@@ -17,6 +17,7 @@
 #include "ui/mapnav.h"
 #include "ui/tripm.h"
 #include "ui/clockx.h"
+#include "refpack_fixture.h"
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); \
@@ -321,6 +322,11 @@ static void test_clock(void)
 
 int main(void)
 {
+	/* the tables are the map pack's on the data chip since 1.1 (refpack_fixture.h) */
+	if (!refpack_fixture_install(REFPACK_MAP)) {
+		printf("FAIL: the map pack fixture\n");
+		return 1;
+	}
 	test_heard();
 	test_waterfall();
 	test_coverage();

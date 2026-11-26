@@ -5,7 +5,10 @@
  * (radio_airwatch.inc) on the simulator's VFOs: the first frequency keeps the VFOs and the position (a running watch
  * stops on its selected channel), each VFO takes its frequency as a fresh FM VFO, the end stops the ring and brings
  * the kept ones back. */
+#define sim_reset sim_base_reset	/* refpack_sim.inc: every reset gets the map pack */
 #include "sim/ui_sim.c"
+#undef sim_reset
+#include "refpack_sim.inc"
 #include "ui_sim_air.h"
 
 air_sim_t air_sim;

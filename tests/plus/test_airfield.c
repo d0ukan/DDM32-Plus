@@ -8,6 +8,7 @@
 #include <string.h>
 #include "ui/airfield.h"
 #include "ui/airfield_data.h"
+#include "refpack_fixture.h"
 #include "radio/radio_am.h"
 
 static int failures;
@@ -75,6 +76,11 @@ static void order_from(double la, double lo, const char *nearest)
 
 int main(void)
 {
+	/* the tables are the map pack's on the data chip since 1.1 (refpack_fixture.h) */
+	if (!refpack_fixture_install(REFPACK_AIR)) {
+		printf("FAIL: the map pack fixture\n");
+		return 1;
+	}
 	CHECK(air_field_count == AIR_FIELDS && AIR_FIELDS >= 60 && AIR_FREQS >= 100);	/* after the cleanup: 74, 122 */
 	/* The table: sorted by code, frequencies in place, on a channel name of the band, the 8.33 kHz grid */
 	uint32_t next_first = 0;

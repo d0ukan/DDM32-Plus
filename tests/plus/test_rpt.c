@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ui/rpt.h"
+#include "refpack_fixture.h"
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { failures++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -234,8 +235,90 @@ static void fixture(const char *path)
 	CHECK(strcmp(rpt_mode_name(&rpt_table[find("TA1BBB")]), "DMR") == 0);
 }
 
+/* --- T15 (docs/mappack-design.md C.7): the TX refusal set in program flash (rpt_freqs.c, generated from this table's
+ * rows) refuses exactly what the old known_repeater loop over the rows refused, on every frequency the radio can
+ * transmit on (136-174 / 400-480 MHz and their 6,250 Hz rims); the pack's repeaters only ever add refusals --- */
+
+static bool old_loop(uint32_t hz, const rpt_entry_t *extra)
+{
+	for (uint32_t i = 0; i <= rpt_info.count; i++) {
+		const rpt_entry_t *e = i < rpt_info.count ? &rpt_table[i] : extra;
+		if (e == NULL)
+			continue;
+		uint32_t in = (uint32_t)((int32_t)e->rx_hz + (int32_t)e->off * (int32_t)RPT_STEP_HZ);
+		if ((hz + 6250u > e->rx_hz && hz < e->rx_hz + 6250u) || (e->off != 0 && hz + 6250u > in && hz < in + 6250u))
+			return true;
+	}
+	return false;
+}
+
+static bool in_rims(uint32_t hz)
+{
+	return (hz >= 135993751u && hz <= 174006249u) || (hz >= 399993751u && hz <= 480006249u);
+}
+
+static unsigned t15_compared, t15_differ;
+static void t15_one(uint32_t hz)
+{
+	t15_compared++;
+	bool want = in_rims(hz) && old_loop(hz, NULL), got = rpt_freq_listed(hz);
+	if (want != got) {
+		if (t15_differ++ < 5)
+			printf("FAIL refusal set at %u Hz: %d, the old loop %d\n", (unsigned)hz, got, want);
+	}
+}
+
+static void t15(void)
+{
+	for (uint32_t hz = 136000000u; hz <= 174000000u; hz += 625u)
+		t15_one(hz);
+	for (uint32_t hz = 400000000u; hz <= 480000000u; hz += 625u)
+		t15_one(hz);
+	for (uint32_t hz = 144000000u; hz <= 146000000u; hz += 10u)
+		t15_one(hz);
+	for (uint32_t hz = 430000000u; hz <= 440000000u; hz += 10u)
+		t15_one(hz);
+	for (uint32_t i = 0; i < rpt_info.count; i++) {
+		const rpt_entry_t *e = &rpt_table[i];
+		uint32_t f[2] = { e->rx_hz, (uint32_t)((int32_t)e->rx_hz + (int32_t)e->off * (int32_t)RPT_STEP_HZ) };
+		for (int k = 0; k < (e->off != 0 ? 2 : 1); k++) {
+			t15_one(f[k] - 6250u), t15_one(f[k] - 6249u), t15_one(f[k]), t15_one(f[k] + 6249u), t15_one(f[k] + 6250u);
+		}
+	}
+	static const uint32_t edges[] = { 0u, 135993750u, 135993751u, 135999999u, 136000000u, 136006249u, 173993751u,
+					  174006249u, 174006250u, 399993750u, 399999999u, 400000000u, 480006249u, 480006250u,
+					  0xFFFFFFFFu };
+	for (unsigned k = 0; k < sizeof edges / sizeof edges[0]; k++)
+		t15_one(edges[k]);
+	CHECK(!rpt_freq_listed(0) && !rpt_freq_listed(135993750u) && !rpt_freq_listed(480006250u) &&
+	      !rpt_freq_listed(0xFFFFFFFFu));
+	CHECK(t15_differ == 0u);
+	/* the OR rule: a pack repeater the set lacks adds exactly its refusals (its output and input), none go */
+	rpt_entry_t x = { .lat_e5 = RPT_NOPOS, .lon_e5 = RPT_NOPOS, .rx_hz = 145212500u, .off = -480, .mode = RPT_FM };
+	unsigned added = 0, removed = 0;
+	for (uint32_t hz = 144000000u; hz <= 146000000u; hz += 125u) {
+		bool before = rpt_freq_listed(hz), after = before || rpt_entry_near(&x, hz);
+		added += after && !before;
+		removed += before && !after;
+		CHECK(after == old_loop(hz, &x));
+	}
+	CHECK(added > 0u && removed == 0u);
+	printf("  refusal set: %u frequencies (%u + %u steps) equal to the old loop on %u frequencies\n",
+	       (unsigned)(rpt_fq_vhf_n + rpt_fq_uhf_n), (unsigned)rpt_fq_vhf_n, (unsigned)rpt_fq_uhf_n, t15_compared);
+}
+
 int main(int argc, char **argv)
 {
+	/* the tables are the map pack's on the data chip since 1.1 (refpack_fixture.h) */
+	if (!refpack_fixture_install(REFPACK_RPT)) {
+		printf("FAIL: the map pack fixture\n");
+		return 1;
+	}
+	t15();
+	if (argc > 1 && strcmp(argv[1], "--t15") == 0) {
+		printf("test_rpt: %s (T15 only, %u repeaters)\n", failures ? "FAILED" : "ok", (unsigned)rpt_info.count);
+		return failures != 0;
+	}
 	if (argc > 1)
 		fixture(argv[1]);
 	else

@@ -13,7 +13,8 @@ import subprocess
 
 
 def run(args, **kw):
-    return subprocess.run([str(a) for a in args], check=True, **kw)
+    import refpack_host	# the map pack's reader, its fixture and the tables (tools/refpack_host.py)
+    return subprocess.run([str(a) for a in refpack_host.patch([str(a) for a in args])], check=True, **kw)
 
 
 def ui_argv(host, test, out):
@@ -66,5 +67,5 @@ def main(ROOT, APP, OUT, flags, host):
          '-DCONFIG_XBAND=1', '-DCONFIG_REPEATERS=1', '-DCONFIG_SFR_CWID=1', '-DCONFIG_SUBTONE=1', '-DCONFIG_LANG_TR=1',
          str(ui / 'ui_xband.c'), str(APP / 'core/radio/radio_cwid.c'),	# (tones.c: in uiFlowTest's own sources)
          str(ui / 'ui_scratch.c'), str(ui / 'rpt.c'), str(ui / 'ui_rpt.c'), str(APP / 'core/radio/xband.c'),
-         str(APP / 'core/aprs/aprs_fmt.c'), '-lm'], cwd=host)
+         str(APP / 'core/aprs/aprs_fmt.c'), str(tp / 'xband_rpt_freqs.c'), '-lm'], cwd=host)	# no map pack: the flash set refuses
     run([OUT / 'test_ui_xband'], cwd=host)

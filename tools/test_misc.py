@@ -17,7 +17,8 @@ from pathlib import Path
 
 
 def run(args, **kw):
-    return subprocess.run([str(a) for a in args], check=True, **kw)
+    import refpack_host	# the map pack's reader, its fixture and the tables (tools/refpack_host.py)
+    return subprocess.run([str(a) for a in refpack_host.patch([str(a) for a in args])], check=True, **kw)
 
 
 AIRPORTS = '''"id","ident","type","name","latitude_deg","longitude_deg","elevation_ft","continent","iso_country","iso_region","municipality","scheduled_service","icao_code","iata_code","gps_code","local_code","home_link","wikipedia_link","keywords"

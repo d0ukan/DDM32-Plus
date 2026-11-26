@@ -170,7 +170,11 @@ static void pv_widths(void)
 	char buf[48];
 	int w = gfx_width();
 	for (uint8_t p = 0; p < AIR_PROVS; p++) {
-		snprintf(buf, sizeof buf, "%02u %s (123)", (unsigned)map_province_plate(p), map_province_name(p));
+		{
+			char nm[MAP_NAME_MAX];
+			map_province_name(p, nm, sizeof nm);
+			snprintf(buf, sizeof buf, "%02u %s (123)", (unsigned)map_province_plate(p), nm);
+		}
 		if (gfx_text_width(ui_layout.small, buf) > w - 2) {
 			printf("FAIL %s: \"%s\" is %d px, the row %d\n", name, buf, gfx_text_width(ui_layout.small, buf), w - 2);
 			fails++;

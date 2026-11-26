@@ -19,7 +19,8 @@ from pathlib import Path
 
 
 def run(args, **kw):
-    return subprocess.run([str(a) for a in args], check=True, **kw)
+    import refpack_host	# the map pack's reader, its fixture and the tables (tools/refpack_host.py)
+    return subprocess.run([str(a) for a in refpack_host.patch([str(a) for a in args])], check=True, **kw)
 
 
 def fail(what):

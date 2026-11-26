@@ -25,7 +25,8 @@ sys.path.insert(0,str(ROOT/'tools'))
 import test_p25nac as p25nac	# DM32 Plus separate RX / TX NAC
 
 def run(args, **kw):
-    return subprocess.run([str(a) for a in args],check=True,**kw)
+    import refpack_host	# the map pack's reader, its fixture and the tables (tools/refpack_host.py)
+    return subprocess.run([str(a) for a in refpack_host.patch([str(a) for a in args])], check=True, **kw)
 
 def iddb_fixture(csv_path, expect_path):
     """A synthetic RadioID.net user.csv and what the radio must show for it (tests/plus/test_iddb.c): dense IDs over
@@ -180,17 +181,40 @@ def rpt_tests(flags):
         _,stats=rpt_list.generate(str(csv_path),str(json_path),date='2026-01-02')
         if stats['skipped']!=skipped or stats['count']!=8 or stats['nopos']!=1:
             raise SystemExit('rpt_list: skipped %s, count %d'%(stats['skipped'],stats['count']))
+        freqs=Path(tmp)/'rpt_freqs.c'	# the TX refusal set of the same rows (T15, docs/mappack-design.md C.7)
         run(['python3',ROOT/'tools/rpt_list.py','--csv',csv_path,'--radioid',json_path,'--date','2026-01-02',
-             '-o',gen],cwd=ROOT)
+             '-o',gen,'--freqs-out',freqs],cwd=ROOT)
         run(['clang',*flags,'-DCONFIG_REPEATERS=1','-DCONFIG_APRS=1',ROOT/'tests/plus/test_rpt.c',APP/'core/ui/rpt.c',
-             gen,APP/'core/aprs/aprs_fmt.c','-lm','-o',OUT/'test_rpt'],cwd=ROOT)
+             gen,freqs,APP/'core/aprs/aprs_fmt.c','-lm','-o',OUT/'test_rpt'],cwd=ROOT)
         run([OUT/'test_rpt',expect],cwd=ROOT)
+        # T15 on a generated 400-repeater list (both bands, offsets both ways, band edges, simplex, shared outputs)
+        import random
+        rnd=random.Random(400)
+        big_csv,big_gen,big_freqs=(Path(tmp)/n for n in ('rpt400.csv','rpt400_data.c','rpt400_freqs.c'))
+        with open(big_csv,'w',encoding='utf-8') as f:
+            f.write('callsign,city,lat,lon,rx_mhz,offset_mhz,mode\n')
+            edge=['136.0000','135.9950','174.0000','174.0050','400.0000','479.9950','480.0050','144.0000','146.0000']
+            for k in range(400):
+                if k<len(edge):
+                    rx=edge[k]
+                else:
+                    band=rnd.choice(((144.0,146.0),(430.0,440.0),(136.0,174.0),(400.0,480.0)))
+                    rx='%.5f'%(round(rnd.uniform(*band)/0.00125)*0.00125)
+                off=rnd.choice(('','-0.600','+0.600','-7.600','+7.600','-1.6'))
+                f.write('TB%04d,Ankara,39.9,32.8,%s,%s,%s\n'%(k,rx,off,rnd.choice(('FM','DMR'))))
+        run(['python3',ROOT/'tools/rpt_list.py','--csv',big_csv,'--date','2026-01-02','--max-bytes','100000',
+             '-o',big_gen,'--freqs-out',big_freqs],cwd=ROOT)
+        run(['clang',*flags,'-DCONFIG_REPEATERS=1','-DCONFIG_APRS=1',ROOT/'tests/plus/test_rpt.c',APP/'core/ui/rpt.c',
+             big_gen,big_freqs,APP/'core/aprs/aprs_fmt.c','-lm','-o',OUT/'test_rpt400'],cwd=ROOT)
+        run([OUT/'test_rpt400','--t15'],cwd=ROOT)
         r=subprocess.run(['python3',ROOT/'tools/rpt_list.py','--csv',csv_path,'--max-bytes','100'],capture_output=True,
                          text=True)
         if r.returncode==0 or 'more than 100' not in r.stderr:
             raise SystemExit('rpt_list.py made a table over its byte limit')
+    # The table and refusal set this prepare made (T15 on the real list: build/rpt/rpt_data.c and rpt_freqs.c)
     run(['clang',*flags,'-DCONFIG_REPEATERS=1','-DCONFIG_APRS=1',ROOT/'tests/plus/test_rpt.c',APP/'core/ui/rpt.c',
-         APP/'core/ui/rpt_data.c',APP/'core/aprs/aprs_fmt.c','-lm','-o',OUT/'test_rpt_shipped'],cwd=ROOT)
+         ROOT/'build/rpt/rpt_data.c',ROOT/'build/rpt/rpt_freqs.c',APP/'core/aprs/aprs_fmt.c','-lm','-o',
+         OUT/'test_rpt_shipped'],cwd=ROOT)
     run([OUT/'test_rpt_shipped'],cwd=ROOT)
 
 def p25_extras_tests(flags, worker_flags, codec):
