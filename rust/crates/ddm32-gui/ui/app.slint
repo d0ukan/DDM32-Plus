@@ -495,7 +495,7 @@ export component AppWindow inherits Window {
     default-font-size: Theme.font;
     // a dialog is open: the controls under it take no keyboard focus and no click (widgets.slint Modal)
     property <bool> modal: App.prompt-open || Radio.picker-open || App.confirm-open || App.disc-open || App.test-confirm-open || App.force-close-open
-        || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || Radio.zone-picker-open || App.map-ask-open;
+        || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || Radio.zone-picker-open || App.map-ask-open || App.map-loss-open;
     changed modal => { Modal.open = self.modal; }
 
     VerticalLayout {
@@ -503,7 +503,7 @@ export component AppWindow inherits Window {
         spacing: 0;
         if App.page != 6 : MenuBar {
             radio-locked: App.menu-radio-locked || App.confirm-open || App.disc-open || App.test-confirm-open
-                || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || App.map-ask-open;
+                || App.res-confirm-open || Packs.download-confirm-open || Packs.write-confirm-open || App.map-ask-open || App.map-loss-open;
             developer: App.developer;
             lang: Tr.lang;
             cable-text: Radio.access ? Radio.port-head : "";
@@ -717,6 +717,14 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
+
+    if App.map-loss-open : YesNo {
+        title: Tr.t(Tr.lang, "map_title");
+        text: Tr.t(Tr.lang, "pack_loss_confirm");
+        yes: Tr.t(Tr.lang, "pack_loss_yes");
+        no-clicked => { App.map-loss-open = false; }
+        yes-clicked => { App.map-allow-loss(); }
     }
 
     // my channels: the zone or mode filter (all, or one zone's channels / one mode)

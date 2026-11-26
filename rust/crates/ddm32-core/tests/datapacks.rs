@@ -1127,9 +1127,132 @@ fn cps_version_and_coordinate_arguments() {
     assert_eq!(Some(0x1A2B3C4D), parse_coord("0x1A2B3C4D"));
     assert_eq!(None, parse_coord("0x123456789"));
     let k = parse_known_coords("1.1.0=0x11, 1.1.1=0x12,1.2.0=0x20").unwrap();
-    assert_eq!(rp::Running::MapPack(vec![0x11, 0x12]), running_rules(Some((1, 1)), &k));
-    assert_eq!(rp::Running::MapPack(vec![]), running_rules(Some((1, 3)), &k));
+    assert_eq!(rp::Running::MapPack(vec![0x11, 0x12], vec![0x20]), running_rules(Some((1, 1)), &k));
+    assert_eq!(rp::Running::MapPack(vec![], vec![0x11, 0x12, 0x20]), running_rules(Some((1, 3)), &k));
     assert_eq!(rp::Running::NoMapPack, running_rules(Some((1, 0)), &k));
     assert_eq!(rp::Running::Unknown, running_rules(None, &k));
     assert!(parse_known_coords("1.1.0").is_err());
+}
+
+/// A 1.0.x RadioID header of a pack over 192 KB (only the header is on the fake radio).
+fn big_radioid_header(seq: u32) -> Vec<u8> {
+    let mut h = dp::header(RADIO_ID, &[], "20261119", "multi", seq, "t", 0).unwrap();
+    h[12..16].copy_from_slice(&200_000u32.to_le_bytes());
+    let hc = ddm32_core::radio::monitor::crc32(&h[..60], 0);
+    h[60..64].copy_from_slice(&hc.to_le_bytes());
+    h
+}
+
+#[test]
+fn cps_sf1_the_release_pack_in_the_slot_not_in_force_is_written_again() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.1.");
+    let mine = ref_image(&ref_payload(COORD, &[rpt_rec(0, 0, 430_100_000, 0, "TA9OWN", 1)], "own list"), 5, "user", 0);
+    radio.borrow_mut().put(0xEA0000, &mine);
+    let mut rel = release_pack();
+    rel[8..12].copy_from_slice(&4u32.to_le_bytes());
+    let hc = ddm32_core::radio::monitor::crc32(&rel[..60], 0);
+    rel[60..64].copy_from_slice(&hc.to_le_bytes());
+    radio.borrow_mut().put(0xEE0000, &rel);
+    let t = tmp();
+    let f = pack_file(&t, &release_pack(), "r.dpk");
+    let coord = format!("0x{COORD:08X}");
+    let known = format!("1.1.0=0x{COORD:08X}");
+    let (lines, err) = run(
+        &radio,
+        &[
+            "update-ref",
+            "--port",
+            "COM9",
+            "--pack",
+            &f,
+            "--coord",
+            &coord,
+            "--known-coords",
+            &known,
+            "--choice",
+            "release",
+        ],
+    );
+    assert!(err.is_none(), "{err:?}");
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 1, \"seq\": 6"), "{lines:?}");
+    // the Data packs page's write does the same
+    let radio2 = Rc::new(RefCell::new(FakeCps::new()));
+    radio2.borrow_mut().git = git("ddm32-plus-1.1.");
+    radio2.borrow_mut().put(0xEA0000, &mine);
+    radio2.borrow_mut().put(0xEE0000, &rel);
+    let (lines, err) = run(&radio2, &["write", "--port", "COM9", "--pack", &f, "--known-coords", &known]);
+    assert!(err.is_none(), "{err:?}");
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 1, \"seq\": 6"), "{lines:?}");
+}
+
+#[test]
+fn cps_sf2_the_data_packs_page_writes_only_for_the_running_firmware() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.1.");
+    let t = tmp();
+    let other = ref_image(&ref_payload(0x0BAD_F00D, &two_rpts(), "x"), 0, "build 1.0.9", 0);
+    let f = pack_file(&t, &other, "o.dpk");
+    let known = format!("1.1.0=0x{COORD:08X}");
+    let (_, err) = run(&radio, &["write", "--port", "COM9", "--pack", &f, "--known-coords", &known]);
+    assert!(err.unwrap().message.contains("ref_other"));
+    assert!(radio.borrow().commits.is_empty());
+    // several ids for the version: the pack's own must be one of them
+    let known2 = format!("1.1.0=0x{COORD:08X},1.1.1=0x0000BEEF");
+    let (_, err) = run(&radio, &["write", "--port", "COM9", "--pack", &f, "--known-coords", &known2]);
+    assert!(err.unwrap().message.contains("ref_other"));
+    let (lines, err) = run(
+        &radio,
+        &["write", "--port", "COM9", "--pack", &pack_file(&t, &release_pack(), "r.dpk"), "--known-coords", &known2],
+    );
+    assert!(err.is_none(), "{err:?}");
+    // the slot lines after the write judge with the running firmware's id
+    assert!(lines.iter().rev().nth(1).unwrap().contains("\"state\": \"empty\""));
+    assert!(lines.iter().any(|l| l.contains("\"in_force\": true") && l.contains("\"type\": \"ref\"")));
+}
+
+#[test]
+fn cps_sf3_a_big_radioid_pack_keeps_its_tail() {
+    let t = tmp();
+    let f = pack_file(&t, &release_pack(), "r.dpk");
+    // 1.0.x, the big pack in RadioID A: the map pack goes to B (0xEE0000), A's tail 0xEA0000 untouched
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.0.");
+    radio.borrow_mut().put(0xE70000, &big_radioid_header(3));
+    radio.borrow_mut().put(0xEA0000, &[0x5A; 64]);
+    let (lines, err) = run(&radio, &["write", "--port", "COM9", "--pack", &f]);
+    assert!(err.is_none(), "{err:?}");
+    let r = radio.borrow();
+    assert!(r.commits.iter().all(|a| (0xEE0000..0xEF0000).contains(a)));
+    assert_eq!(vec![0x5A; 64], r.get(0xEA0000, 64));
+    assert!(
+        lines.iter().position(|l| l.contains("radioid_big")) < lines.iter().position(|l| l.starts_with("{\"plan\""))
+    );
+    drop(r);
+    // both RadioID slots hold big packs: refused before any write, then written when allowed
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.0.");
+    radio.borrow_mut().put(0xE70000, &big_radioid_header(3));
+    radio.borrow_mut().put(0xEB0000, &big_radioid_header(4));
+    let (_, err) = run(&radio, &["write", "--port", "COM9", "--pack", &f]);
+    assert!(err.unwrap().message.starts_with(rp::RADIOID_LOSS));
+    assert!(radio.borrow().commits.is_empty());
+    let (_, err) = run(&radio, &["write", "--port", "COM9", "--pack", &f, "--allow-radioid-loss"]);
+    assert!(err.is_none(), "{err:?}");
+    assert!(!radio.borrow().commits.is_empty());
+}
+
+#[test]
+fn cps_n1_a_radioid_write_never_takes_a_big_pack_in_force() {
+    let radio = Rc::new(RefCell::new(FakeCps::new()));
+    radio.borrow_mut().git = git("ddm32-plus-1.0.");
+    // slot B: a 1.0.6 pack of 200 KB, sequence 9, in force on 1.0.x; slot A: an older valid pack
+    radio.borrow_mut().put(0xEB0000, &big_radioid_header(9));
+    radio.borrow_mut().put(0xE70000, &radioid_image(10, 2, "old"));
+    let t = tmp();
+    let (lines, err) =
+        run(&radio, &["write", "--port", "COM9", "--pack", &pack_file(&t, &radioid_image(20, 0, "new"), "n.dpk")]);
+    assert!(err.is_none(), "{err:?}");
+    assert!(radio.borrow().commits.iter().all(|a| (0xE70000..0xEA0000).contains(a)));
+    assert!(lines.last().unwrap().starts_with("{\"result\": \"PASS\", \"slot\": 0, \"seq\": 10"), "{lines:?}");
 }

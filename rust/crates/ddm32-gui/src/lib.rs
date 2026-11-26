@@ -422,6 +422,7 @@ fn page_dialog_open(ui: &AppWindow) -> bool {
         || p.get_download_confirm_open()
         || p.get_write_confirm_open()
         || ui.global::<App>().get_map_ask_open()
+        || ui.global::<App>().get_map_loss_open()
         || ui.global::<Radio>().get_zone_picker_open()
 }
 
@@ -758,6 +759,8 @@ fn wire(ui: &AppWindow) {
     app.on_map_write(move || mappack::write(&w.unwrap()));
     let w = ui.as_weak();
     app.on_map_choose(move |c| mappack::choose(&w.unwrap(), &c));
+    let w = ui.as_weak();
+    app.on_map_allow_loss(move || mappack::allow_loss(&w.unwrap()));
     let w = ui.as_weak();
     app.on_test_confirm_yes(move || {
         let ui = w.unwrap();

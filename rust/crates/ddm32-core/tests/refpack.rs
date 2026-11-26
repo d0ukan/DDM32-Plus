@@ -120,9 +120,23 @@ fn every_structural_rule_broken_once_is_bad() {
     let mut p = g.clone();
     set16(&mut p, rings + 6, 0);
     cases.push(("ring of no step", p));
+    // ranges must follow each other (the firmware's rule against crafted overlaps: one frame taking minutes)
+    let mut p = g.clone();
+    set16(&mut p, rings + 8 + 4, 0);
+    cases.push(("two rings sharing the same step range", p));
+    let mut p = g.clone();
+    set16(&mut p, rings + 4, 1);
+    set16(&mut p, rings + 8 + 4, 0);
+    cases.push(("two rings with swapped step ranges", p));
     let mut p = g.clone();
     set16(&mut p, provs_off, 81);
     cases.push(("province ring past the rings", p));
+    let mut p = g.clone();
+    set16(&mut p, provs_off + 18, 0);
+    cases.push(("a province reusing another's rings", p));
+    let mut p = g.clone();
+    p[provs_off + 2] = 2;
+    cases.push(("a province's rings running into the next one's", p));
     let mut p = g.clone();
     set16(&mut p, provs_off + 4, 5000);
     cases.push(("province name past its blob", p));
@@ -275,20 +289,20 @@ fn slot_choice_follows_r3() {
     let target = rules();
     let w = |slot, seq| Ok(SlotChoice::Write { slot, seq });
     // both empty: slot A, sequence 1
-    assert_eq!(w(0, 1), rp::choose_slot(&[empty(), empty()], &Running::NoMapPack, &target, &p));
+    assert_eq!(w(0, 1), rp::choose_slot(&[empty(), empty()], &Running::NoMapPack, &target, &p, &[], false));
     // A valid in force: B, above it
     let a5 = slot(&other_payload, 5, "build 1.1.0");
-    assert_eq!(w(1, 6), rp::choose_slot(&[a5.clone(), empty()], &Running::Unknown, &target, &p));
+    assert_eq!(w(1, 6), rp::choose_slot(&[a5.clone(), empty()], &Running::Unknown, &target, &p, &[], false));
     // newer B for another version (OTHER, seq 7) next to the valid older A: B is overwritten, sequence above both
     let b7_other = slot(&ref_payload(COORD ^ 0x100, &two_rpts(), "x"), 7, "build 1.2.0");
-    assert_eq!(w(1, 8), rp::choose_slot(&[a5.clone(), b7_other.clone()], &Running::NoMapPack, &target, &p));
+    assert_eq!(w(1, 8), rp::choose_slot(&[a5.clone(), b7_other.clone()], &Running::NoMapPack, &target, &p, &[], false));
     // newer B damaged (payload CRC): overwritten, its header still counts for the sequence
     let mut b9_bad = slot(&other_payload, 9, "x");
     *b9_bad.last_mut().unwrap() ^= 1;
-    assert_eq!(w(1, 10), rp::choose_slot(&[a5.clone(), b9_bad], &Running::NoMapPack, &target, &p));
+    assert_eq!(w(1, 10), rp::choose_slot(&[a5.clone(), b9_bad], &Running::NoMapPack, &target, &p, &[], false));
     // both valid for the target: the older one
     let b6 = slot(&other_payload, 6, "build 1.1.0");
-    assert_eq!(w(0, 7), rp::choose_slot(&[a5.clone(), b6.clone()], &Running::NoMapPack, &target, &p));
+    assert_eq!(w(0, 7), rp::choose_slot(&[a5.clone(), b6.clone()], &Running::NoMapPack, &target, &p, &[], false));
     // across versions: the running firmware (coordinate X) uses A; the target (Z) rejects both: A is kept
     let x = 0x0BAD_F00D;
     let ax = slot(&ref_payload(x, &two_rpts(), "x"), 4, "build 1.1.0");
@@ -297,24 +311,60 @@ fn slot_choice_follows_r3() {
     *bz_bad.last_mut().unwrap() ^= 1;
     assert_eq!(
         w(1, 6),
-        rp::choose_slot(&[ax.clone(), bz_bad.clone()], &Running::MapPack(vec![x]), &Rules::new(Some(COORD)), &p)
+        rp::choose_slot(
+            &[ax.clone(), bz_bad.clone()],
+            &Running::MapPack(vec![x], vec![]),
+            &Rules::new(Some(COORD)),
+            &p,
+            &[],
+            false
+        )
     );
     // ... even when the target would pick A (A older and B valid for the target): the running slot stays
     let bt = slot(&p, 3, "build 1.2.0");
     assert_eq!(
         Ok(SlotChoice::AlreadyThere { slot: 1 }),
-        rp::choose_slot(&[ax.clone(), bt.clone()], &Running::MapPack(vec![x]), &target, &p)
+        rp::choose_slot(&[ax.clone(), bt.clone()], &Running::MapPack(vec![x], vec![]), &target, &p, &[], false)
     );
     // the only free slot holds another target pack: it is replaced (never the running firmware's)
-    assert_eq!(w(1, 5), rp::choose_slot(&[ax.clone(), bt], &Running::MapPack(vec![x]), &target, &other_payload));
+    // (the target's id is known as another version's: a pack of that id is not the running firmware's)
+    assert_eq!(
+        w(1, 5),
+        rp::choose_slot(
+            &[ax.clone(), bt],
+            &Running::MapPack(vec![x], vec![COORD]),
+            &target,
+            &other_payload,
+            &[],
+            false
+        )
+    );
     // running version not known: the higher CRC-checked sequence is kept
-    assert_eq!(w(0, 8), rp::choose_slot(&[a5.clone(), b7_other.clone()], &Running::Unknown, &target, &p));
+    assert_eq!(w(0, 8), rp::choose_slot(&[a5.clone(), b7_other.clone()], &Running::Unknown, &target, &p, &[], false));
     // a map pack firmware whose coordinate id is not known: every id a slot holds is possible; two packs of two ids
     // may each be the running one: nothing is written
-    assert!(rp::choose_slot(&[ax.clone(), slot(&p, 6, "b")], &Running::MapPack(vec![]), &target, &p).is_err());
+    assert!(rp::choose_slot(
+        &[ax.clone(), slot(&p, 6, "b")],
+        &Running::MapPack(vec![], vec![]),
+        &target,
+        &other_payload,
+        &[],
+        false
+    )
+    .is_err());
     // with the id known it goes ahead
-    assert_eq!(w(1, 7), rp::choose_slot(&[ax, slot(&p, 6, "b")], &Running::MapPack(vec![x]), &target, &other_payload));
-    assert!(rp::choose_slot(&[empty()], &Running::NoMapPack, &target, &p).is_err());
+    assert_eq!(
+        w(1, 7),
+        rp::choose_slot(
+            &[ax, slot(&p, 6, "b")],
+            &Running::MapPack(vec![x], vec![COORD]),
+            &target,
+            &other_payload,
+            &[],
+            false
+        )
+    );
+    assert!(rp::choose_slot(&[empty()], &Running::NoMapPack, &target, &p, &[], false).is_err());
 }
 
 #[test]
@@ -620,4 +670,44 @@ fn the_real_public_pack_is_valid_when_present() {
 fn ref_image_seq(data: &[u8], seq: u32) -> Vec<u8> {
     let h = dp::parse(data).0.unwrap();
     dp::image(REF, &data[64..], &h.date, &h.name, seq, &h.tag, h.flags).unwrap()
+}
+
+#[test]
+fn verifier_findings_on_the_slot_choice() {
+    let target = rules();
+    let release = good();
+    let mine = ref_payload(COORD, &[rpt_rec(0, 0, 430_100_000, 0, "TA9OWN", 1)], "own list");
+    let w = |slot, seq| Ok(SlotChoice::Write { slot, seq });
+    let run11 = Running::MapPack(vec![COORD], vec![]);
+    // SF1: the release pack in the slot NOT in force (A: the user's pack, seq 5, in force) is written again into B
+    // with a sequence above A, never "already there"
+    let images = [slot(&mine, 5, "user"), slot(&release, 4, "build 1.1.0")];
+    assert_eq!(w(1, 6), rp::choose_slot(&images, &run11, &target, &release, &[], false));
+    assert_eq!(w(1, 6), rp::choose_slot(&images, &Running::NoMapPack, &target, &release, &[], false));
+    // ... and "already there" only when the identical pack is the one in force
+    let images = [slot(&mine, 3, "user"), slot(&release, 4, "build 1.1.0")];
+    assert_eq!(
+        Ok(SlotChoice::AlreadyThere { slot: 1 }),
+        rp::choose_slot(&images, &run11, &target, &release, &[], false)
+    );
+    // SF3: a 1.0.x radio with a RadioID pack over 192 KB in slot A: map A (its tail) is avoided
+    assert_eq!(w(1, 1), rp::choose_slot(&[empty(), empty()], &Running::NoMapPack, &target, &release, &[0], false));
+    // both partners big: refused unless allowed
+    let e = rp::choose_slot(&[empty(), empty()], &Running::NoMapPack, &target, &release, &[0, 1], false).unwrap_err();
+    assert!(e.starts_with(rp::RADIOID_LOSS), "{e}");
+    assert_eq!(w(0, 1), rp::choose_slot(&[empty(), empty()], &Running::NoMapPack, &target, &release, &[0, 1], true));
+    // the only slot the rules leave is avoided (the other is the target's only valid pack): refused, then allowed
+    let images = [slot(&mine, 5, "user"), empty()];
+    assert!(rp::choose_slot(&images, &run11, &target, &release, &[1], false).is_err());
+    assert_eq!(w(1, 6), rp::choose_slot(&images, &run11, &target, &release, &[1], true));
+    // SF4: a 1.1.x patch build whose id the program does not know: the slot valid under its own id is kept
+    let patch = 0x0BAD_F00D;
+    let images = [slot(&ref_payload(patch, &two_rpts(), "x"), 7, "build 1.1.1"), slot(&release, 3, "build 1.1.0")];
+    assert_eq!(
+        Err("both map slots may be in use by the running firmware; nothing is written".to_string()),
+        rp::choose_slot(&images, &run11, &target, &mine, &[], false)
+    );
+    // when that id is known to be another version's, it is not protected
+    let run11b = Running::MapPack(vec![COORD], vec![patch]);
+    assert_eq!(w(0, 8), rp::choose_slot(&images, &run11b, &target, &mine, &[], false));
 }

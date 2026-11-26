@@ -74,6 +74,9 @@ export global App {
     in property <bool> map-ask-rebuild;
     callback map-write();
     callback map-choose(string);
+    // the only map slot left is the tail of a RadioID pack over 192 KB: asked before anything is written
+    in-out property <bool> map-loss-open;
+    callback map-allow-loss();
     // the wizard: 0 version, 1 backup choice, 2 backup, 3 check, 4 install, 5 done
     in-out property <int> step: 0;
     in property <[VersionRow]> versions;

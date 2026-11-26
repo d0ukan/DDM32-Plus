@@ -157,6 +157,14 @@ pages"; `tests/parity.rs`, screenshots, a11y and hidpi passes extended):
   bad, airfield keys checked, MAP_META's origin / unit / bounds for firmware 1.1's id 0x056b6a10), the manifest's
   `ref_pack` as `check_ref_pack` (pack_format 1, `ddm32-ref-<version>.dpk`, `0x` + 8 lowercase hex). The real public
   1.1 pack (50,724 B, flags 0x1001) checks valid (test by path, not committed: RadioID.net rows).
+- Verifier fixes (SF1-SF4, N1, N4): "already there" only when the identical pack is the one the target has in force;
+  the Data packs page writes for the running firmware's id (one known id, or the pack's own among several) and judges
+  the slot lines after the write with it; a map slot whose RadioID partner holds a pack over 192 KB is avoided, and
+  when it is the only one left the tool refuses (`radioid_loss`) until the user says Yes (`--allow-radioid-loss`);
+  on a 1.1+ radio a slot valid under its own id is kept unless that id is known as another version's; a RadioID
+  write counts a header-checked pack over 192 KB as a live pack; the map pack refusals have Turkish texts.
+- The firmware's later rule mirrored: province ring ranges and ring step ranges consecutive and disjoint (a crafted
+  pack with shared ranges is refused).
 - Host-tested only. Still unconfirmed on the radio: the CPS `git` text of a 1.1 build ("ddm32-plus-1.1."). Radio
   rows: MP2, MP9.
 

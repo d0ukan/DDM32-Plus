@@ -548,18 +548,20 @@ pub fn running_rules(version: Option<(u32, u32)>, known: &[(String, u32)]) -> Ru
         None => Running::Unknown,
         Some(v) if v < (1, 1) => Running::NoMapPack,
         Some((ma, mi)) => {
-            let mut coords: Vec<u32> = known
-                .iter()
-                .filter(|(ver, _)| {
-                    let mut it = ver.split(['.', '-']);
-                    it.next().and_then(|x| x.parse::<u32>().ok()) == Some(ma)
-                        && it.next().and_then(|x| x.parse::<u32>().ok()) == Some(mi)
-                })
-                .map(|(_, c)| *c)
-                .collect();
+            let ours = |ver: &str| {
+                let mut it = ver.split(['.', '-']);
+                it.next().and_then(|x| x.parse::<u32>().ok()) == Some(ma)
+                    && it.next().and_then(|x| x.parse::<u32>().ok()) == Some(mi)
+            };
+            let mut coords: Vec<u32> = known.iter().filter(|(v, _)| ours(v)).map(|(_, c)| *c).collect();
             coords.sort();
             coords.dedup();
-            Running::MapPack(coords)
+            // ids only other versions use (a patch build of this version may share one: then it is not foreign)
+            let mut foreign: Vec<u32> =
+                known.iter().filter(|(v, c)| !ours(v) && !coords.contains(c)).map(|(_, c)| *c).collect();
+            foreign.sort();
+            foreign.dedup();
+            Running::MapPack(coords, foreign)
         }
     }
 }
@@ -579,7 +581,7 @@ pub fn data_pack_tool(argv: &[String], ctx: &ToolContext<'_>) -> ToolResult<()> 
     let a = Args::new(
         &argv[1..],
         &["--port", "--pack", "--line", "--coord", "--known-coords", "--choice"],
-        &[],
+        &["--allow-radioid-loss"],
         &["--port"],
     )?;
     let port_name = a.get("--port").ok_or_else(|| ToolError::exit("2"))?.to_string();
@@ -617,7 +619,7 @@ pub fn data_pack_tool(argv: &[String], ctx: &ToolContext<'_>) -> ToolResult<()> 
     raw.set_baud_rate(115200)?;
     raw.reset_input_buffer()?;
     let mut guard = CpsPackPort::new(raw);
-    let opts = RefOptions { coord, known, choice };
+    let opts = RefOptions { coord, known, choice, allow_loss: a.has("--allow-radioid-loss") };
     let result = data_pack_run(&mut guard, &argv[0], pack, a.get("--line").unwrap_or("Data pack"), &opts, ctx);
     let _ = guard.raw.close();
     result
@@ -627,6 +629,7 @@ struct RefOptions {
     coord: Option<u32>,
     known: Vec<(String, u32)>,
     choice: Option<String>,
+    allow_loss: bool,
 }
 
 fn data_pack_run(
@@ -648,7 +651,7 @@ fn data_pack_run(
     let running = running_rules(running_version(&git), &opts.known);
     if cmd == "read" {
         let rules = match &running {
-            Running::MapPack(c) if c.len() == 1 => Rules::new(Some(c[0])),
+            Running::MapPack(c, _) if c.len() == 1 => Rules::new(Some(c[0])),
             _ => Rules::new(None),
         };
         for ptype in dp::TYPES {
@@ -664,16 +667,23 @@ fn data_pack_run(
     if ph.ptype != REF {
         return write_pack(&mut c, &image, &ph, line_text, ctx);
     }
-    let target = Rules::new(opts.coord);
+    let target = Rules::new(target_coord(opts.coord, &running, &image[HEADER_SIZE..])?);
+    if let refpack::Verdict::Bad(e) | refpack::Verdict::Other(e) =
+        refpack::validate(&image[HEADER_SIZE..], ph.flags, &target)
+    {
+        return Err(ToolError::new("PackError", format!("ref_other: not for the radio's firmware: {e}")));
+    }
     if running == Running::NoMapPack {
         // harmless (1.0.x never reads the map slots), said for the user (E.3)
         (ctx.print)(&line(PyDict::new().with("note", "ref_after_update")));
     }
-    // a RadioID pack over 192 KB would lose its tail to the map slot: warned, not refused (B.4 N1)
+    // a RadioID pack over 192 KB has its tail in the map slot of its side (B.4): that slot is avoided, said first
+    let mut avoid = Vec::new();
     for slot in 0..2 {
         let head = read_slot(&mut c, RADIO_ID, slot)?;
         if base_state(RADIO_ID, &head) == "big" {
             (ctx.print)(&line(PyDict::new().with("warning", "radioid_big").with("slot", slot)));
+            avoid.push(refpack::radioid_partner(slot));
         }
     }
     let before = vec![read_slot(&mut c, REF, 0)?, read_slot(&mut c, REF, 1)?];
@@ -721,8 +731,8 @@ fn data_pack_run(
             },
         }
     }
-    let choice =
-        refpack::choose_slot(&before, &running, &target, &payload).map_err(|e| ToolError::new("PackError", e))?;
+    let choice = refpack::choose_slot(&before, &running, &target, &payload, &avoid, opts.allow_loss)
+        .map_err(|e| ToolError::new("PackError", e))?;
     let (slot, seq) = match choice {
         SlotChoice::AlreadyThere { slot } => {
             (ctx.print)(&line(PyDict::new().with("result", "SAME").with("slot", slot)));
@@ -732,8 +742,29 @@ fn data_pack_run(
     };
     let pe = |e: crate::datapacks::PackError| ToolError::new("PackError", e.0);
     let new = dp::image(REF, &payload, &ph.date, &name, seq, &tag, ph.flags).map_err(pe)?;
-    let w = Written { ptype: REF, slot, seq, name: &name, date: &ph.date };
+    let w = Written { ptype: REF, slot, seq, name: &name, date: &ph.date, rules: target };
     write_into(&mut c, &w, &new, line_text, ctx, &|after: &[Vec<u8>]| refpack::in_force(after, &target) == Some(slot))
+}
+
+/// The coordinate id a map pack is written for: the release's (--coord), else the running firmware's when the
+/// program knows exactly one for its version; with several, the pack's own when it is one of them; else the pack's
+/// own (a firmware before 1.1, or not known). A pack for another id than the running firmware's is refused.
+pub fn target_coord(coord: Option<u32>, running: &Running, payload: &[u8]) -> ToolResult<Option<u32>> {
+    if coord.is_some() {
+        return Ok(coord);
+    }
+    let own = refpack::directory(payload).ok().map(|d| d.coord);
+    match running {
+        Running::MapPack(c, _) if c.len() == 1 => Ok(Some(c[0])),
+        Running::MapPack(c, _) if c.len() > 1 => match own.filter(|o| c.contains(o)) {
+            Some(o) => Ok(Some(o)),
+            None => Err(ToolError::new(
+                "PackError",
+                "ref_other: the map pack is for none of the coordinate ids of the radio's firmware version",
+            )),
+        },
+        _ => Ok(None),
+    }
 }
 
 fn write_pack(
@@ -749,21 +780,44 @@ fn write_pack(
     for s in describe(ptype, &before) {
         (ctx.print)(&line(PyDict::new().with("slot", slot_json(&s))));
     }
-    let slot = dp::inactive_slot(ptype, &before);
-    let seq = dp::next_seq(&before).map_err(pe)?;
+    let (slot, seq) = if ptype == RADIO_ID { radioid_slot(&before)? } else { (dp::inactive_slot(ptype, &before), 0) };
+    let seq = if ptype == RADIO_ID { seq } else { dp::next_seq(&before).map_err(pe)? };
     let payload = &image[HEADER_SIZE..];
     let target = dp::image(ptype, payload, &ph.date, &ph.name, seq, &ph.tag, ph.flags).map_err(pe)?;
-    let w = Written { ptype, slot, seq, name: &ph.name, date: &ph.date };
+    let w = Written { ptype, slot, seq, name: &ph.name, date: &ph.date, rules: Rules::new(None) };
     write_into(c, &w, &target, line_text, ctx, &|after: &[Vec<u8>]| dp::active_slot(ptype, after) == Some(slot))
 }
 
-/// The slot a write goes to, and what the PASS line names.
+/// A RadioID write's slot (N1): a slot whose header checks but whose pack is over 192 KB (a 1.0.x pack: only its
+/// header is read) counts as a valid pack of its sequence, since a 1.0.x firmware may have it in force; the new pack
+/// goes into the other slot, with a sequence above both.
+fn radioid_slot(images: &[Vec<u8>]) -> ToolResult<(usize, u32)> {
+    let live = |img: &Vec<u8>| -> Option<u32> {
+        let h = dp::parse(img).0?;
+        let big = h.ptype == RADIO_ID && h.length as usize > dp::RADIO_ID_PAYLOAD_MAX;
+        (h.ptype == RADIO_ID && (h.crc_ok || big)).then_some(h.seq)
+    };
+    let mut best: Option<(usize, u32)> = None;
+    for (i, img) in images.iter().enumerate() {
+        if let Some(seq) = live(img) {
+            if best.is_none_or(|b| seq > b.1) {
+                best = Some((i, seq));
+            }
+        }
+    }
+    let max = images.iter().filter_map(live).max().unwrap_or(0);
+    let seq = max.checked_add(1).ok_or_else(|| ToolError::new("PackError", "the sequence number is used up"))?;
+    Ok((best.map_or(0, |b| 1 - b.0), seq))
+}
+
+/// The slot a write goes to, what the PASS line names, and the rules the slot lines after the write judge with.
 struct Written<'a> {
     ptype: u8,
     slot: usize,
     seq: u32,
     name: &'a str,
     date: &'a str,
+    rules: Rules,
 }
 
 /// The plan for one slot, the write (payload sectors, the header's sector last, each read back) and the check that
@@ -814,7 +868,7 @@ fn write_into(
         return Err(e);
     }
     let after = vec![read_slot(c, ptype, 0)?, read_slot(c, ptype, 1)?];
-    for s in describe(ptype, &after) {
+    for s in describe_with(ptype, &after, &w.rules) {
         (ctx.print)(&line(PyDict::new().with("slot", slot_json(&s))));
     }
     if after[slot] != target || !in_force(&after) {

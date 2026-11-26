@@ -46,6 +46,8 @@ pub struct MapState {
     pub notes: Vec<String>,
     pub sectors_done: usize,
     pub sectors_all: usize,
+    /// The choice of the last run (repeated when the user allows a RadioID pack's loss)
+    pub choice: Option<String>,
 }
 
 /// What the tool's lines of one run mean for the step.
@@ -124,15 +126,28 @@ pub fn choose(ui: &AppWindow, choice: &str) {
     with(|s| s.map.ask = None);
     let choice = choice.to_string();
     match choice.as_str() {
-        "rebuild" => with_port(ui, |ui, p| run_with(ui, p, Some("rebuild"))),
-        "keep" => with_port(ui, |ui, p| run_with(ui, p, Some("keep"))),
-        "release" => with_port(ui, |ui, p| run_with(ui, p, Some("release"))),
+        "rebuild" => with_port(ui, |ui, p| run_with(ui, p, Some("rebuild"), false)),
+        "keep" => with_port(ui, |ui, p| run_with(ui, p, Some("keep"), false)),
+        "release" => with_port(ui, |ui, p| run_with(ui, p, Some("release"), false)),
         _ => {}
     }
 }
 
+/// "Yes" to the RadioID pack's loss: the same run again with the loss allowed.
+pub fn allow_loss(ui: &AppWindow) {
+    ui.global::<App>().set_map_loss_open(false);
+    if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
+        return;
+    }
+    match with(|s| s.map.choice.clone()).as_deref() {
+        Some("rebuild") => with_port(ui, |ui, p| run_with(ui, p, Some("rebuild"), true)),
+        Some("release") => with_port(ui, |ui, p| run_with(ui, p, Some("release"), true)),
+        _ => with_port(ui, |ui, p| run_with(ui, p, None, true)),
+    }
+}
+
 fn write_on(ui: &AppWindow, found: Option<String>) {
-    run_with(ui, found, None);
+    run_with(ui, found, None, false);
 }
 
 fn set_text(ui: &AppWindow, text: &str, kind: &str) {
@@ -142,7 +157,7 @@ fn set_text(ui: &AppWindow, text: &str, kind: &str) {
 }
 
 /// The download (a worker thread), then the data pack tool's update-ref.
-fn run_with(ui: &AppWindow, found: Option<String>, choice: Option<&'static str>) {
+fn run_with(ui: &AppWindow, found: Option<String>, choice: Option<&'static str>, allow: bool) {
     if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
@@ -168,7 +183,7 @@ fn run_with(ui: &AppWindow, found: Option<String>, choice: Option<&'static str>)
             let Some(ui) = w.upgrade() else { return };
             ui.global::<App>().set_busy(false);
             match r.and_then(|x| x) {
-                Ok(file) => run_tool(&ui, &port, &fv, file, choice),
+                Ok(file) => run_tool(&ui, &port, &fv, file, choice, allow),
                 Err(e) => set_text(&ui, &trf("map_download_failed", &e), "danger"),
             }
         },
@@ -203,14 +218,18 @@ pub fn argv(
     a
 }
 
-fn run_tool(ui: &AppWindow, port: &str, fv: &FirmwareVersion, file: PathBuf, choice: Option<&str>) {
+fn run_tool(ui: &AppWindow, port: &str, fv: &FirmwareVersion, file: PathBuf, choice: Option<&str>, allow: bool) {
     if !radio_allowed(ui) || reader_holds_port(ui) || port_busy(ui) {
         return;
     }
     let coord = fv.entry.ref_pack.as_ref().map_or(0, |r| r.coord_crc);
     let line = radioid::fold(&tr("map_screen_line"));
-    let a = argv(port, &file, coord, &crate::packs::known_coords_args(), &line, choice);
-    with(|s| s.map = MapState { done_for: s.map.done_for.clone(), ..Default::default() });
+    let mut a = argv(port, &file, coord, &crate::packs::known_coords_args(), &line, choice);
+    if allow {
+        a.push("--allow-radioid-loss".into());
+    }
+    let ch = choice.map(str::to_string);
+    with(|s| s.map = MapState { done_for: s.map.done_for.clone(), choice: ch, ..Default::default() });
     set_text(ui, &tr("map_writing"), "info");
     let version = fv.version().to_string();
     crate::run_tool_lines(ui, "datapack", a, true, tool_line, move |ui, err| {
@@ -232,7 +251,14 @@ fn run_tool(ui: &AppWindow, port: &str, fv: &FirmwareVersion, file: PathBuf, cho
                 let (t, k) = result_text(&lang, &st);
                 set_text(ui, &t, k);
             }
-            Some(e) => set_text(ui, &i18n::tf(&lang, "map_failed", &e.record()), "danger"),
+            Some(e) if e.record().contains(ddm32_core::datapacks::refpack::RADIOID_LOSS) => {
+                // nothing was written: asked first (No by default)
+                ui.global::<App>().set_map_loss_open(true);
+                set_text(ui, &i18n::t(&lang, "pack_err_radioid_loss"), "warning");
+            }
+            Some(e) => {
+                set_text(ui, &i18n::tf(&lang, "map_failed", &crate::packs::error_text(&lang, &e.record())), "danger")
+            }
         }
         show(ui);
     });

@@ -322,21 +322,35 @@ fn map_rules(p: &[u8], d: &Directory, fw_coord: u32) -> Result<(), String> {
         return Err("a name blob does not end with NUL".into());
     }
     // rule 3
+    // rings: their step ranges consecutive and disjoint (ring r starts where ring r-1 ended), so a crafted pack can
+    // never make one frame walk shared or overlapping ranges again and again
     let rb = d.bytes(p, RINGS);
+    let mut next_step = 0u32;
     for i in 0..rings as usize {
         let r = &rb[i * 8..i * 8 + 8];
         let (first, count) = (le16(r, 4) as u32, le16(r, 6) as u32);
         if count < 1 || first + count > steps {
             return Err(format!("ring {i}: steps {first}+{count} of {steps}"));
         }
+        if first != next_step {
+            return Err(format!("ring {i}: steps from {first}, not {next_step} (ranges must follow each other)"));
+        }
+        next_step += count;
     }
     let pb = d.bytes(p, PROVINCES);
+    let mut next_ring = 0u32;
     for i in 0..provinces as usize {
         let r = &pb[i * 18..i * 18 + 18];
         let (first_ring, ring_count, name) = (le16(r, 0) as u32, r[2] as u32, le16(r, 4) as usize);
         if first_ring + ring_count > rings {
             return Err(format!("province {i}: rings {first_ring}+{ring_count} of {rings}"));
         }
+        if first_ring != next_ring {
+            return Err(format!(
+                "province {i}: rings from {first_ring}, not {next_ring} (ranges must follow each other)"
+            ));
+        }
+        next_ring += ring_count;
         if name >= pnames.len() {
             return Err(format!("province {i}: name offset {name}"));
         }
@@ -598,9 +612,11 @@ pub fn next_seq(images: &[Vec<u8>]) -> Result<u32, String> {
 pub enum Running {
     /// A firmware before 1.1: it never reads the map slots.
     NoMapPack,
-    /// A map pack firmware whose coordinate id is one of these (the releases of its version the program knows);
-    /// empty: not known, every coordinate id a slot holds is taken as possible.
-    MapPack(Vec<u32>),
+    /// A map pack firmware (1.1 or later). The first list: the coordinate ids of the releases of its version the
+    /// program knows; the second: the ids known to belong to other versions. The CPS text names major.minor only, so
+    /// a patch or developer build may have an id the program does not know: every id a slot holds that is not known
+    /// to be another version's is taken as possible too (it is never overwritten if it could be the one in force).
+    MapPack(Vec<u32>, Vec<u32>),
     /// The running version cannot be told: the slot with the higher sequence among the slots whose header and
     /// payload CRC check is kept (E.3).
     Unknown,
@@ -622,16 +638,15 @@ pub fn protected(images: &[Vec<u8>], running: &Running) -> Vec<usize> {
             }
             out.extend(best.map(|b| b.0));
         }
-        Running::MapPack(coords) => {
-            let candidates: Vec<u32> = if coords.is_empty() {
+        Running::MapPack(coords, foreign) => {
+            let mut candidates: Vec<u32> = coords.clone();
+            candidates.extend(
                 images
                     .iter()
                     .filter_map(|img| checked_header(img).filter(|h| h.crc_ok).map(|_| dp::parse(img).1))
                     .filter_map(|p| directory(&p).ok().map(|d| d.coord))
-                    .collect()
-            } else {
-                coords.clone()
-            };
+                    .filter(|c| !foreign.contains(c)),
+            );
             for c in candidates {
                 if let Some(s) = in_force(images, &Rules::new(Some(c))) {
                     if !out.contains(&s) {
@@ -658,52 +673,71 @@ pub enum SlotChoice {
     },
 }
 
+/// The code of the refusal when the only slot left would destroy a RadioID pack over 192 KB (its tail lies in that
+/// map slot); the tool writes it only with --allow-radioid-loss.
+pub const RADIOID_LOSS: &str = "radioid_loss";
+
 /// R3: never the slot in force for the running firmware; of the rest, the slot the target firmware does not use
 /// (rejected or empty, or the older valid one), never its only valid pack; sequence above every checked header.
+/// Nothing to write only when the identical pack is the one the target firmware has in force. `avoid`: map slots
+/// whose RadioID partner holds a pack over 192 KB (B.4: the map slot is that pack's tail); another slot is taken when
+/// the rules allow, else the write is refused with [`RADIOID_LOSS`] unless `allow_loss`.
 /// `images` must be both slots read in full (the caller stops before this when a read fails).
 pub fn choose_slot(
     images: &[Vec<u8>],
     running: &Running,
     target: &Rules,
     payload: &[u8],
+    avoid: &[usize],
+    allow_loss: bool,
 ) -> Result<SlotChoice, String> {
     if images.len() != 2 {
         return Err("both map slots must be read".into());
     }
-    let keep = protected(images, running);
-    let free: Vec<usize> = (0..2).filter(|s| !keep.contains(s)).collect();
     let same = |s: usize| {
         let (h, p) = dp::parse(&images[s]);
         h.is_some_and(|h| h.crc_ok) && p == payload
     };
-    let slot = match free.as_slice() {
-        [] => return Err("both map slots may be in use by the running firmware; nothing is written".into()),
-        [s] => {
-            if same(*s) {
-                return Ok(SlotChoice::AlreadyThere { slot: *s });
-            }
-            *s
+    let target_slot = in_force(images, target);
+    if let Some(t) = target_slot.filter(|t| same(*t)) {
+        return Ok(SlotChoice::AlreadyThere { slot: t });
+    }
+    let keep = protected(images, running);
+    // the slots that may be written: never the running firmware's; of two, not the one the target has in force (its
+    // only valid pack). When the running firmware holds the other slot, the target's pack there is replaced: the
+    // running firmware does not use it (the pack-first case).
+    let mut free: Vec<usize> = (0..2).filter(|s| !keep.contains(s)).collect();
+    if free.len() == 2 {
+        free.retain(|s| Some(*s) != target_slot);
+    }
+    let preferred = |cands: &[usize]| -> usize {
+        // an empty slot first, else the lower header sequence
+        if let Some(s) = cands.iter().find(|s| judge(&images[**s], target) == SlotVerdict::Empty) {
+            return *s;
         }
-        _ => match in_force(images, target) {
-            Some(t) => 1 - t,
-            None => {
-                // neither is valid for the target: an empty slot first, else the lower header sequence, else A
-                let empty: Vec<usize> = (0..2).filter(|s| judge(&images[*s], target) == SlotVerdict::Empty).collect();
-                match empty.first() {
-                    Some(s) => *s,
-                    None => {
-                        let seq = |s: usize| checked_header(&images[s]).map_or(0, |h| h.seq);
-                        if seq(1) < seq(0) {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                }
-            }
-        },
+        *cands.iter().min_by_key(|s| (checked_header(&images[**s]).map_or(0, |h| h.seq), **s)).unwrap()
+    };
+    if free.is_empty() {
+        return Err("both map slots may be in use by the running firmware; nothing is written".into());
+    }
+    let safe: Vec<usize> = free.iter().copied().filter(|s| !avoid.contains(s)).collect();
+    let slot = if !safe.is_empty() {
+        preferred(&safe)
+    } else if allow_loss {
+        preferred(&free)
+    } else {
+        return Err(format!(
+            "{RADIOID_LOSS}: the map slot left is the tail of a RadioID pack over 192 KB; writing ends that pack \
+             (rebuild it under 192 KB first, or allow it)"
+        ));
     };
     Ok(SlotChoice::Write { slot, seq: next_seq(images)? })
+}
+
+/// The map slot (0, 1) whose bytes are the tail of a RadioID slot's old 256 KB layout: map A 0xEA0000 lies in RadioID
+/// A (0xE70000), map B 0xEE0000 in RadioID B (0xEB0000).
+pub fn radioid_partner(map_slot: usize) -> usize {
+    map_slot
 }
 
 // --- the update step (E.3 S-B) -----------------------------------------------------------------------------------
@@ -723,7 +757,7 @@ pub enum UpdateDecision {
 /// packs, else the higher sequence among the slots whose CRCs check.
 pub fn in_force_for_update(images: &[Vec<u8>], running: &Running) -> Option<usize> {
     match running {
-        Running::MapPack(_) => {
+        Running::MapPack(..) => {
             let p = protected(images, running);
             p.into_iter().max_by_key(|s| checked_header(&images[*s]).map_or(0, |h| h.seq))
         }

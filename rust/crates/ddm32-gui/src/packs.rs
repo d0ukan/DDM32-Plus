@@ -36,6 +36,10 @@ pub struct PackState {
     /// A map pack (type 3) chosen from a release folder or a .dpk file (docs/mappack-design.md E.3)
     pub map_pack: Option<(BuiltPack, PathBuf)>,
     pub map_error: Option<String>,
+    /// The user said Yes to losing a RadioID pack over 192 KB (its tail is the only map slot left)
+    pub allow_loss: bool,
+    /// The last write's result line ("PASS", "SAME")
+    pub last_result: Option<String>,
     pub radio_text: String,
     pub radioid_error: Option<String>,
     pub air_error: Option<String>,
@@ -617,7 +621,10 @@ pub fn ask_write(ui: &AppWindow, ptype: u8) {
     }) else {
         return;
     };
-    with(|s| s.packs.pending = Some(ptype));
+    with(|s| {
+        s.packs.pending = Some(ptype);
+        s.packs.allow_loss = false;
+    });
     let p = ui.global::<Packs>();
     p.set_write_confirm_text(text.into());
     p.set_write_confirm_open(true);
@@ -646,10 +653,12 @@ fn write_on(ui: &AppWindow, found: Option<String>) {
     }) else {
         return;
     };
-    with(|s| {
+    let allow_loss = with(|s| {
         s.packs.sectors_done = 0;
         s.packs.sectors_all = 0;
         s.packs.radio_text.clear();
+        s.packs.last_result = None;
+        std::mem::take(&mut s.packs.allow_loss)
     });
     ui.global::<Packs>().set_progress(0.0);
     result(ui, &tr("pack_writing"), "info");
@@ -666,14 +675,30 @@ fn write_on(ui: &AppWindow, found: Option<String>) {
     if ptype == REF {
         // the coordinate ids of the releases the program knows: the running firmware's slot is never overwritten
         argv.extend(known_coords_args());
+        if allow_loss {
+            argv.push("--allow-radioid-loss".into());
+        }
     }
     crate::run_tool_lines(ui, "datapack", argv, true, tool_line, move |ui, err| {
+        let lang = with(|s| s.lang.clone());
         match err {
             None => {
                 ui.global::<Packs>().set_progress(1.0);
-                result(ui, &tr("pack_write_done"), "success");
+                let same = with(|s| s.packs.last_result.as_deref() == Some("SAME"));
+                result(ui, &tr(if same { "pack_write_same" } else { "pack_write_done" }), "success");
             }
-            Some(e) => result(ui, &trf("pack_write_failed", &e.record()), "danger"),
+            Some(e) if e.record().contains(ddm32_core::datapacks::refpack::RADIOID_LOSS) => {
+                // asked before anything is written: Yes writes with the loss allowed (No by default)
+                with(|s| {
+                    s.packs.pending = Some(ptype);
+                    s.packs.allow_loss = true;
+                });
+                let p = ui.global::<Packs>();
+                p.set_write_confirm_text(i18n::t(&lang, "pack_loss_confirm").into());
+                p.set_write_confirm_open(true);
+                result(ui, &i18n::t(&lang, "pack_err_radioid_loss"), "warning");
+            }
+            Some(e) => result(ui, &i18n::tf(&lang, "pack_write_failed", &error_text(&lang, &e.record())), "danger"),
         }
         show(ui);
     });
@@ -778,6 +803,11 @@ pub fn tool_line(ui: &AppWindow, line: &str) {
             );
             result(ui, &text, "info");
         }
+    } else if line.starts_with("{\"result\"") {
+        if let Some(v) = parse(line) {
+            let r = v["result"].as_str().map(str::to_string);
+            with(|s| s.packs.last_result = r);
+        }
     } else if line.starts_with("{\"note\"") || line.starts_with("{\"warning\"") {
         if let Some(t) = note_text(&lang, line) {
             with(|s| {
@@ -799,6 +829,28 @@ pub fn tool_line(ui: &AppWindow, line: &str) {
         ui.global::<Packs>().set_progress(v.min(1.0));
     }
     show(ui);
+}
+
+/// A tool error in the user's language: the known map pack refusals get their own words (Turkish first), the tool's
+/// English text stays after them as the detail.
+pub fn error_text(lang: &str, record: &str) -> String {
+    let key = [
+        (ddm32_core::datapacks::refpack::RADIOID_LOSS, "pack_err_radioid_loss"),
+        ("ref_other", "pack_err_ref_other"),
+        ("not for this firmware", "pack_err_ref_other"),
+        ("another firmware version", "pack_err_ref_other"),
+        ("both map slots may be in use", "pack_err_both_slots"),
+        ("does not check", "pack_err_ref_bad"),
+        ("cannot be rebuilt", "pack_err_rebuild"),
+        ("192 KB", "pack_err_radioid_big"),
+    ]
+    .iter()
+    .find(|(k, _)| record.contains(k))
+    .map(|(_, v)| *v);
+    match key {
+        Some(k) => format!("{}\n({record})", i18n::t(lang, k)),
+        None => record.to_string(),
+    }
 }
 
 /// A note or warning line of the data pack tool in words (the map pack's old-firmware note, a RadioID pack too big

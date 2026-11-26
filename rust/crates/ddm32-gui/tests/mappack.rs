@@ -266,3 +266,21 @@ fn every_new_text_is_in_both_languages() {
         assert!(tr != k && en != k && tr != en || k == "pack_type_ref" && tr != en, "{k}");
     }
 }
+
+#[test]
+fn map_pack_refusals_are_said_in_turkish() {
+    let t = packs::error_text("tr", "PackError: radioid_loss: the map slot left is the tail of a RadioID pack");
+    assert!(t.starts_with("Yazılmadı: kalan tek harita yuvası") && t.contains("(PackError: radioid_loss"), "{t}");
+    assert!(
+        packs::error_text("tr", "PackError: ref_other: not for the radio's firmware").starts_with("Bu harita paketi")
+    );
+    assert!(packs::error_text("tr", "PackError: both map slots may be in use by the running firmware")
+        .starts_with("İki harita yuvası"));
+    assert!(packs::error_text("tr", "ValueError: r.dpk: map pack does not check: x")
+        .starts_with("Harita paketi denetimden"));
+    assert!(packs::error_text("tr", "ValueError: big.dpk: RadioID pack of 200000 bytes: ... (192 KB)")
+        .starts_with("RadioID paketi 192"));
+    assert!(packs::error_text("en", "PackError: the pack cannot be rebuilt: x").starts_with("Your own pack could not"));
+    // other errors pass as they are
+    assert_eq!("CpsError: R 1 0xEA0000: reply 2D", packs::error_text("tr", "CpsError: R 1 0xEA0000: reply 2D"));
+}
