@@ -56,6 +56,7 @@ static void mw_reset(void)
 	memset(mw_heard, 0, sizeof mw_heard);
 #if CONFIG_AIR_WATCH
 	mw_air = false;		// DDM32 Plus air watch (ui_airwatch.inc)
+	mw_air_kind = 0;
 #endif
 }
 
@@ -80,6 +81,11 @@ static void mw_sync(void)
 static bool __attribute__((noinline)) mw_row_read(uint8_t k)
 {
 	const ui_dual_ref_t *r = &mw_ref[k];
+#if CONFIG_AUTO_SCAN
+	if (mw_air_kind != 0 && r->vfo)	// DDM32 Plus auto scan: the letter's label stays (ui_airwatch.inc)
+		memset(&mw_row[k], 0, (size_t)(mw_row[k].name - (char *)&mw_row[k]));
+	else
+#endif
 	memset(&mw_row[k], 0, sizeof mw_row[k]);
 	if (r->vfo) {
 		if (!ui_svc_vfo_get((uint8_t)r->pos, &mw_ch))
@@ -779,8 +785,24 @@ static char mw_taken_tag(const ui_dual_ref_t *r, uint16_t arg)
 	return 0;
 }
 
+#if CONFIG_AUTO_SCAN
+// DDM32 Plus auto scan: its letters are the nearest repeaters or airfields; a picked channel would be one the next
+// refresh knows nothing of (review m8). Up / Down on a letter still steps its VFO (until a refresh replaces it)
+static bool mw_auto_refused(void)
+{
+	if (mw_air_kind == 0)
+		return false;
+	ui_toast(TR(TEXT_ALT_OPEN "The scan picks its letters: stop it first" TEXT_ALT_NEXT "Stop the scan first" TEXT_ALT_CLOSE));
+	return true;
+}
+#endif
+
 static void mw_pick_set(uint16_t arg, const ui_dual_ref_t *r)
 {
+#if CONFIG_AUTO_SCAN
+	if (mw_auto_refused())
+		return;
+#endif
 	if (arg & MW_LETTER_ARG)
 		mw_set_letter((uint8_t)(arg & 7u), r);
 	else
@@ -791,6 +813,10 @@ static void mw_pick_set(uint16_t arg, const ui_dual_ref_t *r)
 // (CONFIG_VFO_MODES) C..F have one each too (vfo_for, mw_vfo_letter)
 static void mw_pick_vfo(uint16_t arg)
 {
+#if CONFIG_AUTO_SCAN
+	if (mw_auto_refused())
+		return;
+#endif
 	if (arg & MW_LETTER_ARG) {
 #if CONFIG_VFO_MODES
 		// DM32 Plus: a letter outside the panes gets its own VFO (C..F: VFOs 2..5, RAM only)

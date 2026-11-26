@@ -40,6 +40,17 @@ bool ui_hold_tool(uint8_t d)
 	return true;
 }
 
+#if CONFIG_AUTO_SCAN
+// DDM32 Plus auto scan: its held digit works on a VFO too (the scan's letters are VFOs; the user may start it from the
+// VFO), not while a frequency is being typed (ui_app.c ui_home_key)
+bool ui_hold_any(uint8_t d)
+{
+	if (!hold_ok)
+		hold_load();
+	return d <= 9 && (hold_c[d] == T_AIRSCAN + 1 || hold_c[d] == T_RPTSCAN + 1);
+}
+#endif
+
 // Home's hint group: "4 ISS", the first digit set and its tool's name, "+" after it when more are set; NULL when none is.
 // load: read the settings first (the tick; a draw passes false and sees what the tick last read)
 const char *ui_hold_hint(bool load)

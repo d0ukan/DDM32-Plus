@@ -17,6 +17,9 @@
 #include "fmt.h"
 #include "i18n.h"
 #include "ui/mapnav.h"
+#if CONFIG_AUTO_SCAN
+#include "ui/autoscan.h"
+#endif
 
 #define POLL_MS		1000u
 
@@ -44,6 +47,10 @@ static void __attribute__((noinline)) auto_check(bool fix, int32_t lat, int32_t 
 	const radio_view_t *v = ui_view();
 	if (ui_st.banner.kind != UI_BANNER_NONE || v->state == RS_TX)
 		return;
+#if CONFIG_AUTO_SCAN
+	if (ui_autoscan_on() != AS_OFF)
+		return;	/* DDM32 Plus: the auto scan's ring has the VFOs: # would tune one under it */
+#endif
 	bool first = arpt.cur == RPT_NONE;
 	uint16_t i = arpt_check(&arpt, fix, lat, lon, v->ch.mode == RADIO_MODE_DMR, in_band, v->ch.rx_hz, now);
 	if (i == RPT_NONE)

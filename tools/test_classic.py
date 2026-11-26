@@ -1055,6 +1055,9 @@ def main():
     # DDM32 Plus round 14 air items: the airfield table, air watch, the 3D waterfall (tools/test_air.py)
     import test_air
     test_air.main(ROOT,APP,OUT,flags,host)
+    # DDM32 Plus auto airfield / repeater scan: the selection, the radio core's hooks (tools/test_autoscan.py)
+    import test_autoscan
+    test_autoscan.main(ROOT,APP,OUT,flags,host)
     # DDM32 Plus user data packs (tools/test_datapack.py, docs/r14.md 7)
     import test_datapack
     test_datapack.main(ROOT,APP,OUT,flags,host)

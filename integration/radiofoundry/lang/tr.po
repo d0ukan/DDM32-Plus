@@ -6780,3 +6780,59 @@ msgstr "Başka sürümün harita paketi"
 #: core/ui/ui_dota.c
 msgid "Bad pack"
 msgstr "Bozuk paket"
+
+#: core/ui/ui_menus.c core/ui/ui_autoscan.c
+msgid "Air scan"
+msgstr "Hava tarama"
+
+#: core/ui/ui_menus.c core/ui/ui_autoscan.c
+msgid "Repeater scan"
+msgstr "Röle tarama"
+
+#: core/ui/ui_autoscan.c
+msgid "Air scan on"
+msgstr "Hava tarama açık"
+
+#: core/ui/ui_autoscan.c
+msgid "Repeater scan on"
+msgstr "Röle tarama açık"
+
+#: core/ui/ui_autoscan.c
+msgid "Air scan on: waiting for GPS"
+msgstr "Hava tarama açık: GPS bekleniyor"
+
+#: core/ui/ui_autoscan.c
+msgid "Repeater scan on: waiting for GPS"
+msgstr "Röle tarama açık: GPS bekleniyor"
+
+#: core/ui/ui_autoscan.c
+msgid "Air scan off"
+msgstr "Hava tarama kapalı"
+
+#: core/ui/ui_autoscan.c
+msgid "Repeater scan off"
+msgstr "Röle tarama kapalı"
+
+#: core/ui/ui_autoscan.c
+msgid "Air scan: no airfield within 100 km"
+msgstr "Hava tarama: 100 km içinde meydan yok"
+
+#: core/ui/ui_autoscan.c
+msgid "Repeater scan: none within 60 km"
+msgstr "Röle tarama: 60 km içinde röle yok"
+
+#: core/ui/ui_autoscan.c
+msgid "Air scan: 1 frequency only, waiting"
+msgstr "Hava tarama: tek frekans, bekliyor"
+
+#: core/ui/ui_autoscan.c
+msgid "Repeater scan: 1 repeater only, waiting"
+msgstr "Röle tarama: tek röle, bekliyor"
+
+#: core/ui/ui_autoscan.c
+msgid "GPS is off: switch it on in Settings"
+msgstr "GPS kapalı: Ayarlar'dan açın"
+
+#: core/ui/ui_mwatch.inc
+msgid "{The scan picks its letters: stop it first|Stop the scan first}"
+msgstr "{Harfleri tarama seçer: önce durdurun|Önce taramayı durdurun}"

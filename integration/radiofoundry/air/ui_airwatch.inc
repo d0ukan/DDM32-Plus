@@ -11,6 +11,12 @@
 // it the way any watch stops (Back twice, # 5, * 7, the watch key) brings the user's watch back as it was: the radio
 // core restores the position and VFOs A / B from the settings, then the kept ring is asked for again. A power cycle
 // during it comes back as before it too.
+//
+// DDM32 Plus auto scan (CONFIG_AUTO_SCAN, ui_autoscan.c): the same ring for the nearest repeaters or airfields
+// (mw_air_kind AS_RPT / AS_AIR). Its letters carry a label on Home (mw_row[k].name: "TA2XYZ 12km", "LTBA TWR"; kept
+// by mw_row_read while it runs) and are replaced one by one as the radio moves (ui_dual_auto_set). Any end the user
+// or another feature causes ends the scan too (ui_autoscan_ended); the scan's own end (fewer than two letters, the map
+// pack gone) brings the user's watch back and leaves the scan waiting.
 
 static struct {
 	bool on;			// the user's watch ran
@@ -24,11 +30,14 @@ bool ui_air_watch_on(void)
 	return mw_air;
 }
 
-// The air watch stopped (any way the watch stops: the tick finds it off): the radio and the user's watch as they were
-static bool __attribute__((noinline)) mw_air_end(void)
+// The air watch stopped: the radio and the user's watch as they were. user: the user (or another feature) stopped it,
+// the toast says so; else the auto scan's own end (it says why itself and goes on waiting)
+static bool __attribute__((noinline)) mw_air_finish(bool user)
 {
 	ui_dual_t *d = dual();
+	uint8_t kind = mw_air_kind;
 	mw_air = false;
+	mw_air_kind = 0;	// before the user's rows are read again: no labels
 	ui_svc_air_end();	// the ring stops; VFOs A / B and the position from the settings
 	int32_t v = ui_svc_setting_get(UI_SET_MWATCH);	// Watch channels, changed during it or not
 	mw_n = (uint8_t)(v < 2 ? 2 : v > UI_MW_MAX ? UI_MW_MAX : v);
@@ -43,11 +52,28 @@ static bool __attribute__((noinline)) mw_air_end(void)
 	d->back_to = UI_DUAL_NONE;
 	if (mw_keep.on && apply(mw_keep.sel))
 		watch_on(d);
-	ui_toast(MW_AIR_OFF);
+#if CONFIG_AUTO_SCAN
+	if (kind != 0) {
+		if (user)
+			ui_autoscan_ended();	// off, and its toast
+		return true;
+	}
+#else
+	(void)kind;
+#endif
+	if (user)
+		ui_toast(MW_AIR_OFF);
 	return true;
 }
 
-bool ui_dual_air_watch(const uint32_t hz[], uint8_t n, uint8_t atis)
+static bool mw_air_end(void)
+{
+	return mw_air_finish(true);
+}
+
+// The ring of n letters, each its own VFO: hz[k] with arg[k]'s bits (ui_svc_air_vfo), for the airfield watch (kind 0)
+// or the auto scan (AS_AIR, AS_RPT). The user's watch is kept the first time
+static bool __attribute__((noinline)) mw_air_ring(const uint32_t hz[], const uint32_t arg[], uint8_t n, uint8_t kind)
 {
 	ui_dual_t *d = dual();
 	if (n < 2 || n > UI_MW_MAX)
@@ -67,10 +93,11 @@ bool ui_dual_air_watch(const uint32_t hz[], uint8_t n, uint8_t atis)
 		ui_svc_scan(false);
 		ui_st.scanning = false;
 	}
-	// The radio core keeps the user's state first (radio_airwatch.inc); an ATIS letter is marked
+	// The radio core keeps the user's state first (radio_airwatch.inc); each letter as its bits say
 	for (uint8_t k = 0; k < n; k++)
-		ui_svc_air_vfo((uint8_t)(k | (((atis >> k) & 1u) != 0 ? UI_AIR_ATIS : 0u)), hz[k]);
+		ui_svc_air_vfo(k | arg[k], hz[k]);
 	mw_air = true;
+	mw_air_kind = kind;
 	d->on = false;
 	d->back_to = UI_DUAL_NONE;
 	mw_n = n;
@@ -85,16 +112,86 @@ bool ui_dual_air_watch(const uint32_t hz[], uint8_t n, uint8_t atis)
 	ref[0] = mw_ref[0];
 	ref[1] = mw_ref[1];
 	if (!apply(0)) {
-		mw_air_end();
+		mw_air_finish(kind == 0);
 		return false;
 	}
 	watch_on(d);
 	// The radio core takes the frequencies before the ring (its queue's order); Home shows them at once
 	for (uint8_t k = 0; k < n; k++) {
 		mw_row[k].rx_hz = hz[k];
-		mw_row[k].mode = RADIO_MODE_FM;
+		mw_row[k].mode = (arg[k] & UI_AIR_DMR) != 0 ? RADIO_MODE_DMR : RADIO_MODE_FM;
 	}
 	d->pane[0].rx_hz = hz[0];
 	d->pane[1].rx_hz = hz[1];
 	return true;
 }
+
+bool ui_dual_air_watch(const uint32_t hz[], uint8_t n, uint8_t atis)
+{
+	uint32_t arg[UI_MW_MAX];
+	if (n > UI_MW_MAX)
+		return false;
+#if CONFIG_AUTO_SCAN
+	bool was_auto = mw_air && mw_air_kind != 0;	// an auto scan gives way to the airfield's watch
+#endif
+	for (uint8_t k = 0; k < n; k++)
+		arg[k] = ((atis >> k) & 1u) != 0 ? UI_AIR_ATIS : 0u;
+	bool ok = mw_air_ring(hz, arg, n, 0);
+#if CONFIG_AUTO_SCAN
+	if (was_auto)
+		ui_autoscan_ended();
+#endif
+	return ok;
+}
+
+#if CONFIG_AUTO_SCAN
+bool ui_dual_auto_ring(const uint32_t hz[], const uint32_t arg[], uint8_t n, uint8_t kind)
+{
+	return mw_air_ring(hz, arg, n, kind);
+}
+
+// Letter k replaced: the radio core refuses it while the ring holds a signal or transmits (ui_autoscan.c reads the VFO
+// back and asks again). What the UI knew of the letter starts over (its age, a pane's snapshot)
+void ui_dual_auto_set(uint8_t k, uint32_t hz, uint32_t arg)
+{
+	ui_dual_t *d = dual();
+	if (!mw_air || k >= UI_MW_MAX)
+		return;
+	ui_svc_air_vfo(k | arg | UI_AIR_REPLACE, hz);
+	mw_row[k].rx_hz = hz;
+	mw_row[k].mode = (arg & UI_AIR_DMR) != 0 ? RADIO_MODE_DMR : RADIO_MODE_FM;
+	mw_heard[k] = 0;
+	if (mw_rx == k)
+		mw_rx = UI_DUAL_NONE;
+	uint8_t pane = mw_pane_of(k);
+	if (pane != UI_DUAL_NONE) {
+		snap[pane].valid = false;
+		chan_ok[pane] = false;
+		d->ended[pane] = false;
+		d->pane[pane].rx_hz = hz;
+		refill[pane] = true;
+	}
+}
+
+void ui_dual_auto_label(uint8_t k, const char *label)
+{
+	if (mw_air && k < UI_MW_MAX)
+		str_copy(mw_row[k].name, sizeof mw_row[k].name, label);
+}
+
+bool ui_dual_auto_has(uint8_t k, uint32_t hz)
+{
+	return ui_svc_vfo_get(k, &mw_ch) && mw_ch.rx_hz == hz;
+}
+
+void ui_dual_auto_end(void)
+{
+	if (mw_air)
+		mw_air_finish(false);
+}
+
+uint8_t ui_dual_auto_kind(void)
+{
+	return mw_air ? mw_air_kind : 0;
+}
+#endif

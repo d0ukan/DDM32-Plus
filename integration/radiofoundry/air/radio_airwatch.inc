@@ -16,23 +16,59 @@
 // most (from the first poll of the hold, through the wait and its looks), then the ring goes on and every ATIS letter
 // is passed over (nothing heard there: the ring's quiet stop) for AIR_ATIS_COOL_MS. RAM: the flag, the ATIS bits and
 // two times (12 B in radio_sm_t).
+//
+// DDM32 Plus auto scan (CONFIG_AUTO_SCAN, docs/autoscan-design.md): the same ring for the nearest repeaters and
+// airfields. RREQ_AIR_VFO's arg carries the letter's kind (RADIO_AIR_FM / _DMR: a repeater, as Tools > Repeaters'
+// tune sets the VFO: RX, mode, FM bandwidth and access tone as the TX tone, DMR colour code and slot, TX = RX + the
+// listed offset; a DMR letter talks to the user's DMR VFO talk target as it was at the start). Nothing in it refuses
+// a transmission the radio's own checks allow (an input outside the bands is refused by the band check as on any VFO).
+// RADIO_AIR_REPLACE marks a refresh: refused while the ring holds a signal or waits after one, and while transmitting,
+// so a letter is never swapped under a call (the UI asks again). PTT while the ring holds or waits on a letter talks
+// on that letter (air_talk_back: the one the user hears), else on the selected one as multi-watch does. DOTA and
+// cross-band end the air watch before they take the radio (air_session_end), and a scan the user starts ends it first
+// (air_scan_first): their own stops left sm->air set before (review M3, m9).
 enum { AIR_ATIS_HOLD_MS = 5000, AIR_ATIS_COOL_MS = 60000 };
+enum { AIR_K_AM, AIR_K_FM, AIR_K_DMR };
 
-// A VFO for an air frequency: a fresh VFO (FM, so AM in the air band), simplex
-static void air_vfo_fill(channel_t *c, uint32_t hz)
+// A VFO for letter request arg on hz: a fresh VFO (FM, so AM in the air band), simplex; a repeater's as listed
+static void air_vfo_fill(channel_t *c, uint32_t arg, uint32_t hz)
 {
 	vfo_defaults(c);
 	c->rx_hz = c->tx_hz = hz;
+	uint8_t kind = (uint8_t)((arg >> RADIO_AIR_KIND_SHIFT) & 3u), p = (uint8_t)((arg >> RADIO_AIR_P_SHIFT) & 0x3Fu);
+	if (kind == AIR_K_AM)
+		return;
+	int32_t off = (int32_t)arg >> RADIO_AIR_OFF_SHIFT;	// 1.25 kHz steps, signed
+	c->tx_hz = (uint32_t)((int32_t)hz + off * 1250);
+	if (kind == AIR_K_DMR) {
+		c->mode = RADIO_MODE_DMR;
+		c->color_code = (uint8_t)(p & 0x0Fu);
+		c->timeslot = (uint8_t)((p >> 4) == 2u ? 2u : 1u);
+		return;
+	}
+	c->mode = RADIO_MODE_FM;
+	c->bw = (arg & RADIO_AIR_NARROW) != 0 ? RADIO_BW_12K5 : RADIO_BW_25K;
+	if (p != 0 && p <= TONES_CTCSS_COUNT)
+		c->tx_tone = (subtone_t){ TONE_CTCSS, tones_ctcss[p - 1u] };	// the access tone; the RX tone stays off
+}
+
+// The ring holds a signal or waits after one (a letter the user hears)
+static bool air_held(const radio_sm_t *sm)
+{
+	return dual_running(sm) && (sm->scan.phase == SCAN_PH_HOLD || sm->scan.phase == SCAN_PH_RESUME);
 }
 
 // RREQ_AIR_VFO: VFO idx (0..5) takes hz. What the receiver is tuned to stays (the ring that follows tunes), unless
 // that VFO is on view: it is tuned again
-static void __attribute__((noinline)) air_vfo(radio_sm_t *sm, uint8_t idx, uint32_t hz, uint32_t now_ms)
+static void __attribute__((noinline)) air_vfo(radio_sm_t *sm, uint32_t arg, uint32_t hz, uint32_t now_ms)
 {
-	bool atis = (idx & RADIO_AIR_ATIS) != 0;
-	idx = (uint8_t)(idx & ~RADIO_AIR_ATIS);
-	if (idx >= RADIO_DUAL_SLOTS || !radio_am_band(hz) || !board_in_band(hz, false))
+	bool atis = (arg & RADIO_AIR_ATIS) != 0;
+	uint8_t idx = (uint8_t)(arg & 7u), kind = (uint8_t)((arg >> RADIO_AIR_KIND_SHIFT) & 3u);
+	if (idx >= RADIO_DUAL_SLOTS || kind > AIR_K_DMR || radio_am_band(hz) != (kind == AIR_K_AM) ||
+	    !board_in_band(hz, false))
 		return;
+	if ((arg & RADIO_AIR_REPLACE) != 0 && (!sm->air || air_held(sm)))
+		return;		// a refresh: never under a call (the UI asks again), never after the end
 	if (!sm->air) {
 		if (scan_on(&sm->scan))
 			scan_stop(sm, true, now_ms);	// a scan or the user's watch: back where it started (dual
@@ -43,27 +79,31 @@ static void __attribute__((noinline)) air_vfo(radio_sm_t *sm, uint8_t idx, uint3
 		sm->air_atis = 0;
 		sm->air_held_ms = 0;
 		sm->air_cool_ms = now_ms;		// nothing passed over yet
+		sm->air_talk = sm->vfo_talk_id | (sm->vfo_talk_private ? 0x80000000u : 0u);	// the user's DMR target
 	}
 	if (atis)
 		sm->air_atis |= (uint8_t)(1u << idx);
 	else
 		sm->air_atis &= (uint8_t)~(1u << idx);
+	sm->dual_keep[idx].valid = false;		// a letter that changed: its changes for now went with it
+	dual_busy_set(sm, (uint8_t)(sm->view.dual_busy & ~(1u << idx)));
+	uint32_t talk = kind == AIR_K_DMR ? sm->air_talk : 0;
 	channel_t c;
 	if (idx == vfox_in_use(sm)) {
-		air_vfo_fill(&sm->vfo_ch, hz);
+		air_vfo_fill(&sm->vfo_ch, arg, hz);
 		sm->vfo_seeded = true;
-		sm->vfo_talk_id = 0;
-		sm->vfo_talk_private = false;
+		sm->vfo_talk_id = talk & 0x7FFFFFFFu;
+		sm->vfo_talk_private = (talk & 0x80000000u) != 0;
 		vfox_retune(sm, now_ms);		// on view: tuned again (else only kept)
 		return;
 	}
-	air_vfo_fill(&c, hz);
+	air_vfo_fill(&c, arg, hz);
 	if (idx >= 2) {
-		vfox_slot_put(&sm->vfox_x[idx - 2u], &c, 0, true);
+		vfox_slot_put(&sm->vfox_x[idx - 2u], &c, talk, true);
 	} else if (sm->vfox_at >= 2 && idx == sm->vfo_idx) {
-		vfox_slot_put(&sm->vfox_park, &c, 0, true);	// A / B waiting while a C..F VFO is in use
+		vfox_slot_put(&sm->vfox_park, &c, talk, true);	// A / B waiting while a C..F VFO is in use
 	} else {
-		sm->vfo_other = (radio_vfo_t){ c, true, 0, false };
+		sm->vfo_other = (radio_vfo_t){ c, true, talk & 0x7FFFFFFFu, (talk & 0x80000000u) != 0 };
 	}
 	changed(sm);
 }
@@ -114,6 +154,38 @@ static void __attribute__((noinline)) air_end(radio_sm_t *sm, uint32_t now_ms)
 	changed(sm);
 }
 
+// DOTA / cross-band take the radio (dota_take, xb_take, before they tune): the air watch ends first as the user's stop
+// would, and the view counts the stop so the UI ends its side (its RREQ_AIR_END would be dropped during the session)
+static void air_session_end(radio_sm_t *sm, uint32_t now_ms)
+{
+	if (!sm->air)
+		return;
+	air_end(sm, now_ms);
+	sm->view.dual_stops++;
+}
+
+// A scan of the user's asked for (RREQ_SCAN: a zone, the VFO, dual watch) during the air watch: it ends first, so the
+// UI's RREQ_AIR_END that follows doesn't stop the new scan
+static void air_scan_first(radio_sm_t *sm, uint8_t what, uint32_t now_ms)
+{
+	if (sm->air && (what == RSCAN_ZONE || what == RSCAN_VFO || what == RSCAN_DUAL ||
+			(what == RSCAN_TOGGLE && !scan_on(&sm->scan))))
+		air_end(sm, now_ms);
+}
+
+// PTT (ptt_down, before dual_talk): while the ring holds a signal or waits after one, the letter heard is the one PTT
+// talks on (during a look, the one the look goes back to); the UI follows the radio's selection (mw_tick: "Talking on")
+static void air_talk_back(radio_sm_t *sm)
+{
+	if (!sm->air || !air_held(sm))
+		return;
+	uint8_t k = sm->dual_peek ? dual_back(sm) : sm->dual_at;
+	if (k < dual_count(sm)) {
+		sm->dual_sel = k;
+		sm->view.dual_sel = k;
+	}
+}
+
 // Every scan poll (scan_service, before the scan engine): the ring on an ATIS letter of the air watch. Passed over
 // while it cools (nothing heard: the ring's quiet stop); held AIR_ATIS_HOLD_MS (the hold and the wait after it, looks
 // and all): true, the ring goes on and every ATIS letter cools. Any other stop, or a new one, starts the time over
@@ -153,7 +225,7 @@ static void air_request(radio_sm_t *sm, const radio_req_t *req, uint32_t now_ms)
 	if (sm->view.state == RS_TX || sm->hotspot || sm->ptt)
 		return;
 	if (req->type == RREQ_AIR_VFO)
-		air_vfo(sm, (uint8_t)req->arg, req->arg2, now_ms);
+		air_vfo(sm, (uint32_t)req->arg, req->arg2, now_ms);
 	else
 		air_end(sm, now_ms);
 }

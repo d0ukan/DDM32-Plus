@@ -103,7 +103,17 @@ static void __attribute__((noinline)) mw_draw_row(const radio_view_t *v, const u
 	int x = x0;
 	if (r->vfo) {
 		sb_init(&b, buf, sizeof mw_buf);
-		sb_freq(&b, r->rx_hz);
+		// DDM32 Plus auto scan: the letter's label ("TA2XYZ 12km", "LTBA TWR"); line 2 has the frequency, one line
+		// both
+		if (r->name != NULL && r->name[0] != '\0') {
+			sb_str(&b, r->name);
+			if (!two) {
+				sb_chr(&b, ' ');
+				sb_freq(&b, r->rx_hz);
+			}
+		} else {
+			sb_freq(&b, r->rx_hz);
+		}
 		gfx_text_fit(nf, buf, x_end - x, fit, sizeof mw_fit);
 		gfx_text(nf, x, base, fit, fg);
 	} else {

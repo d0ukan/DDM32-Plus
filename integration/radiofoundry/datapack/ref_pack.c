@@ -278,6 +278,12 @@ static void sync(void)
 	dir.pa = pa;
 }
 
+uint32_t ref_seq(void)
+{
+	sync();
+	return dir.pa != 0u ? dir.seq : 0u;
+}
+
 bool ref_has(uint8_t feature)
 {
 	sync();

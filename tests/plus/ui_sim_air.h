@@ -14,12 +14,18 @@ typedef struct {
 	int vfo_calls, end_calls;
 	uint32_t hz[6];
 	uint8_t atis;			/* the VFOs asked for as an ATIS (UI_AIR_ATIS) */
+	uint32_t arg[6];		/* each VFO's last request bits (DDM32 Plus auto scan: UI_AIR_*) */
+	int replaced, refused;		/* refreshes (UI_AIR_REPLACE) taken, refused */
+	uint8_t gps;			/* ui_svc_position: AIR_GPS_* */
 } air_sim_t;
+enum { AIR_GPS_DEFAULT, AIR_GPS_OFF, AIR_GPS_NOFIX, AIR_GPS_FIX };	/* DEFAULT: the simulator's own (a fix) */
 
 extern air_sim_t air_sim;
 
 void air_sim_setup(void);			/* after sim_reset: AM receive */
 void air_sim_state(radio_state_t st);		/* the radio's state (RS_TX: transmitting) */
+void air_sim_session(void);			/* DOTA / cross-band ends the air watch in the radio core */
+void air_sim_phase(uint8_t phase);		/* the scan's phase (SCAN_PH_HOLD: the ring holds a signal) */
 uint32_t air_sim_vfo_hz(uint8_t idx);		/* VFO idx's frequency as the simulated radio keeps it */
 
 #endif

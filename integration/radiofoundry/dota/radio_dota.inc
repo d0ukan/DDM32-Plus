@@ -58,6 +58,11 @@ static void dota_take(radio_sm_t *sm, uint32_t now_ms)
 	}
 	aprs_rf_abort(sm, now_ms);
 	roam_cancel(sm, now_ms);
+#if CONFIG_AIR_WATCH
+	/* the air watch / auto scan ends first, as the user's stop would (its own RREQ_AIR_END is dropped during the
+	 * session: sm->air stayed set, review M3); the UI follows the counted stop */
+	air_session_end(sm, now_ms);
+#endif
 #if CONFIG_SCAN
 	/* dual / multi-watch: it ends on the selected letter (the one with PTT; reload() puts it back after the session),
 	 * not the letter the ring is on */

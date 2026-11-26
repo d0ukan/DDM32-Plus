@@ -786,3 +786,11 @@ __pycache__/
 !/tests/plus/refpack_dump.c
 !/tests/plus/test_refpack.c
 !/tests/plus/xband_rpt_freqs.c
+# auto airfield scan and auto repeater scan (branch autoscan, docs/autoscan-design.md)
+!/docs/autoscan-design.md
+!/integration/radiofoundry/map/autoscan.c
+!/integration/radiofoundry/map/autoscan.h
+!/integration/radiofoundry/map/ui_autoscan.c
+!/tools/plus_autoscan.py
+!/tools/test_autoscan.py
+!/tests/plus/test_autoscan.c

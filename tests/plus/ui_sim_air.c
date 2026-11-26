@@ -6,10 +6,14 @@
  * stops on its selected channel), each VFO takes its frequency as a fresh FM VFO, the end stops the ring and brings
  * the kept ones back. */
 #define sim_reset sim_base_reset	/* refpack_sim.inc: every reset gets the map pack */
+#define ui_svc_position sim_base_position	/* the test's GPS position (air_sim.gps) */
 #include "sim/ui_sim.c"
 #undef sim_reset
+#undef ui_svc_position
 #include "refpack_sim.inc"
 #include "ui_sim_air.h"
+#include "radio/scan.h"
+#include "radio/tones.h"
 
 air_sim_t air_sim;
 
@@ -34,6 +38,12 @@ void air_sim_state(radio_state_t st)
 	changed();
 }
 
+void air_sim_phase(uint8_t phase)
+{
+	view.scan_phase = phase;
+	changed();
+}
+
 #if CONFIG_AIR_WATCH
 static struct {
 	bool kept;
@@ -54,13 +64,23 @@ uint32_t air_sim_vfo_hz(uint8_t idx)
 	return c.rx_hz;
 }
 
-void ui_svc_air_vfo(uint8_t idx, uint32_t hz)
+void ui_svc_air_vfo(uint32_t arg, uint32_t hz)
 {
 	air_sim.vfo_calls++;
-	bool atis = (idx & UI_AIR_ATIS) != 0;
-	idx = (uint8_t)(idx & ~UI_AIR_ATIS);
+	bool atis = (arg & UI_AIR_ATIS) != 0;
+	uint8_t idx = (uint8_t)(arg & 7u);
 	if (idx >= 6)
 		return;
+	air_sim.arg[idx] = arg;
+	/* DDM32 Plus auto scan: a refresh is refused under a call, its wait and a transmission, and after the end, as the
+	 * radio core does (radio_airwatch.inc) */
+	if ((arg & UI_AIR_REPLACE) != 0 && (!air_kept.kept || view.state == RS_TX ||
+					      (view.scan == 3 && (view.scan_phase == SCAN_PH_HOLD ||
+								  view.scan_phase == SCAN_PH_RESUME)))) {
+		air_sim.refused++;
+		return;
+	}
+	air_sim.replaced += (arg & UI_AIR_REPLACE) != 0;
 	air_sim.hz[idx] = hz;
 	air_sim.atis = (uint8_t)(atis ? air_sim.atis | 1u << idx : air_sim.atis & ~(1u << idx));
 	if (!air_kept.kept) {
@@ -86,6 +106,19 @@ void ui_svc_air_vfo(uint8_t idx, uint32_t hz)
 		air_kept.pos = view.zone_pos;
 	}
 	sim_vfo_t f = { RADIO_MODE_FM, 1, 1, RADIO_BW_12K5, hz, hz, 0, { TONE_NONE, 0 }, { TONE_NONE, 0 }, false };
+	if ((arg & (UI_AIR_FM | UI_AIR_DMR)) != 0) {	/* a repeater letter as listed (radio_airwatch.inc air_vfo_fill) */
+		uint8_t p = (uint8_t)((arg >> UI_AIR_P_SHIFT) & 0x3Fu);
+		f.tx_hz = (uint32_t)((int32_t)hz + ((int32_t)arg >> UI_AIR_OFF_SHIFT) * 1250);
+		if ((arg & UI_AIR_DMR) != 0) {
+			f.mode = RADIO_MODE_DMR;
+			f.cc = (uint8_t)(p & 0x0Fu);
+			f.ts = (uint8_t)((p >> 4) == 2u ? 2u : 1u);
+		} else {
+			f.bw = (arg & UI_AIR_NARROW) != 0 ? RADIO_BW_12K5 : RADIO_BW_25K;
+			if (p != 0 && p <= TONES_CTCSS_COUNT)
+				f.tx_tone = (subtone_t){ TONE_CTCSS, tones_ctcss[p - 1u] };
+		}
+	}
 	sim_vx_ok[idx] = false;
 	if (idx == view.vfo_index) {
 		vfo_mode = f.mode;
@@ -140,7 +173,41 @@ void ui_svc_air_end(void)
 	}
 	changed();
 }
+
+/* DOTA or cross-band takes the radio during the air watch (radio_airwatch.inc air_session_end): the radio core ends it
+ * itself and counts the stop (view.dual_stops); the UI's own end that follows is dropped (not counted here) */
+void air_sim_session(void)
+{
+	if (!air_kept.kept)
+		return;
+	ui_svc_air_end();
+	air_sim.end_calls--;
+	view.dual_stops++;
+	changed();
+}
 #endif
+
+#if CONFIG_REPEATERS
+/* Tools > Repeaters' tune (ui_rpt.c, linked beside the auto scan): not used by these flows */
+void radio_req_mode(uint8_t mode) { (void)mode; }
+void radio_req_dmr_color_code(uint8_t cc) { (void)cc; }
+void radio_req_dmr_timeslot(uint8_t ts) { (void)ts; }
+#endif
+
+/* The GPS (the auto scan): off (no GPS), no fix yet, or a fix at air_sim.lat_e7 / lon_e7 */
+bool ui_svc_position(ui_position_t *out)
+{
+	if (air_sim.gps == AIR_GPS_DEFAULT)
+		return sim_base_position(out);
+	memset(out, 0, sizeof *out);
+	if (air_sim.gps == AIR_GPS_OFF)
+		return false;
+	out->fix = air_sim.gps == AIR_GPS_FIX;
+	out->lat_e7 = out->fix ? air_sim.lat_e7 : 0;
+	out->lon_e7 = out->fix ? air_sim.lon_e7 : 0;
+	out->sats = out->fix ? 9 : 0;
+	return true;
+}
 
 /* The position APRS uses (Tools > Airfields' order) */
 bool aprs_position_now(int32_t *lat, int32_t *lon, uint32_t *err_m, bool *dmr_gps)

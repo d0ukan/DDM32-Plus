@@ -26,7 +26,7 @@ static void air_req(uint8_t type, int32_t arg, uint32_t arg2)
     }
     CHECK(!"the native receiver never let go");
 }
-void radio_req_air_vfo(uint8_t idx, uint32_t hz) { air_req(RREQ_AIR_VFO, idx, hz); }
+void radio_req_air_vfo(uint32_t arg, uint32_t hz) { air_req(RREQ_AIR_VFO, (int32_t)arg, hz); }
 void radio_req_air_end(void) { air_req(RREQ_AIR_END, 0, 0); }
 
 /* The fake board's demodulator as the DM-32's (radio_dm32.c rx_tune): rx() plays FM, rx_am() AM, and AM is refused
@@ -226,7 +226,7 @@ static void test_air_atis(void)
     air_user();
     radio_dual_ref_t r[RADIO_DUAL_SLOTS];
     for (uint8_t k = 0; k < 4; k++) {
-        radio_req_air_vfo((uint8_t)(k | (k == 3 ? RADIO_AIR_ATIS : 0u)), hz[k]);
+        radio_req_air_vfo(k | (k == 3 ? RADIO_AIR_ATIS : 0u), hz[k]);
         r[k] = (radio_dual_ref_t){ true, 0, k };
     }
     radio_req_mwatch(r, 4, 0);
@@ -328,6 +328,213 @@ static void test_air_search_refused(void)
 #endif
 }
 
+/* ---- DDM32 Plus auto scan (docs/autoscan-design.md): repeater letters, PTT on the letter heard, the refresh's
+ * replacement refused under a call, the ends DOTA / cross-band and a user's scan cause ---- */
+
+static uint8_t as_tone(uint16_t ctcss10)
+{
+    for (uint8_t i = 0; i < TONES_CTCSS_COUNT; i++)
+        if (tones_ctcss[i] == ctcss10)
+            return (uint8_t)(i + 1u);
+    return 0;
+}
+
+static uint32_t as_off(int32_t hz)
+{
+    return ((uint32_t)(hz / 1250) & 0x3FFFFu) << RADIO_AIR_OFF_SHIFT;
+}
+
+/* The letters: A FM 145.600 -600 kHz 88.5 Hz narrow; B FM 438.700 -7.6 MHz no tone, wide; C DMR 438.425 -7.6 MHz CC 3
+ * slot 2; D FM 145.650 whose input (105.65 MHz) is outside the bands */
+static const uint32_t as_rx[4] = { 145600000, 438700000, 438425000, 145650000 };
+static uint32_t as_bits(uint8_t k)
+{
+    switch (k) {
+    case 0: return RADIO_AIR_FM | RADIO_AIR_NARROW | (uint32_t)as_tone(885) << RADIO_AIR_P_SHIFT | as_off(-600000);
+    case 1: return RADIO_AIR_FM | as_off(-7600000);
+    case 2: return RADIO_AIR_DMR | (3u | 2u << 4) << RADIO_AIR_P_SHIFT | as_off(-7600000);
+    default: return RADIO_AIR_FM | as_off(-40000000);
+    }
+}
+
+/* VFO k's RX as the radio keeps it (the one in use: vfo_ch; C..F: their slots) */
+static uint32_t as_vfo_hz(uint8_t k)
+{
+    uint8_t in_use = sm.vfox_at >= 2 ? sm.vfox_at : sm.vfo_idx;
+    if (k == in_use)
+        return sm.vfo_ch.rx_hz;
+    if (k >= 2)
+        return sm.vfox_x[k - 2u].rx_hz;
+    return sm.vfox_at >= 2 && k == sm.vfo_idx ? sm.vfox_park.rx_hz : sm.vfo_other.ch.rx_hz;
+}
+
+static void as_start(uint8_t n, const uint32_t hz[], uint32_t (*bits)(uint8_t))
+{
+    radio_dual_ref_t r[RADIO_DUAL_SLOTS];
+    for (uint8_t k = 0; k < n; k++) {
+        radio_req_air_vfo(k | bits(k), hz[k]);
+        r[k] = (radio_dual_ref_t){ true, 0, k };
+    }
+    radio_req_mwatch(r, n, 0);
+}
+
+static void test_auto_repeater_letters(void)
+{
+    air_user();
+    sm.vfo_talk_id = 2862;	/* the user's DMR VFO target: a DMR letter talks to it */
+    as_start(4, as_rx, as_bits);
+    CHECK(sm.air && sm.scan.kind == SCAN_DUAL && sm.dual_n == 4);
+    unsigned seen = 0;
+    for (int i = 0; i < 400 && seen != 0xFu; i++) {
+        mw_poll();
+        uint8_t k = sm.dual_at;
+        if (sm.scan.kind != SCAN_DUAL || k >= 4 || sm.view.ch.rx_hz != as_rx[k])
+            continue;
+        const channel_t *c = &sm.view.ch;
+        CHECK(sm.view.vfo && !sm.view.am && !air_board_am && hw.rx_hz == as_rx[k]);
+        CHECK(c->rx_tone.type == TONE_NONE);	/* the list's tone is the access tone: never a receive filter */
+        if (k == 0)
+            CHECK(c->mode == RADIO_MODE_FM && c->bw == RADIO_BW_12K5 && c->tx_hz == 145000000 &&
+                  c->tx_tone.type == TONE_CTCSS && c->tx_tone.value == 885 && radio_sm_tx_check(&sm) == TXDENY_NONE);
+        else if (k == 1)
+            CHECK(c->mode == RADIO_MODE_FM && c->bw == RADIO_BW_25K && c->tx_hz == 431100000 &&
+                  c->tx_tone.type == TONE_NONE && radio_sm_tx_check(&sm) == TXDENY_NONE);
+        else if (k == 2)
+            CHECK(c->mode == RADIO_MODE_DMR && c->color_code == 3 && c->timeslot == 2 && c->tx_hz == 430825000 &&
+                  sm.vfo_talk_id == 2862 && radio_sm_tx_check(&sm) != TXDENY_MODE);
+        else	/* the input outside the bands: the band check refuses it, as on any VFO (no rule of the scan's) */
+            CHECK(c->mode == RADIO_MODE_FM && c->tx_hz == 105650000 && radio_sm_tx_check(&sm) != TXDENY_NONE);
+        seen |= 1u << k;
+    }
+    CHECK(seen == 0xFu);
+    radio_req_air_end();
+    CHECK(!sm.air && sm.scan.kind == SCAN_OFF && !sm.view.vfo && sm.view.zone_pos == 2 && air_noted_as_before());
+    CHECK(sm.vfo_ch.rx_hz == 145500000 && sm.vfo_ch.mode == RADIO_MODE_FM);
+    printf("Plus auto scan: FM and DMR repeater letters as listed (input, access tone, CC and slot, the user's DMR "
+           "target), an input outside the bands refused by the band check, the end as the air watch's\n");
+}
+
+/* Four FM letters in the 70 cm band, simplex (the fake board's FM receiver: mw_poll's signal) */
+static const uint32_t as_fm[4] = { 446006250, 446018750, 446031250, 446043750 };
+static uint32_t as_fm_bits(uint8_t k) { (void)k; return RADIO_AIR_FM; }
+
+/* PTT while the ring holds or waits on a letter talks there (B1); with nothing heard, on the selected letter */
+static void test_auto_talk_back(void)
+{
+    air_user();
+    as_start(4, as_fm, as_fm_bits);
+    CHECK(sm.air && sm.dual_sel == 0);
+    /* A call on C: held; PTT talks on C, not on A */
+    mw_busy_hz = as_fm[2];
+    CHECK(mw_until_at(2, 2000));
+    for (int i = 0; i < 20; i++)
+        mw_poll();
+    CHECK(sm.scan.phase == SCAN_PH_HOLD && sm.dual_at == 2);
+    mw_busy_hz = 0;
+    int tx = hw.tx_calls;
+    req(RREQ_PTT, 1);
+    CHECK(sm.view.state == RS_TX && hw.tx_calls == tx + 1 && hw.tx_hz == as_fm[2] && sm.dual_sel == 2 &&
+          sm.view.dual_sel == 2);
+    for (int i = 0; i < 20; i++)
+        mw_poll();
+    req(RREQ_PTT, 0);
+    CHECK(sm.view.state != RS_TX && sm.scan.kind == SCAN_DUAL && sm.air);
+    /* In the wait after a call on B (the hang time): PTT talks on B */
+    mw_busy_hz = as_fm[1];
+    for (int i = 0; i < 400 && !(sm.dual_at == 1 && sm.scan.phase == SCAN_PH_HOLD && !sm.dual_peek); i++)
+        mw_poll();	/* (a look from C's wait finds B busy first; the ring holds on B once the wait ends) */
+    CHECK(sm.dual_at == 1 && sm.scan.phase == SCAN_PH_HOLD && !sm.dual_peek);
+    for (int i = 0; i < 20; i++)
+        mw_poll();
+    mw_busy_hz = 0;
+    for (int i = 0; i < 40 && sm.scan.phase != SCAN_PH_RESUME; i++)
+        mw_poll();
+    CHECK(sm.scan.phase == SCAN_PH_RESUME);
+    tx = hw.tx_calls;
+    uint8_t at = sm.dual_at, home = sm.dual_home;
+    bool peek = sm.dual_peek;
+    req(RREQ_PTT, 1);
+    if (!(sm.view.state == RS_TX && hw.tx_calls == tx + 1 && hw.tx_hz == as_fm[1] && sm.dual_sel == 1))
+        printf("  (hang: state %d tx %d/%d hz %u sel %u at %u home %u peek %d)\n", sm.view.state, hw.tx_calls, tx,
+               (unsigned)hw.tx_hz, sm.dual_sel, at, home, peek);
+    CHECK(sm.view.state == RS_TX && hw.tx_calls == tx + 1 && hw.tx_hz == as_fm[1] && sm.dual_sel == 1);
+    req(RREQ_PTT, 0);
+    /* Nothing heard (the ring going round): on the selected letter (B now), tuned first, as multi-watch does */
+    for (int i = 0; i < 400 && (sm.scan.phase != SCAN_PH_LISTEN || sm.dual_at == 1); i++)
+        mw_poll();
+    CHECK(sm.scan.phase == SCAN_PH_LISTEN && sm.dual_at != 1);
+    tx = hw.tx_calls;
+    req(RREQ_PTT, 1);
+    if (!(sm.view.state == RS_TX && hw.tx_calls == tx + 1 && hw.tx_hz == as_fm[1] && sm.dual_sel == 1))
+        printf("  (quiet: state %d tx %d/%d hz %u sel %u at %u phase %u)\n", sm.view.state, hw.tx_calls, tx,
+               (unsigned)hw.tx_hz, sm.dual_sel, sm.dual_at, sm.scan.phase);
+    CHECK(sm.view.state == RS_TX && hw.tx_calls == tx + 1 && hw.tx_hz == as_fm[1] && sm.dual_sel == 1);
+    req(RREQ_PTT, 0);
+    radio_req_air_end();
+    CHECK(!sm.air && air_noted_as_before());
+    printf("Plus auto scan: PTT on the letter held or waited on (C, then B in its hang time), else on the selected one\n");
+}
+
+/* A refresh's replacement (RADIO_AIR_REPLACE): refused under a call, its wait and a transmission; taken once quiet;
+ * refused after the end (it never starts an air state) */
+static void test_auto_replace(void)
+{
+    air_user();
+    as_start(3, as_fm, as_fm_bits);
+    mw_busy_hz = as_fm[1];
+    CHECK(mw_until_at(1, 2000));
+    for (int i = 0; i < 10; i++)
+        mw_poll();
+    CHECK(sm.scan.phase == SCAN_PH_HOLD);
+    radio_req_air_vfo(2u | RADIO_AIR_FM | RADIO_AIR_REPLACE, 446056250);
+    radio_req_air_vfo(1u | RADIO_AIR_FM | RADIO_AIR_REPLACE, 446056250);
+    CHECK(as_vfo_hz(2) == as_fm[2] && sm.view.ch.rx_hz == as_fm[1] && hw.rx_hz == as_fm[1]);
+    mw_busy_hz = 0;
+    for (int i = 0; i < 40 && sm.scan.phase != SCAN_PH_RESUME; i++)
+        mw_poll();
+    CHECK(sm.scan.phase == SCAN_PH_RESUME);
+    radio_req_air_vfo(2u | RADIO_AIR_FM | RADIO_AIR_REPLACE, 446056250);
+    CHECK(as_vfo_hz(2) == as_fm[2]);
+    for (int i = 0; i < 400 && sm.scan.phase != SCAN_PH_LISTEN; i++)
+        mw_poll();
+    CHECK(sm.scan.phase == SCAN_PH_LISTEN);
+    sm.view.state = RS_TX;
+    radio_req_air_vfo(2u | RADIO_AIR_FM | RADIO_AIR_REPLACE, 446056250);
+    sm.view.state = RS_IDLE;
+    CHECK(as_vfo_hz(2) == as_fm[2]);
+    radio_req_air_vfo(2u | RADIO_AIR_FM | RADIO_AIR_REPLACE, 446056250);
+    CHECK(as_vfo_hz(2) == 446056250 && sm.air && sm.dual_n == 3);
+    bool visited = false;
+    for (int i = 0; i < 200 && !visited; i++) {
+        mw_poll();
+        visited = sm.dual_at == 2 && hw.rx_hz == 446056250;
+    }
+    CHECK(visited);
+    radio_req_air_end();
+    radio_req_air_vfo(0u | RADIO_AIR_FM | RADIO_AIR_REPLACE, 446056250);
+    CHECK(!sm.air && sm.vfo_ch.rx_hz == 145500000 && air_noted_as_before());
+    printf("Plus auto scan: a refresh's replacement refused under a call, its wait and TX, taken once quiet\n");
+}
+
+/* Review m9: a zone scan asked for during the air watch ends it first, so the UI's end after it leaves the scan
+ * running (DOTA and cross-band end it the same way before they take the radio, air_session_end: this fixture builds
+ * neither, tools/test_autoscan.py checks their calls) */
+static void test_auto_ends(void)
+{
+    air_user();
+    air_start(3);
+    CHECK(sm.air);
+    req(RREQ_SCAN, RSCAN_ZONE);
+    CHECK(!sm.air && sm.scan.kind == SCAN_ZONE);
+    radio_req_air_end();
+    for (int i = 0; i < 20; i++)
+        mw_poll();
+    CHECK(sm.scan.kind == SCAN_ZONE && !sm.air);
+    req(RREQ_SCAN, RSCAN_CANCEL);
+    CHECK(sm.scan.kind == SCAN_OFF && !sm.air);
+    printf("Plus auto scan: a zone scan asked for during the air watch ends it first and survives the UI's end\n");
+}
+
 int main(void)
 {
     int prior = vfox_radio_main();
@@ -337,6 +544,10 @@ int main(void)
     test_air_atis();
     test_air_refused();
     test_air_search_refused();
+    test_auto_repeater_letters();
+    test_auto_talk_back();
+    test_auto_replace();
+    test_auto_ends();
     printf("Plus air watch, radio core: %d failures\n", failures - before);
     return prior || failures != before ? 1 : 0;
 }

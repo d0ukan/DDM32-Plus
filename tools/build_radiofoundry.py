@@ -733,6 +733,7 @@ def main():
         "CONFIG_APRS_MICE="+("y" if args.plus else "n"),	# DDM32 Plus Mic-E beacons (round 14 item 47)
         "CONFIG_APRS_STATION="+("y" if args.plus else "n"),	# DDM32 Plus APRS station page (round 14 item 49)
         "CONFIG_AIR_WATCH="+("y" if args.plus else "n"),	# DDM32 Plus air watch (item 44b, tools/plus_air.py)
+        "CONFIG_AUTO_SCAN="+("y" if args.plus else "n"),	# DDM32 Plus auto airfield / repeater scan (tools/plus_autoscan.py)
         "CONFIG_SPECTRUM_WF3D="+("y" if args.plus else "n"),	# DDM32 Plus 3D waterfall (item 45, tools/plus_air.py)
         "CONFIG_DATAPACK="+("y" if args.plus else "n"),	# DDM32 Plus user data packs (docs/r14.md 7)
         "CONFIG_LAST_CALLS="+("y" if args.plus else "n"),	# DDM32 Plus last calls (docs/plus.md, item 43)

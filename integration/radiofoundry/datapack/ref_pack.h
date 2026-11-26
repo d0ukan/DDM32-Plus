@@ -52,6 +52,8 @@ uint8_t ref_validate(uint32_t pa, uint32_t len, uint16_t flags);
 
 /* --- UI task only --- */
 bool ref_has(uint8_t feature);
+/* The pack in force's sequence (0: none): a new pack (CPS close, a DOTA commit) has another (DDM32 Plus auto scan) */
+uint32_t ref_seq(void);
 uint16_t ref_count(uint8_t id);		/* a section's count, 0 without it (also reloads like ref_has) */
 /* Record i of a section, whole (the record window) */
 bool ref_rec(uint8_t id, uint32_t i, void *out);
