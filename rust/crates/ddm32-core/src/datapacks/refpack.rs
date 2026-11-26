@@ -681,7 +681,7 @@ pub enum SlotChoice {
 }
 
 /// The refusal when both slots may be the running firmware's: why, and what the user can do.
-pub const BOTH_IN_USE: &str = "both map slots may be in use by the running firmware; nothing is written. The program      does not know the map pack id of the radio's firmware version: check for updates online (the release list names      the ids) and try again, or install the firmware again first";
+pub const BOTH_IN_USE: &str = "both map slots may be in use by the running firmware; nothing is written. The program does not know the map pack id of the radio's firmware version: check for updates online (the release list names the ids) and try again, or install the firmware again first";
 
 /// The code of the refusal when the only slot left would destroy a RadioID pack over 192 KB (its tail lies in that
 /// map slot); the tool writes it only with --allow-radioid-loss.
