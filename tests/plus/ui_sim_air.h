@@ -16,6 +16,8 @@ typedef struct {
 	uint8_t atis;			/* the VFOs asked for as an ATIS (UI_AIR_ATIS) */
 	uint32_t arg[6];		/* each VFO's last request bits (DDM32 Plus auto scan: UI_AIR_*) */
 	int replaced, refused;		/* refreshes (UI_AIR_REPLACE) taken, refused */
+	int refuse;			/* the next this many refreshes refused anyway (the ring held by the time the radio core
+				 * read them, after the UI saw it quiet) */
 	uint8_t gps;			/* ui_svc_position: AIR_GPS_* */
 } air_sim_t;
 enum { AIR_GPS_DEFAULT, AIR_GPS_OFF, AIR_GPS_NOFIX, AIR_GPS_FIX };	/* DEFAULT: the simulator's own (a fix) */

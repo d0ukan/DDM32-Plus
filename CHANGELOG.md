@@ -14,8 +14,8 @@ Host-tested only; not yet run on the radio (docs/plus-radio-test.md AS1 ... AS12
   30 s at most, after 1 km / 3 km, never during a call). PTT during a call or its hang time talks on the letter you
   hear; otherwise on the selected one. FM letters transmit to the repeater's input with its access tone, DMR letters
   on the listed slot to your DMR VFO talk group; air letters stay receive only. Off at power on.
-- **Tool numbers**: Air scan is 42 and Repeater scan 43; Battery moves from 41 to 43. A hold key stored as Battery now
-  opens Air scan: set it again in Settings > Keys.
+- **Tool numbers**: Air scan is 42 and Repeater scan 43, after Battery; every other tool keeps its number, so a stored
+  hold key keeps its tool.
 - **Fixes** (air watch and multi-watch): DOTA and cross-band started during an airfield watch left the radio in the
   air state until a power cycle (nothing noted, the beacon and satellite hold refused); a zone scan started during it
   could be stopped again by the watch's end; on a mixed FM / DMR ring the first DMR letter after an FM one lost most of

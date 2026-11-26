@@ -74,6 +74,11 @@ void ui_svc_air_vfo(uint32_t arg, uint32_t hz)
 	air_sim.arg[idx] = arg;
 	/* DDM32 Plus auto scan: a refresh is refused under a call, its wait and a transmission, and after the end, as the
 	 * radio core does (radio_airwatch.inc) */
+	if ((arg & UI_AIR_REPLACE) != 0 && air_sim.refuse > 0) {
+		air_sim.refuse--;
+		air_sim.refused++;
+		return;
+	}
 	if ((arg & UI_AIR_REPLACE) != 0 && (!air_kept.kept || view.state == RS_TX ||
 					      (view.scan == 3 && (view.scan_phase == SCAN_PH_HOLD ||
 								  view.scan_phase == SCAN_PH_RESUME)))) {
@@ -125,9 +130,11 @@ void ui_svc_air_vfo(uint32_t arg, uint32_t hz)
 		vfo_cc = f.cc;
 		vfo_ts = f.ts;
 		vfo_bw = f.bw;
-		vfo_rx_hz = vfo_tx_hz = hz;
+		vfo_rx_hz = hz;
+		vfo_tx_hz = f.tx_hz;	/* the whole letter, as air_vfo_fill fills vfo_ch (a repeater's split and tone) */
 		vfo_talk = 0;
-		vfo_rx_tone = vfo_tx_tone = f.rx_tone;
+		vfo_rx_tone = f.rx_tone;
+		vfo_tx_tone = f.tx_tone;
 		vfo_talk_private = false;
 		if (view.vfo)
 			sim_vfo(true);

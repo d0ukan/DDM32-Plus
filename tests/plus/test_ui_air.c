@@ -485,6 +485,40 @@ static void as_move(void)
 	layout();
 }
 
+/* A refresh the radio core refused (the ring held by the time it read it, after the UI saw it quiet): asked again until
+ * the letter's VFO is the whole letter (RX, TX, mode, tone, colour code and slot), not only its RX: two repeaters often
+ * share an output (verifier fix) */
+static void as_retry(void)
+{
+	start("AS refused refresh asked again");
+	gps(39.9208, 32.8541);
+	ui_autoscan_toggle(AS_RPT);
+	run("wait:1500");
+	check(ui_dual_ring() >= 3, "a ring");
+	air_sim.refuse = 64;	/* every refresh of the move refused */
+	gps(39.7767, 30.5206);
+	run("wait:31000");
+	int refused = air_sim.refused;
+	check(refused > 0, "the refresh refused");
+	air_sim.refuse = 0;
+	run("wait:3000");
+	check(air_sim.replaced > 0, "asked again and taken");
+	for (uint8_t k = 0; k < ui_dual_ring(); k++) {
+		channel_t c;
+		uint32_t a = air_sim.arg[k], hz = air_sim.hz[k];
+		uint8_t p = (uint8_t)((a >> UI_AIR_P_SHIFT) & 0x3Fu);
+		ui_svc_vfo_get(k, &c);
+		bool dmr = (a & UI_AIR_DMR) != 0;
+		check(c.rx_hz == hz && c.tx_hz == (uint32_t)((int32_t)hz + ((int32_t)a >> UI_AIR_OFF_SHIFT) * 1250) &&
+			      c.mode == (dmr ? RADIO_MODE_DMR : RADIO_MODE_FM) &&
+			      (dmr ? c.color_code == (p & 0x0Fu) : (p == 0) == (c.tx_tone.type == TONE_NONE)),
+		      "each letter whole on its VFO");
+	}
+	int calls = air_sim.vfo_calls;
+	run("wait:3000");
+	check(air_sim.vfo_calls == calls, "nothing asked once taken");
+}
+
 /* None within 60 km: no ring, the user's state as it was, the scan waits; one only: the same; then a place with more:
  * the ring */
 static void as_few(void)
@@ -603,7 +637,7 @@ static const case_fn all[] = {
 	aw_watch, aw_four, aw_stop, aw_user_ring, aw_pair, aw_one, aw_refused, aw_reboot,
 #endif
 #if CONFIG_AUTO_SCAN
-	as_rpt, as_move, as_few, as_gps, as_air, as_pack, as_session,
+	as_rpt, as_move, as_retry, as_few, as_gps, as_air, as_pack, as_session,
 #endif
 };
 

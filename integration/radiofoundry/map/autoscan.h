@@ -96,7 +96,7 @@ void ui_autoscan_ended(void);		/* the ring stopped some other way (the user, DOT
 bool ui_dual_auto_ring(const uint32_t hz[], const uint32_t arg[], uint8_t n, uint8_t kind);
 void ui_dual_auto_set(uint8_t k, uint32_t hz, uint32_t arg);	/* letter k replaced (UI_AIR_REPLACE) */
 void ui_dual_auto_label(uint8_t k, const char *label);	/* Home's label of letter k */
-bool ui_dual_auto_has(uint8_t k, uint32_t hz);		/* the radio's VFO k is on hz */
+bool ui_dual_auto_has(uint8_t k, uint32_t hz, uint32_t arg);	/* the radio's VFO k is letter (hz, arg): RX, TX, tone ... */
 void ui_dual_auto_end(void);	/* the scan's own end (fewer than two letters, map pack gone): the user's watch back */
 uint8_t ui_dual_auto_kind(void);	/* the scan kind the ring runs for, AS_OFF none (or the airfield watch) */
 #endif

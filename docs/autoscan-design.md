@@ -13,7 +13,7 @@ nearest repeaters (FM, DMR; NXDN if possible), the list following the position w
 | Item | Decision |
 |---|---|
 | Engine | **No new scan engine.** Both scans fill the existing **multi-watch ring** (A..F, each its own VFO) through the generalised **air watch** path: the radio core keeps and restores the user's state, saves nothing during it, holds a letter on a signal and waits the Dual watch delay |
-| Start | Two Tools entries, **Air scan** / **Repeater scan** (after ISS: Battery and the zone offer move two on), On / Off as a value, OK toggles; or a **held digit** (Settings > Keys). No digit by default. A held digit set to a scan works on a VFO too (not while typing a frequency) |
+| Start | Two Tools entries, **Air scan** / **Repeater scan** (after Battery: no stored hold code moves), On / Off as a value, OK toggles; or a **held digit** (Settings > Keys). No digit by default. A held digit set to a scan works on a VFO too (not while typing a frequency) |
 | Selection | 6 nearest; repeaters FM + DMR within **60 km**; airfields within **100 km**, their frequencies round robin (TWR, APP / DEP, AFIS / INFO / CTAF, GND, the rest), **ATIS left out** |
 | Refresh | Once a second the UI looks; a refresh at the first fix, then every 30 s at most and only after moving 1 km (repeaters) / 3 km (air). A letter goes when beyond 110 % of the radius or a candidate is 20 % and 2 km nearer than the farthest letter. Never while a call comes in, the ring holds a signal or waits after one, or the radio transmits |
 | PTT | While the ring holds or waits on a letter, **PTT talks on that letter** (the one heard); otherwise the selected letter as in multi-watch. FM: the listed input and access tone (as Tools > Repeaters "tune"); DMR: the listed slot (unknown / both: 1) and the user's DMR VFO talk target; air: refused as before (TXDENY_AM). No new TX or band rule |
@@ -60,8 +60,8 @@ no RAN. Later: a generator change (RAN in the `dmr` byte for NXDN rows) and a th
 - Tools > **Air scan** ("Hava tarama", shown on AM-capable radios) and **Repeater scan** ("Röle tarama"): the value
   says On / Off; OK toggles and goes to Home. Starting one ends the other (and an airfield's Watch all).
 - Settings > Keys: a digit can hold either (none by default). It works on a channel and on a VFO (the scan's letters
-  are VFOs), not while a frequency is being typed. **Note:** the two new Tools numbers (42, 43) move Battery from 41
-  to 43: a hold key stored as Battery now opens Air scan (as the ISS moved it before).
+  are VFOs), not while a frequency is being typed. The two new Tools numbers (42, 43) come after Battery (41,
+  unchanged), so a stored hold key keeps its tool (verifier fix; they were before it first).
 - Refused with a toast: no map pack or none of the kind ("No repeater data: load the map pack" / the airfield twin);
   no GPS or GPS off in Settings ("GPS is off: switch it on in Settings"; the scan never switches it on).
 - Stops: any way a watch stops (Back twice, # 5, * 7, the watch key), the same Tools entry or digit again, an airfield's

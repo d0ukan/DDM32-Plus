@@ -5413,14 +5413,14 @@ radio does not have (Battery without a voltmeter, the SOS key entry) shows in th
 old toast. Design choice: a flat list of ten rows, no sub-page (a page of its own would cost a screen definition).
 
 **Stored** in one appended field, `settings_t.hold_tool[12]` (10 bytes, 2 spare for the size to stay a multiple of 4):
-0 none, else the tool's number in Tools (its enum index + 1; Battery 41, 43 since the auto scans; the zone offer is not offered). The record grows
+0 none, else the tool's number in Tools (its enum index + 1; Battery 41; the auto scans 42 and 43, after Battery; the zone offer is not offered). The record grows
 from 392 to 404 B, page 1 only (still two pages: 168 of 236 B in page 1); no field moves. A record from before has
 no such bytes: `settings_init` starts from `settings_defaults`, so an older record, a fresh radio and a factory reset
 all read hold 4 = ISS (code 40, `SETTINGS_HOLD_ISS`) and the rest none. Firmware from before clamps the page it reads
 (it ignores the 12 bytes) and saves its 392 B page: going back to 1.0.4 then returns the defaults. UI ids
 `UI_SET_HOLD_FIRST..LAST` through `ui_svc_setting_get / _set` (a value above 255 or below 0 is refused). The codes are
-the Tools list's own numbers, which "keep their numbers"; a later new tool goes before Battery as ISS did, so a stored
-Battery code would shift (the static assert in `ui_hold.inc` keeps the ISS default honest). `SETTINGS_LAYOUT` stays 1
+the Tools list's own numbers, which "keep their numbers"; a later new tool goes after Battery (before the hidden zone
+offer, never a hold code), as the auto scans did, so every stored code keeps its tool (the static assert in `ui_hold.inc` keeps the ISS default honest). `SETTINGS_LAYOUT` stays 1
 (no field moves or changes meaning) and the release manifest's `settings_format` stays 1 as well: a downgrade loses only
 the hold keys (back to the defaults), which does not warrant the programmers' "settings format goes back" warning. No
 PC program parses the settings record (backups are whole flash images), so nothing there knows its size.
@@ -5487,8 +5487,8 @@ worker hand-over faked). Host-tested only; not run on the radio. Budget and desi
 ## Auto airfield scan and auto repeater scan (`CONFIG_AUTO_SCAN`, branch `autoscan`)
 
 Design and review resolution: `docs/autoscan-design.md`. Tools > **Air scan** ("Hava tarama", tool 42, AM-capable
-radios) and Tools > **Repeater scan** ("Röle tarama", tool 43), after ISS: Battery moves from 41 to 43 (a hold key
-stored as Battery now opens Air scan; set it again in Settings > Keys). Each shows On / Off; OK toggles and goes to
+radios) and Tools > **Repeater scan** ("Röle tarama", tool 43), after Battery (41, unchanged: a stored hold key keeps
+its tool; only the hidden zone offer moves). Each shows On / Off; OK toggles and goes to
 Home; a digit held on Home can start / stop either (Settings > Keys, none by default; it works on a VFO too, not while
 a frequency is typed). Needs the map pack and the GPS (refused with a toast without them; the scan never switches the
 GPS on). RAM only: off after a power cycle.

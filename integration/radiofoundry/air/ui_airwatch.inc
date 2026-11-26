@@ -145,6 +145,8 @@ bool ui_dual_air_watch(const uint32_t hz[], uint8_t n, uint8_t atis)
 }
 
 #if CONFIG_AUTO_SCAN
+#include "radio/tones.h"	// ui_dual_auto_has: the access tone's table
+
 bool ui_dual_auto_ring(const uint32_t hz[], const uint32_t arg[], uint8_t n, uint8_t kind)
 {
 	return mw_air_ring(hz, arg, n, kind);
@@ -179,9 +181,22 @@ void ui_dual_auto_label(uint8_t k, const char *label)
 		str_copy(mw_row[k].name, sizeof mw_row[k].name, label);
 }
 
-bool ui_dual_auto_has(uint8_t k, uint32_t hz)
+// The whole letter, not only its RX: two repeaters often share an output (another tone, offset or colour code), and a
+// refused replacement must not pass for a taken one (its TX would stay the old repeater's under the new label)
+bool ui_dual_auto_has(uint8_t k, uint32_t hz, uint32_t arg)
 {
-	return ui_svc_vfo_get(k, &mw_ch) && mw_ch.rx_hz == hz;
+	if (!ui_svc_vfo_get(k, &mw_ch) || mw_ch.rx_hz != hz)
+		return false;
+	uint8_t p = (uint8_t)((arg >> UI_AIR_P_SHIFT) & 0x3Fu);
+	uint32_t tx = (uint32_t)((int32_t)hz + ((int32_t)arg >> UI_AIR_OFF_SHIFT) * 1250);
+	if ((arg & UI_AIR_DMR) != 0)
+		return mw_ch.mode == RADIO_MODE_DMR && mw_ch.tx_hz == tx && mw_ch.color_code == (p & 0x0Fu) &&
+		       mw_ch.timeslot == ((p >> 4) == 2u ? 2u : 1u);
+	if ((arg & UI_AIR_FM) != 0)
+		return mw_ch.mode == RADIO_MODE_FM && mw_ch.tx_hz == tx &&
+		       (p != 0 && p <= TONES_CTCSS_COUNT ? mw_ch.tx_tone.type == TONE_CTCSS && mw_ch.tx_tone.value == tones_ctcss[p - 1u]
+							 : mw_ch.tx_tone.type == TONE_NONE);
+	return mw_ch.tx_hz == hz;	// an air letter: simplex (receive only)
 }
 
 void ui_dual_auto_end(void)

@@ -236,7 +236,7 @@ static void retry(void)
 		if (!((as.pend >> k) & 1u))
 			continue;
 		uint32_t hz, arg;
-		if (ui_dual_auto_has(k, as.hz[k]))
+		if (ui_dual_auto_has(k, as.hz[k], as_arg[k]))
 			as.pend &= (uint8_t)~(1u << k);
 		else if (letter(&as.l[k], &hz, &arg))
 			ui_dual_auto_set(k, hz, arg);

@@ -43,7 +43,7 @@ def text_checks(APP):
         b = body(text, sig)
         assert b.index('air_session_end(sm, now_ms);') < b.index('tune(sm, now_ms)'), name + ': air_session_end'
     menus = (APP / 'core/ui/ui_menus.c').read_text(encoding='utf-8')
-    assert 'T_ISS, T_AIRSCAN, T_RPTSCAN, T_BATTERY,' in menus and 'ui_autoscan_toggle(AS_RPT)' in menus, 'Tools entries'
+    assert 'T_ISS, T_BATTERY, T_AIRSCAN, T_RPTSCAN, T_ZONE_OFFER, T_COUNT' in menus and 'ui_autoscan_toggle(AS_RPT)' in menus, 'Tools entries'
     print('auto scan: PTT, scan requests, DOTA and cross-band call the air watch\'s hooks; the Tools entries')
 
 

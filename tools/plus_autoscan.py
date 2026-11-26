@@ -4,8 +4,8 @@
 fixes it needed. Called last from plus_features.prepare(): it changes text the earlier prepares made (the Tools list,
 the hold keys, PTT in dual watch).
 
-  AUTO_SCAN  Tools > Air scan and Tools > Repeater scan (after ISS; Battery and the zone offer move two on, a stored
-             hold code for Battery with them): the nearest airfield frequencies (100 km) or FM / DMR repeaters
+  AUTO_SCAN  Tools > Air scan (42) and Tools > Repeater scan (43), after Battery (41, unchanged: a stored hold code
+             keeps its tool; only the hidden zone offer moves): the nearest airfield frequencies (100 km) or FM / DMR repeaters
              (60 km) of the map pack on the multi-watch ring, A..F each its own VFO, refreshed as the GPS position
              moves (integration/radiofoundry/map/autoscan.c, ui_autoscan.c, air/ui_airwatch.inc). Needs AIR_WATCH,
              REPEATERS, GPS, VFO_FM, VFO_DMR and DATAPACK. A held digit set to one of them works on a VFO too.
@@ -83,11 +83,13 @@ def prepare_autoscan(transform, install):
         ('#if CONFIG_AUTO_RPT\n#include "ui/mapnav.h"\n#endif\n',
          '#if CONFIG_AUTO_RPT\n#include "ui/mapnav.h"\n#endif\n'
          '#if CONFIG_AUTO_SCAN\n#include "ui/autoscan.h"\n#endif\n'),
-        ('T_ISS, T_BATTERY,', 'T_ISS, T_AIRSCAN, T_RPTSCAN, T_BATTERY,'),
+        # After Battery (before the hidden zone offer, never a hold code): every stored hold code keeps its tool
+        ('T_BATTERY, T_ZONE_OFFER, T_COUNT', 'T_BATTERY, T_AIRSCAN, T_RPTSCAN, T_ZONE_OFFER, T_COUNT'),
         ('(i != T_ISS || CONFIG_SATELLITES) &&',
          '(i != T_ISS || CONFIG_SATELLITES) && (i != T_AIRSCAN || (CONFIG_AUTO_SCAN && radio_am_capable())) &&'
          ' (i != T_RPTSCAN || CONFIG_AUTO_SCAN) &&'),
-        ('"ISS", TRN("Battery"),', '"ISS", TRN("Air scan"), TRN("Repeater scan"), TRN("Battery"),'),
+        ('TRN("Battery"), TRN("Zones/Chs Received") };',
+         'TRN("Battery"), TRN("Air scan"), TRN("Repeater scan"), TRN("Zones/Chs Received") };'),
         ('\t\t[T_ISS] = ART_ICON_ALMANAC + 1,\t// the sky, as Satellites\n',
          '\t\t[T_ISS] = ART_ICON_ALMANAC + 1,\t// the sky, as Satellites\n'
          '\t\t[T_AIRSCAN] = ART_ICON_AIRBAND + 1,\t// the aircraft, as Airfields\n'
