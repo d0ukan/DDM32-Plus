@@ -256,8 +256,14 @@ static void fsc_p25_given_back(radio_sm_t *sm, const radio_status_t *st, uint32_
 static uint32_t fsc_now(const radio_sm_t *sm, uint32_t now_ms)
 {
 	uint32_t t = hal_millis();
-	if (!fsc_kind(sm))
+	if (!fsc_kind(sm)) {
+		// v1.2 (docs/autoscan-design.md, review M5): the faster ring (3..6 letters) the same way: a slow step (an FM <->
+		// DMR switch, ~170 ms) left the stop after it one reading of its quiet DMR window; its dwell counts from the
+		// retune's end now. The ring's own timing and statistics are not the zone scan's: nothing else is noted
+		if (FS_DIP_GUARD && MW_FAST(sm) && t - now_ms >= FS_STEP_SLOW_MS && t - now_ms <= 1000u)
+			return t;
 		return now_ms;
+	}
 	if (t - now_ms > 1000u)
 		t = now_ms;
 	fs_step_modes(fsc_mode, fsc_mode_of(sm), t - now_ms);	// scanst.step: which switch the longest step was
