@@ -38,6 +38,42 @@ void mapnav_sim_mode(uint8_t mode)
 	changed();
 }
 
+void mapnav_sim_radio_update(int rssi_dbm)
+{
+	view.rssi_dbm = (int16_t)rssi_dbm;
+	changed();
+}
+
+static hal_flash_t counting_flash;
+static uint32_t chip_reads;
+static bool counted_read(uint32_t addr, void *buf, uint32_t len)
+{
+	chip_reads++;
+	return sim_flash.read(addr, buf, len);
+}
+
+void mapnav_sim_count_reads(void)
+{
+	counting_flash = sim_flash;
+	counting_flash.read = counted_read;
+	board.flash = &counting_flash;
+	chip_reads = 0;
+}
+
+uint32_t mapnav_sim_reads(void)
+{
+	return chip_reads;
+}
+
+uint32_t mapnav_sim_rows_hash(int y, int h)
+{
+	uint32_t hash = 2166136261u;
+	for (int r = disp.inset_top + y; r < disp.inset_top + y + h; r++)
+		for (int x = disp.inset_left; x < disp.width - disp.inset_right; x++)
+			hash = (hash ^ panel_px[r * disp.width + x]) * 16777619u;
+	return hash;
+}
+
 bool ui_svc_position(ui_position_t *out)
 {
 	if (!mapnav_sim.gps)

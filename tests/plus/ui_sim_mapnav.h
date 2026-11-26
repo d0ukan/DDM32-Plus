@@ -23,5 +23,11 @@ typedef struct {
 extern mapnav_sim_t mapnav_sim;
 void mapnav_sim_clear(void);
 void mapnav_sim_mode(uint8_t mode);	/* the channel's mode in the simulator's view (RADIO_MODE_FM / _DMR) */
+/* The map's cheap frames (docs/mappack-design.md T10): a radio view change only (the RSSI, a new view serial); the
+ * data chip's reads counted from now on; how many since; a hash of the panel pixels of viewport rows y .. y + h */
+void mapnav_sim_radio_update(int rssi_dbm);
+void mapnav_sim_count_reads(void);
+uint32_t mapnav_sim_reads(void);
+uint32_t mapnav_sim_rows_hash(int y, int h);
 
 #endif

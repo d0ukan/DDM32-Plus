@@ -883,4 +883,14 @@ static void map_enter(void)
 const ui_scr_def_t ui_map_screen = {
 	.name = "map", .flags = SF_FIELD, .key = map_key, .draw = map_draw_screen, .enter = map_enter,
 };
+
+#ifndef __csky__
+/* Host tests only (docs/mappack-design.md T10): the map rectangle in viewport pixels */
+void ui_map_rect(int *y, int *h);
+void ui_map_rect(int *y, int *h)
+{
+	*y = view.y;
+	*h = view.h;
+}
+#endif
 #endif

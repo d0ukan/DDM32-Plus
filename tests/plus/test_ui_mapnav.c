@@ -293,6 +293,67 @@ static void st_pick(void)
 	expect("shows=TA1ABC-9_2.8_km_NE");
 }
 
+/* --- T10 / S4 (docs/mappack-design.md C.4): the map layer is read from the chip only when something drawn inside the
+ * map rectangle changed; a radio update alone repaints the top strip and the lines under the map --- */
+void ui_map_rect(int *y, int *h);	/* ui_map.c, host builds */
+void ui_toast(const char *text);	/* ui_nav.h */
+
+static uint32_t draws_now(void)
+{
+	ui_app_status_t s;
+	ui_app_status(&s);
+	return s.draws;
+}
+
+static void map_cheap(void)
+{
+	int y, h;
+	ok_run(MAP "wait:1500");
+	expect("screen=map shows=06_Ankar");
+	ui_map_rect(&y, &h);
+	mapnav_sim_count_reads();
+	ok_run("wait:1100");
+	uint32_t hash = mapnav_sim_rows_hash(y, h), d0 = draws_now(), r0 = mapnav_sim_reads();
+	for (int i = 0; i < 20; i++) {
+		mapnav_sim_radio_update(-60 - i);	/* RSSI, a new view serial: a frame each */
+		ok_run("wait:60");
+	}
+	check(draws_now() >= d0 + 20u, "a frame for each radio update");
+	check(mapnav_sim_reads() == r0, "20 radio updates read the pack zero times");
+	check(mapnav_sim_rows_hash(y, h) == hash, "the map rectangle byte-identical after 20 cheap frames");
+	expect("screen=map shows=06_Ankar");		/* the line under the map still there */
+	/* a toast up, and gone: a full frame each time */
+	r0 = mapnav_sim_reads();
+	ui_toast("Test toast");
+	ok_run("wait:60");
+	check(mapnav_sim_reads() > r0, "a toast forces a full frame");
+	ok_run("wait:6000");
+	r0 = mapnav_sim_reads();
+	mapnav_sim_radio_update(-80);
+	ok_run("wait:60");
+	check(mapnav_sim_reads() == r0, "cheap again once the toast went (its going drew whole)");
+	/* another screen on top, then back: the map draws whole */
+	ok_run("ctx ok");
+	expect("screen=repeaters");
+	r0 = mapnav_sim_reads();
+	ok_run("back wait:60");
+	expect("screen=map");
+	check(mapnav_sim_reads() > r0, "back from the screen on top: a full frame");
+	ok_run("back wait:60");			/* the pick dropped */
+	/* our position a few map pixels on (follow is on: the view moves with it): a full frame */
+	ok_run("wait:1100");
+	r0 = mapnav_sim_reads();
+	gps(true, 39.99, 32.95);
+	ok_run("wait:1100");
+	check(mapnav_sim_reads() > r0, "our position moved: a full frame");
+	/* a new APRS station in view: a full frame */
+	ok_run("wait:1100");
+	r0 = mapnav_sim_reads();
+	station("TA3NEW-1", 39.94, 32.90, "new", MAPNAV_ALT_NONE);
+	ok_run("wait:1100");
+	check(mapnav_sim_reads() > r0, "a new station mark: a full frame");
+}
+
 static void st_details_message(void)
 {
 	ok_run(MAP "3 3 3 0 ok shot:details");
@@ -397,6 +458,7 @@ int main(void)
 		{ "AR waits for a banner", ar_waits },
 		{ "AR waits for TX", ar_tx },
 		{ "MAP APRS station pick", st_pick },
+		{ "MAP cheap frames (T10)", map_cheap },
 		{ "MAP APRS details and message", st_details_message },
 		{ "MAP APRS Back", st_back },
 		{ "MAP APRS # and 0", st_switch },
