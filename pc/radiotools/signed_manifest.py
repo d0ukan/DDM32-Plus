@@ -110,6 +110,37 @@ def _asset(entry, where):
     _need(isinstance(entry.get('size'), int) and 0 < entry['size'] <= 512 << 20, f'{where}.size')
 
 
+# The map pack of a firmware entry ("ref_pack", firmware 1.1+, docs/mappack-design.md E.2): a separate signed asset
+# (the firmware zip keeps its three files, so older programs still install the firmware and ignore this object)
+REF_PACK_SCHEMA = 1
+REF_PACK_MAX = 65472 + 64				# the map pack slot: payload max + its 64-byte header
+RE_REF_FILE = re.compile(r'^ddm32-ref-\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.-]{1,40})?\.dpk$')
+RE_COORD = re.compile(r'^0x[0-9a-f]{8}$')
+RE_DATE = re.compile(r'^\d{8}$')
+
+
+def check_ref_pack(e, where='ref_pack'):
+    """A firmware entry's map pack object; True when this program understands it, False when its schema is newer
+    (ignored: "update the programmer"); ManifestError when it is malformed"""
+    _need(isinstance(e, dict), where)
+    schema = e.get('schema')
+    _need(isinstance(schema, int) and not isinstance(schema, bool) and schema >= 1, f'{where}.schema')
+    if schema > REF_PACK_SCHEMA:
+        return False
+    _asset(e, where)
+    _need(RE_REF_FILE.match(e['file']) is not None, f'{where}.file')
+    _need(e['size'] <= REF_PACK_MAX, f'{where}.size')
+    for k, want in (('pack_type', 3), ('pack_format', 1)):
+        _need(e.get(k) == want and not isinstance(e.get(k), bool), f'{where}.{k}')
+    _need(isinstance(e.get('dir_version'), int) and not isinstance(e.get('dir_version'), bool) and
+          1 <= e['dir_version'] <= 255, f'{where}.dir_version')
+    _need(isinstance(e.get('coord_crc'), str) and RE_COORD.match(e['coord_crc']) is not None, f'{where}.coord_crc')
+    _need(isinstance(e.get('date'), str) and RE_DATE.match(e['date']) is not None, f'{where}.date')
+    _need(isinstance(e.get('min_firmware'), str), f'{where}.min_firmware')
+    parse_version(e['min_firmware'])
+    return True
+
+
 def check_manifest(m):
     """Schema check of a parsed (already signature-verified) manifest; returns it"""
     _need(isinstance(m, dict) and m.get('format') == FORMAT, 'format')
@@ -137,6 +168,8 @@ def check_manifest(m):
               f'{where}.notes')
         _need(e['version'] not in seen, f'{where}.version (duplicate)')
         seen.add(e['version'])
+        if 'ref_pack' in e:
+            check_ref_pack(e['ref_pack'], f'{where}.ref_pack')
     for key in ('app', 'app_net'):
         app = m.get(key)
         if app is not None:

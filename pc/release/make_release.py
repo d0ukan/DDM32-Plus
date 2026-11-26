@@ -161,6 +161,59 @@ def firmware_package(build_dir, version):
     return data, app, release_build
 
 
+# --- the map pack (firmware 1.1+, docs/mappack-design.md E.2) ----------------------------------------------------
+# The release gate's allowed repeater sources (tools/rpt_list.py's source names). Owner decision 2026-11-26 (H.5
+# option (b), replacing the recommended (d)): both sources ship as in 1.0.x, the owner's TRAC list ("own") with
+# RadioID.net, in the public map pack's records and in the program-flash refusal set; the TRAC list states no
+# licence and the owner takes responsibility for publishing it. A "sample" list (the fictional one a build without
+# research-data gets) is never released. Change these two sets if the owner's answer changes.
+PACK_SOURCES = {'RadioID.net', 'own list', 'own+RadioID.net'}
+FREQ_SET_SOURCES = {'RadioID.net', 'own list', 'own+RadioID.net'}
+
+
+def _refpack():
+    sys.path.insert(0, str(REPO))
+    from tools import datapack, refpack
+    return datapack, refpack
+
+
+def check_ref_pack(image, build=None, pack_sources=None, freq_sources=None):
+    """A map pack .dpk for a release: a whole map pack (header, CRCs) the firmware takes (refpack.validate, its
+    version hint), the one the build made (build manifest ref_pack.sha256), and its repeater data from sources the
+    owner cleared (the gate, S6): the pack's RPT_INFO source and the build's recorded refusal-set source, each
+    against its own list; "sample" refused. Returns the pack's facts for the manifest entry"""
+    dp, rp = _refpack()
+    pack_sources = PACK_SOURCES if pack_sources is None else pack_sources
+    freq_sources = FREQ_SET_SOURCES if freq_sources is None else freq_sources
+    h, payload = dp.parse(image)
+    if not h or h['type'] != dp.REF or h['fmt'] != 1 or not h['crc_ok'] or len(image) != 64 + h['len']:
+        raise SystemExit('Refusing the map pack: not a whole map pack (header, length or CRC)')
+    if len(image) > sm.REF_PACK_MAX:
+        raise SystemExit('Refusing the map pack: larger than its slot')
+    k = rp.defines(rp.MAP_H)
+    verdict, why = rp.validate(payload, h['flags'], k)
+    if verdict != 'ok':
+        raise SystemExit(f'Refusing the map pack: the firmware would not take it ({verdict}: {why})')
+    if h['flags'] != rp.hint(k):
+        raise SystemExit('Refusing the map pack: its version hint is not this firmware\'s')
+    info = rp.rpt_info(payload)
+    if info is not None and (info[1] or info[3] == 'sample'):
+        raise SystemExit('Refusing the map pack: its repeater list is the fictional sample')
+    if info is not None and info[3] not in pack_sources:
+        raise SystemExit(f'Refusing the map pack: repeater records from "{info[3]}" are not cleared for a release')
+    if build is not None:
+        rec = build.get('ref_pack') or {}
+        if rec.get('sha256') != sha256(image):
+            raise SystemExit('Refusing the map pack: it is not the one this firmware build made')
+        src = rec.get('repeater_sources') or {}
+        if src.get('freq_set_sample') or src.get('freq_set') == 'sample':
+            raise SystemExit('Refusing: the firmware\'s repeater refusal set was made from the fictional sample')
+        if src.get('freq_set') not in freq_sources:
+            raise SystemExit(f'Refusing: the firmware\'s refusal set comes from "{src.get("freq_set")}", not cleared')
+    return {'pack_type': 3, 'pack_format': 1, 'dir_version': payload[4], 'coord_crc': '0x%08x' % rp.coord_id(k),
+            'date': h['date'], 'repeaters': info[3] if info else 'none'}
+
+
 def check_app_zip(path):
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
@@ -301,6 +354,21 @@ def build(args, secret):
     manifest = {'format': sm.FORMAT, 'repo': sm.REPO, 'release': tag,
                 'created_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'firmware': [entry]}
     assets = {fw_name: fw_zip}
+    # The map pack (firmware 1.1+): --ref-pack, else the one the build made beside the image; --no-ref-pack: none
+    ref = getattr(args, 'ref_pack', None)
+    if ref is None and not getattr(args, 'no_ref_pack', False) and (Path(args.build_dir) / 'ddm32-ref.dpk').is_file():
+        ref = Path(args.build_dir) / 'ddm32-ref.dpk'
+    if ref is not None:
+        image = Path(ref).read_bytes()
+        facts = check_ref_pack(image, json.loads((Path(args.build_dir) / 'rfoundry_dm32.json').read_text()))
+        ref_name = f'ddm32-ref-{args.version}.dpk'
+        entry['ref_pack'] = {'schema': sm.REF_PACK_SCHEMA, 'version': args.version, 'file': ref_name,
+                             'url': f'{sm.URL_PREFIX}{tag}/{ref_name}', 'sha256': sha256(image), 'size': len(image),
+                             'pack_type': facts['pack_type'], 'pack_format': facts['pack_format'],
+                             'dir_version': facts['dir_version'], 'coord_crc': facts['coord_crc'],
+                             'date': facts['date'],
+                             'min_firmware': getattr(args, 'ref_min_firmware', None) or args.version}
+        assets[ref_name] = image
     if args.app_zip:
         if not args.app_version:
             raise SystemExit('--app-zip needs --app-version')
@@ -349,11 +417,16 @@ def build(args, secret):
 def verify(folder, public_hex=None):
     folder = Path(folder)
     m = check_app_rs(sm.verify_files(folder, public_hex))
-    for e in (m['firmware'] + [m[k] for k in ('app', 'app_net') if m.get(k)] +
+    refs = [e['ref_pack'] for e in m['firmware'] if e.get('ref_pack') and sm.check_ref_pack(e['ref_pack'])]
+    for e in (m['firmware'] + refs + [m[k] for k in ('app', 'app_net') if m.get(k)] +
               list((m.get('app_rs') or {}).values())):
         body = (folder / e['file']).read_bytes()
         if len(body) != e['size'] or sha256(body) != e['sha256']:
             raise SystemExit(f'{e["file"]}: size or SHA-256 differs from the manifest')
+    for e in refs:		# each firmware's map pack: whole, taken by the firmware, the repeater gate
+        facts = check_ref_pack((folder / e['file']).read_bytes())
+        if facts['coord_crc'] != e['coord_crc'] or facts['dir_version'] != e['dir_version']:
+            raise SystemExit(f'{e["file"]}: its directory does not match the manifest entry')
     return m
 
 
@@ -384,6 +457,9 @@ def main(argv=None):
     b.add_argument('--app-rs-version')
     b.add_argument('--app-rs-notes-tr')
     b.add_argument('--app-rs-notes-en')
+    b.add_argument('--ref-pack', type=Path, help='the map pack .dpk (default: DIR/ddm32-ref.dpk when the build made one)')
+    b.add_argument('--no-ref-pack', action='store_true', help='a release without the map pack (firmware before 1.1)')
+    b.add_argument('--ref-min-firmware', help='the oldest firmware that uses the pack (default: --version)')
     b.add_argument('--tag')
     b.add_argument('--out', type=Path, required=True)
     b.add_argument('--key', dest='build_key', type=Path, default=None)

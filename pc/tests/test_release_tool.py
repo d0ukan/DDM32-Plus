@@ -372,5 +372,108 @@ class ReleaseToolTest(unittest.TestCase):
         self.assertFalse((rt.PC / 'release' / 'never').exists())
 
 
+class MapPackReleaseTest(unittest.TestCase):
+    """The map pack as a signed release asset inside the firmware entry and the release gate (docs/mappack-design.md
+    E.2, G T16; owner decision 2026-11-26, H.5 option (b): RadioID.net and the owner's list ship, "sample" never)"""
+    setUp = ReleaseToolTest.setUp
+    tearDown = ReleaseToolTest.tearDown
+    run_build = ReleaseToolTest.run_build
+
+    @staticmethod
+    def pack(source='RadioID.net', sample=0, flags=None, broken=False):
+        sys.path.insert(0, str(rt.PC.parent))
+        from tools import datapack, refpack
+        rpt = ((2, sample, b'2026-11-19', source.encode()),
+               [(3993340, 3285970, 145600000, -480, 885, 0, 0, b'TA1AAA', b'Ankara', 6),
+                (4102083, 2887500, 439162500, -6080, 0, 1, 0x22, b'TA1BBB', b'Istanbul', 34)])
+        image = refpack.build('1.1.0', rpt=rpt)
+        if broken or flags is not None:
+            payload = bytearray(image[64:])
+            if broken:		# the steps' count past the payload, CRCs made valid again
+                for i, (sid, rec, off, count) in enumerate(refpack.directory(bytes(payload))):
+                    if sid == refpack.STEP:
+                        at = refpack.HEAD + refpack.ENTRY * i + 8
+                        payload[at:at + 4] = (40000).to_bytes(4, 'little')
+            h, _ = datapack.parse(image)
+            image = datapack.header(datapack.REF, bytes(payload), h['date'], h['name'], tag=h['tag'].encode(),
+                                    flags=h['flags'] if flags is None else flags) + bytes(payload)
+        return image
+
+    def put_pack(self, image, freq_set='own+RadioID.net', recorded=None):
+        (self.build / 'ddm32-ref.dpk').write_bytes(image)
+        j = json.loads((self.build / 'rfoundry_dm32.json').read_text())
+        j['ref_pack'] = {'sha256': mr.sha256(recorded if recorded is not None else image), 'size': len(image),
+                         'repeater_sources': {'pack': 'x', 'freq_set': freq_set,
+                                              'freq_set_sample': freq_set == 'sample'}}
+        (self.build / 'rfoundry_dm32.json').write_text(json.dumps(j))
+
+    def test_pack_is_a_signed_asset_in_the_firmware_entry(self):
+        image = self.pack()
+        self.put_pack(image)
+        code, out, _ = self.run_build()
+        self.assertEqual(code, 0)
+        names = sorted(p.name for p in out.iterdir())
+        self.assertIn('ddm32-ref-1.0.0-beta.1.dpk', names)
+        with zipfile.ZipFile(out / 'ddm32-plus-1.0.0-beta.1.zip') as z:	# the firmware zip keeps its three files
+            self.assertEqual(sorted(z.namelist()), sorted(mr.FIRMWARE_FILES))
+        m = mr.verify(out, self.public)
+        e = m['firmware'][0]['ref_pack']
+        self.assertEqual((e['schema'], e['pack_type'], e['pack_format'], e['dir_version'], e['version']),
+                         (1, 3, 1, 1, '1.0.0-beta.1'))
+        self.assertEqual((e['size'], e['sha256'], e['min_firmware']), (len(image), mr.sha256(image), '1.0.0-beta.1'))
+        self.assertTrue(e['url'].endswith('/ddm32-ref-1.0.0-beta.1.dpk'))
+        # --verify walks the nested object: a changed pack file is found
+        (out / 'ddm32-ref-1.0.0-beta.1.dpk').write_bytes(image[:-1] + bytes([image[-1] ^ 1]))
+        with self.assertRaisesRegex(SystemExit, 'size or SHA-256'):
+            mr.verify(out, self.public)
+
+    def test_gate(self):
+        # owner decision 2026-11-26 (b): the TRAC list ("own") ships, in the pack and in the refusal set
+        for k, source in enumerate(('own+RadioID.net', 'own list', 'RadioID.net')):
+            self.put_pack(self.pack(source))
+            self.assertEqual(self.run_build(out=self.top / f'ok-{k}')[0], 0)
+        # a pack without repeater sections is fine too
+        sys.path.insert(0, str(rt.PC.parent))
+        from tools import refpack
+        self.put_pack(refpack.build('1.1.0', rpt=None))
+        self.assertEqual(self.run_build(out=self.top / 'ok-norpt')[0], 0)
+        refusals = [
+            (self.pack(sample=1, source='sample'), {}, 'fictional sample'),
+            (self.pack(source='somebody'), {}, 'not cleared'),
+            (self.pack(broken=True), {}, 'would not take it'),
+            (self.pack(flags=0x1234), {}, 'would not take it'),
+            (self.pack(), {'recorded': b'another pack'}, 'not the one this firmware build made'),
+            (self.pack(), {'freq_set': 'sample'}, 'fictional sample'),
+        ]
+        for k, (image, kw, why) in enumerate(refusals):
+            self.put_pack(image, **kw)
+            with self.assertRaisesRegex(SystemExit, why):
+                self.run_build(out=self.top / f'refused-{k}')
+            self.assertFalse((self.top / f'refused-{k}').exists())
+        # the gate is a setting: under another owner answer (RadioID.net only) "own" is refused
+        with self.assertRaisesRegex(SystemExit, 'not cleared'):
+            mr.check_ref_pack(self.pack('own+RadioID.net'), pack_sources={'RadioID.net'})
+        # --no-ref-pack: a release without it
+        self.put_pack(self.pack())
+        code, out, _ = self.run_build('--no-ref-pack', out=self.top / 'none')
+        self.assertEqual(code, 0)
+        self.assertNotIn('ref_pack', json.loads((out / 'ddm32-manifest.json').read_text())['firmware'][0])
+
+    def test_manifest_schema(self):
+        from radiotools import signed_manifest as sm
+        self.put_pack(self.pack())
+        code, out, _ = self.run_build()
+        m = json.loads((out / 'ddm32-manifest.json').read_text(encoding='utf-8'))
+        e = m['firmware'][0]['ref_pack']
+        self.assertTrue(sm.check_ref_pack(e))
+        self.assertFalse(sm.check_ref_pack(dict(e, schema=2, file='anything-else.bin')))	# newer: ignored
+        for bad in (dict(e, pack_type=1), dict(e, size=70000), dict(e, file='ddm32-ref.dpk'),
+                    dict(e, coord_crc='12'), dict(e, sha256='x'), dict(e, schema='1')):
+            with self.assertRaises(sm.ManifestError):
+                sm.check_ref_pack(bad)
+        # a reader that does not know ref_pack still finds the firmware entry it knows
+        self.assertEqual(m['firmware'][0]['file'], 'ddm32-plus-1.0.0-beta.1.zip')
+
+
 if __name__ == '__main__':
     unittest.main()
