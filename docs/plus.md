@@ -1196,6 +1196,45 @@ without the resume delay. Model: dips of 25-45 ms 152 ms a stop classic, 53-94 m
 dip unchanged. `scanst.cost` gains DIPS and DIP_HOLDS. Host-tested only; radio rows SS-1..SS-3 in
 [plus-radio-test.md](plus-radio-test.md).
 
+### Channels list speed (branch `chlag`, after v1.2.0)
+
+Owner's report on v1.2.0: Menu > Channels comes up late and the list lags while moving. Cause (upstream r13 code, no
+Plus regression): every `codeplug_kv_get` (each channel load reads its tag; a P25 channel also its mode parameters and
+the radio-wide P25 unit ID) ran `chain_check` (every settings page's CRC in 16-byte reads, two entry walks) and then
+`raw_next` checked each page again; the list loads every channel on entry (`ui_filter_rebuild`) and 8 per move, and
+each row also read the zone (`chlist_current`). Cost: channels x settings size.
+
+`tools/plus_chlag.py` (every build): `codeplug_kv.c` remembers that the chain was found valid at a
+`codeplug_kv_generation()` (32 bits: moved by every key write and sector commit, also a failed or cut one, by every
+`codeplug_serial()` change, and whenever `storage_untouched` was cleared: `storage.c` clears it in `wr()`, `er()`, the
+replace path and `storage_init`, so every journaled sector, record patch, replay and power-on counts). While unchanged a
+lookup reads the root header (compared with the CRC of the header checked: a raw change of it is seen at once) and
+walks the entries with page headers only; the debug link's `codeplug_kv_info` and every write path keep the full check.
+Paths that write the data chip outside `storage.c` never reach the settings pages (0x70E000 and the banks at
+0x7AF000-0x7CEFFF): the settings slots (`settings.c`, 0x711000), the fast CPS staging slots (`cps_fast.c`, staging is
+kept off the open-firmware area by `storage_staging_size`), the data packs (`datapack.c`, 0xE70000-0xEFFFFF); TFTP is
+not built for the DM-32; CPS / TFTP sector commits go through `codeplug_kv_commit`. A damaged area is refused by the
+first lookup after any change, as before; what is not seen any more is a change of a page body by no write at all (bit
+rot) until the next write, reload or power-on. `codeplug_p25_unit_id` keeps the radio-wide P25 ID per generation, and
+the list reads its zone once per `count()` (each key, move and draw) instead of once per row.
+
+Host fixture (`tests/plus/test_kv_cache.c`, data-chip reads; "before" with `-DKV_BASELINE` on v1.2.0's code):
+
+| Channels / P25 tags | open the list | a move | first lookup after a change |
+|---|---|---|---|
+| 27 / 13 (the owner's 2026-11-21 codeplug) | 5,557 -> 613 | 1,304 -> 119 | 309 -> 71 |
+| 60 / 30 | 24,707 -> 2,323 | 2,864 -> 187 | 682 -> 141 |
+
+The test also changes or corrupts the area through each path (key write, sector commit, journaled sector write, record
+patch, failed write, a write cut at every point then power-on, raw change then reload, raw change then power-on, root
+header, a continuation page, the trust ending with the lookup) and compares every lookup with one that checks the chain
+whole; mutations (no `storage_untouched` clears, no header CRC, the trust left on) each fail it. Host-tested only.
+
+Cost (`--plus --public --stack-check --verify-rebuild`, on `ddm25` 1293c3f): zero warnings, forced rebuild identical,
+every task's stack fits (ui 184 -> 164 B free); FLASH 861,704 -> 862,164 B (+460, 95.68 %), static RAM 207,104 ->
+207,136 B (+32, 97.96 %, 4,320 B free): the cache's generation, checked generation and header CRC 12 B, its flags and
+`storage_untouched` 2 B, the P25 ID cache 9 B, the list's current channel 2 B, alignment.
+
 ### Airband AM and broadcast FM
 
 The DM-32 glue exists upstream but is unverified on the radio (hardware-dm32.md 8.7): AM is the

@@ -7,12 +7,25 @@
 #if CONFIG_P25_CHANNELS
 #define CLASSIC_P25_PARAMS 9u
 
+/* DDM32 Plus (tools/plus_chlag.py): the radio-wide P25 unit ID read once per codeplug_kv_generation() (every P25
+ * channel without its own ID asked the area for it at each load); 0 = none stored, the DMR ID (read each time) */
+static uint32_t p25_own_gen,p25_own;
+static bool p25_own_known;
+
 uint32_t codeplug_p25_unit_id(uint32_t own)
 {
     if(own) return own;
-    uint8_t v[8];
-    int n=codeplug_mode_settings(CODEPLUG_KIND_P25,v,sizeof v);
-    return p25_unit_id_decode(v,n,codeplug_dmr_id());
+    storage_lock();
+    uint32_t g=codeplug_kv_generation();
+    if(!p25_own_known || g!=p25_own_gen) {
+        uint8_t v[8];
+        int n=codeplug_mode_settings(CODEPLUG_KIND_P25,v,sizeof v);
+        p25_own=p25_unit_id_decode(v,n,0);	/* the stored ID when valid, else 0 */
+        p25_own_gen=g;p25_own_known=true;
+    }
+    uint32_t id=p25_own;
+    storage_unlock();
+    return id?id:codeplug_dmr_id();
 }
 
 void codeplug_p25_params_encode(const channel_t *ch, uint8_t v[CLASSIC_P25_PARAMS])

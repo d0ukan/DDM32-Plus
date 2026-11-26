@@ -18,7 +18,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from tools import codec_cache, classic_channels, classic_standard, sources, plus_features, plus_brand
+from tools import codec_cache, classic_channels, classic_standard, sources, plus_features, plus_brand, plus_chlag
 UP = ROOT / "research/upstream/radiofoundry"
 PIN = "dfbaf20c400c73e2ccf6edb80af7d1d255bee418"
 DEST = ROOT / "build/radiofoundry-p25"
@@ -459,6 +459,8 @@ def prepare():
     # .c files in a Classic tree gave it pointer stores Classic never makes (removed again below when left over)
     plus_features.prepare(transform, lambda rel, src: (PLUS_FILES or not rel.endswith('.c')) and
                           write_owned(DEST / rel, (ROOT / src).read_bytes()))
+    # DDM32 Plus: the codeplug settings check cache and the Channels list's zone read (every build; tools/plus_chlag.py)
+    plus_chlag.prepare(transform, DEST, write_owned)
     # A pending shared beep remains owned by beep.c when digital PCM stops.
     # Reuse the existing own-stream startup and failure cleanup at handoff.
     beep_source=(UP/'core/radio/beep.c').read_text()

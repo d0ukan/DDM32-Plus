@@ -794,3 +794,6 @@ __pycache__/
 !/tools/plus_autoscan.py
 !/tools/test_autoscan.py
 !/tests/plus/test_autoscan.c
+# Channels list speed: the codeplug settings check cache (branch chlag, tools/plus_chlag.py)
+!/tools/plus_chlag.py
+!/tests/plus/test_kv_cache.c

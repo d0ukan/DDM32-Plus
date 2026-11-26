@@ -340,6 +340,10 @@ def main():
     run(['clang',*flags,ROOT/'tests/classic/test_channels.c',*CODEPLUG,
          APP/'core/storage/storage.c',host/'sim/sim_flash.c','-o',OUT/'test_channels'],cwd=ROOT)
     run([OUT/'test_channels'],cwd=ROOT)
+    # DDM32 Plus: the settings check cache (tools/plus_chlag.py): read counts, every invalidating write, same channels
+    run(['clang',*flags,ROOT/'tests/plus/test_kv_cache.c',*CODEPLUG,
+         APP/'core/storage/storage.c',host/'sim/sim_flash.c','-o',OUT/'test_kv_cache'],cwd=ROOT)
+    run([OUT/'test_kv_cache'],cwd=ROOT)
     run(['clang',*flags,'-DCONFIG_YSF=1',ROOT/'tests/plus/test_ysf_channel.c',*CODEPLUG,
          APP/'core/storage/storage.c',host/'sim/sim_flash.c','-o',OUT/'test_ysf_channel'],cwd=ROOT)
     run([OUT/'test_ysf_channel'],cwd=ROOT)
