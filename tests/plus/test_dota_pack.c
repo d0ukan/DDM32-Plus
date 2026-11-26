@@ -19,6 +19,7 @@
 #include <string.h>
 #include "storage/storage.h"
 #include "storage/datapack.h"
+#include "storage/ref_pack.h"
 #include "sim/sim_flash.h"
 #include "aprs/hdlc.h"
 #include "radio/dota.h"
@@ -396,9 +397,78 @@ static void test_old_receiver(void)
 	CHECK(in_force(DPK_AIR, 1) && other_slot_empty(DPK_AIR));
 }
 
+/* --- The map pack (type 3, firmware 1.1; docs/mappack-design.md E.4, T5b, T5e, T11) --- */
+
+/* A map pack payload of 16 bytes: a directory without sections (valid: every feature off), or one that says it has a
+ * section with no room for its entry (structurally bad, CRC-valid) */
+static void ref_payload(bool bad)
+{
+	uint32_t coord = ref_coord_id();
+	memset(payload, 0, 64);
+	memcpy(payload, "REF1", 4);
+	payload[4] = 1;
+	payload[5] = bad ? 1 : 0;
+	memcpy(payload + 8, &coord, 4);
+	payload_len = 16;	/* bad: one section said, no room for its entry (the same length: the sender's view of it) */
+}
+
+/* The header of the pack in force rewritten in place (no rescan: the sender still sends it), its CRCs made good */
+static void rewrite_in_force(uint16_t flags, bool new_payload)
+{
+	uint32_t a = dpk_active_addr(DPK_REF);
+	dpk_hdr_t h;
+	memcpy(&h, sim_flash_data + a, sizeof h);
+	h.flags = flags;
+	if (new_payload) {
+		memcpy(sim_flash_data + a + DPK_HDR, payload, payload_len);
+		h.len = payload_len;
+		h.crc = storage_crc32(0, payload, payload_len);
+	}
+	dpk_seal(&h);
+	memcpy(sim_flash_data + a, &h, sizeof h);
+}
+
+static void test_map_pack(void)
+{
+	/* T11: a map pack goes whole, the receiver's copy in force one sequence on */
+	sim_flash_create(FLASH_SIZE, &map);
+	dpk_scan();
+	ref_payload(false);
+	install(DPK_REF, "DDM32 TR test");
+	CHECK(dpk_active(DPK_REF) != NULL);
+	case_t c = { .method = DOTA_FM, .type = DPK_REF, .answer = 1, .answer_after_ms = 1000, .limit_ms = 120000 };
+	run(&c);
+	CHECK(asked && va.result == DOTA_RES_SENT && vb.result == DOTA_RES_DONE && in_force(DPK_REF, 2) && !vb.pack_bad);
+	/* T5e: a hint for another version: refused at the HELLO, the receiver says why, nothing erased */
+	sim_flash_create(FLASH_SIZE, &map);
+	dpk_scan();
+	ref_payload(false);
+	install(DPK_REF, "DDM32 TR test");
+	rewrite_in_force((uint16_t)(ref_hint() ^ 0x0100u), false);
+	uint32_t erases = sim_flash_erases(dpk_slot_addr(DPK_REF, 1));
+	run(&c);
+	CHECK(!asked && va.result == DOTA_RES_REFUSED && va.why == DOTA_R_VERSION && vb.pack_other);
+	CHECK(other_slot_empty(DPK_REF) && sim_flash_erases(dpk_slot_addr(DPK_REF, 1)) == erases);
+	/* T5b over DOTA: CRC-valid but structurally bad: never committed (its header sector stays erased), "Bad pack" */
+	sim_flash_create(FLASH_SIZE, &map);
+	dpk_scan();
+	ref_payload(false);
+	install(DPK_REF, "DDM32 TR test");
+	ref_payload(true);
+	rewrite_in_force(0, true);
+	run(&c);
+	CHECK(asked && vb.result != DOTA_RES_DONE && vb.pack_bad && va.result != DOTA_RES_SENT);
+	if (!(asked && vb.pack_bad))
+		printf("    (asked %d, receiver result %u why %u, pack_bad %d, sender result %u why %u)\n", asked, vb.result,
+		       vb.why, vb.pack_bad, va.result, va.why);
+	CHECK(other_slot_empty(DPK_REF));
+	printf("  map pack: sent whole; another version refused at the HELLO; a bad structure never committed\n");
+}
+
 int main(void)
 {
 	now = 1000;
+	test_map_pack();
 	test_whole(DOTA_FM, DPK_AIR, 2500, 0);
 	test_whole(DOTA_DMR, DPK_AIR, 2500, 0);
 	test_whole(DOTA_FM, DPK_RADIOID, 9008, 10);

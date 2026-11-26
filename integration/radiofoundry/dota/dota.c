@@ -293,8 +293,10 @@ void dota_job(void *ctx)
 #if CONFIG_DATAPACK
 		/* the payload read back against its CRC, then the header: the new pack is in force */
 		bool ok = !job_failed && (r->pack ? dpk_commit(&r->u.pk.w) : dota_imp_commit(&r->u.im));
-		if (!ok && r->pack && r->u.pk.h.type == DPK_REF)
+		if (!ok && r->pack && r->u.pk.h.type == DPK_REF) {
 			view.pack_bad = true;	/* its CRC or its structure did not check: never committed */
+			touch();		/* the screen says "Bad pack" */
+		}
 #else
 		bool ok = !job_failed && dota_imp_commit(&r->u.im);
 #endif
