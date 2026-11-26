@@ -566,6 +566,18 @@ fn manifest_ref_pack_is_parsed_and_checked() {
         assert!(sm::check_manifest(&fw_with(Some(o)), &ddm32_core::releases::CURRENT).is_err(), "{k} = {v}");
     }
     assert!(sm::check_manifest(&fw_with(Some(json!("x"))), &ddm32_core::releases::CURRENT).is_err());
+    // a pack of another version than its firmware entry: refused (parity with signed_manifest.py)
+    let mut o = ref_entry("v1.1.0", &data);
+    o["version"] = json!("1.1.1");
+    o["file"] = json!("ddm32-ref-1.1.1.dpk");
+    o["url"] = json!(url("v1.1.0", "ddm32-ref-1.1.1.dpk"));
+    let e = sm::check_manifest(&fw_with(Some(o)), &ddm32_core::releases::CURRENT).unwrap_err();
+    assert!(e.0.contains("ref_pack.version"), "{}", e.0);
+    // a newer schema is still ignored, whatever its version says
+    let mut o = ref_entry("v1.1.0", &data);
+    o["schema"] = json!(2);
+    o["version"] = json!("9.9.9");
+    assert!(sm::check_manifest(&fw_with(Some(o)), &ddm32_core::releases::CURRENT).unwrap().firmware[0].ref_pack_newer);
 }
 
 #[test]

@@ -272,7 +272,11 @@ pub fn check_manifest(m: &Value, schema: &ManifestSchema) -> Result<Manifest, Ma
         let (ref_pack, ref_pack_newer) = match get(e, "ref_pack") {
             None | Some(Value::Null) => (None, false),
             Some(r) => match check_ref_pack(r, &format!("{w}.ref_pack"), schema)? {
-                Some(rp) => (Some(rp), false),
+                Some(rp) => {
+                    // the pack belongs to this firmware version (signed_manifest.py check_ref_pack)
+                    need(rp.version == a.version, &format!("{w}.ref_pack.version"))?;
+                    (Some(rp), false)
+                }
                 None => (None, true),
             },
         };
