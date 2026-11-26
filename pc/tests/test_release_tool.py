@@ -453,11 +453,29 @@ class MapPackReleaseTest(unittest.TestCase):
         # the gate is a setting: under another owner answer (RadioID.net only) "own" is refused
         with self.assertRaisesRegex(SystemExit, 'not cleared'):
             mr.check_ref_pack(self.pack('own+RadioID.net'), pack_sources={'RadioID.net'})
-        # --no-ref-pack: a release without it
+        # S3: a map pack firmware is never released without its pack by accident: --no-ref-pack or a missing
+        # ddm32-ref.dpk is refused; --allow-no-ref-pack overrides with a loud warning
         self.put_pack(self.pack())
-        code, out, _ = self.run_build('--no-ref-pack', out=self.top / 'none')
+        with self.assertRaisesRegex(SystemExit, 'no map pack is given'):
+            self.run_build('--no-ref-pack', out=self.top / 'none-refused')
+        (self.build / 'ddm32-ref.dpk').unlink()
+        with self.assertRaisesRegex(SystemExit, 'no map pack is given'):
+            self.run_build(out=self.top / 'missing-refused')
+        j = json.loads((self.build / 'rfoundry_dm32.json').read_text())
+        del j['ref_pack']
+        j.setdefault('audits', {})['map_pack_tables_absent'] = True	# the layout's audit alone also counts
+        (self.build / 'rfoundry_dm32.json').write_text(json.dumps(j))
+        with self.assertRaisesRegex(SystemExit, 'no map pack is given'):
+            self.run_build(out=self.top / 'audit-refused')
+        with patch('sys.stderr', io.StringIO()) as err:
+            code, out, _ = self.run_build('--no-ref-pack', '--allow-no-ref-pack', out=self.top / 'none')
         self.assertEqual(code, 0)
+        self.assertIn('WITHOUT its map pack', err.getvalue())
         self.assertNotIn('ref_pack', json.loads((out / 'ddm32-manifest.json').read_text())['firmware'][0])
+        # an older build (no map pack layout) still releases without one, silently
+        del j['audits']['map_pack_tables_absent']
+        (self.build / 'rfoundry_dm32.json').write_text(json.dumps(j))
+        self.assertEqual(self.run_build('--no-ref-pack', out=self.top / 'older')[0], 0)
 
     def test_manifest_schema(self):
         from radiotools import signed_manifest as sm
@@ -471,6 +489,14 @@ class MapPackReleaseTest(unittest.TestCase):
                     dict(e, coord_crc='12'), dict(e, sha256='x'), dict(e, schema='1')):
             with self.assertRaises(sm.ManifestError):
                 sm.check_ref_pack(bad)
+        # N2: the pack's version must be its firmware entry's
+        self.assertTrue(sm.check_ref_pack(e, 'x', '1.0.0-beta.1'))
+        with self.assertRaisesRegex(sm.ManifestError, 'version'):
+            sm.check_ref_pack(dict(e, version='1.0.0'), 'x', '1.0.0-beta.1')
+        other = json.loads(json.dumps(m))
+        other['firmware'][0]['ref_pack']['version'] = '9.9.9'
+        with self.assertRaises(sm.ManifestError):
+            sm.check_manifest(other)
         # a reader that does not know ref_pack still finds the firmware entry it knows
         self.assertEqual(m['firmware'][0]['file'], 'ddm32-plus-1.0.0-beta.1.zip')
 

@@ -119,9 +119,10 @@ RE_COORD = re.compile(r'^0x[0-9a-f]{8}$')
 RE_DATE = re.compile(r'^\d{8}$')
 
 
-def check_ref_pack(e, where='ref_pack'):
+def check_ref_pack(e, where='ref_pack', firmware_version=None):
     """A firmware entry's map pack object; True when this program understands it, False when its schema is newer
-    (ignored: "update the programmer"); ManifestError when it is malformed"""
+    (ignored: "update the programmer"); ManifestError when it is malformed. firmware_version: the entry's own version,
+    which the pack's must equal"""
     _need(isinstance(e, dict), where)
     schema = e.get('schema')
     _need(isinstance(schema, int) and not isinstance(schema, bool) and schema >= 1, f'{where}.schema')
@@ -129,6 +130,7 @@ def check_ref_pack(e, where='ref_pack'):
         return False
     _asset(e, where)
     _need(RE_REF_FILE.match(e['file']) is not None, f'{where}.file')
+    _need(firmware_version is None or e['version'] == firmware_version, f'{where}.version (not the firmware\'s)')
     _need(e['size'] <= REF_PACK_MAX, f'{where}.size')
     for k, want in (('pack_type', 3), ('pack_format', 1)):
         _need(e.get(k) == want and not isinstance(e.get(k), bool), f'{where}.{k}')
@@ -169,7 +171,7 @@ def check_manifest(m):
         _need(e['version'] not in seen, f'{where}.version (duplicate)')
         seen.add(e['version'])
         if 'ref_pack' in e:
-            check_ref_pack(e['ref_pack'], f'{where}.ref_pack')
+            check_ref_pack(e['ref_pack'], f'{where}.ref_pack', e['version'])
     for key in ('app', 'app_net'):
         app = m.get(key)
         if app is not None:

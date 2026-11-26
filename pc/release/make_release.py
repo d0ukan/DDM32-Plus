@@ -354,10 +354,20 @@ def build(args, secret):
     manifest = {'format': sm.FORMAT, 'repo': sm.REPO, 'release': tag,
                 'created_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'firmware': [entry]}
     assets = {fw_name: fw_zip}
-    # The map pack (firmware 1.1+): --ref-pack, else the one the build made beside the image; --no-ref-pack: none
+    # The map pack (firmware 1.1+): --ref-pack, else the one the build made beside the image. A firmware that reads its
+    # map, repeaters and airfields from the pack (its build has the map pack layout) is never released without it:
+    # --no-ref-pack is for older builds, or with --allow-no-ref-pack (a loud warning: the map stays empty)
     ref = getattr(args, 'ref_pack', None)
+    build_json = json.loads((Path(args.build_dir) / 'rfoundry_dm32.json').read_text())
+    needs_pack = bool(build_json.get('ref_pack') or (build_json.get('audits') or {}).get('map_pack_tables_absent'))
     if ref is None and not getattr(args, 'no_ref_pack', False) and (Path(args.build_dir) / 'ddm32-ref.dpk').is_file():
         ref = Path(args.build_dir) / 'ddm32-ref.dpk'
+    if ref is None and needs_pack:
+        if not getattr(args, 'allow_no_ref_pack', False):
+            raise SystemExit('Refusing: this firmware reads its map, repeaters and airfields from the map pack, and no '
+                             'map pack is given (ddm32-ref.dpk missing or --no-ref-pack); --allow-no-ref-pack overrides')
+        print('WARNING: releasing a map pack firmware WITHOUT its map pack: the map, Repeaters and Airfields stay '
+              'empty until a user loads one (--allow-no-ref-pack)', file=sys.stderr)
     if ref is not None:
         image = Path(ref).read_bytes()
         facts = check_ref_pack(image, json.loads((Path(args.build_dir) / 'rfoundry_dm32.json').read_text()))
@@ -459,6 +469,8 @@ def main(argv=None):
     b.add_argument('--app-rs-notes-en')
     b.add_argument('--ref-pack', type=Path, help='the map pack .dpk (default: DIR/ddm32-ref.dpk when the build made one)')
     b.add_argument('--no-ref-pack', action='store_true', help='a release without the map pack (firmware before 1.1)')
+    b.add_argument('--allow-no-ref-pack', action='store_true',
+                   help='release a map pack firmware without its map pack anyway (warns: its map stays empty)')
     b.add_argument('--ref-min-firmware', help='the oldest firmware that uses the pack (default: --version)')
     b.add_argument('--tag')
     b.add_argument('--out', type=Path, required=True)
