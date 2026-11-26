@@ -1025,3 +1025,23 @@ other radio on several frequencies / NACs / talkgroups also makes finds.
 | SL-2 | With more finds than the screen shows: Down from the top through every find to the last, then Up back past the first | the highlighted find is always on screen with both its lines (the "ID" line too); the list scrolls; a "v" at the right of the Pass line while finds are below the part shown, "^" while some are above; Up past the first: nothing highlighted, the newest find on top again |
 | SL-3 | Same on DMR search and All digital search (English and Turkish menus) | as SL-2; OK on a find far down the list still tunes that find |
 | SL-4 | Pick a find far down the list while the search runs and new finds come in | the picked find stays highlighted and on screen (it moves down a row per new find, the list follows); # (P25 / DMR) still saves all finds, "Saving N of 16" at most |
+
+## Map pack and layout 2 (branch `mappack`, firmware 1.1, docs/mappack-design.md G.2)
+
+Each serial / flash / RF step needs the owner's approval in chat (AGENTS.md rule 1). Host-tested only so far. Owner
+decision 2026-11-26 (H.5 option (b)): the TRAC list ships, so MP7's TRAC repeater is refused in every state.
+
+| Row | Do | Expect |
+|---|---|---|
+| MP1 | Update 1.0.6 -> 1.1 with the existing RadioID pack, no map pack yet | boots normally; About: RadioID pack unchanged, "Map pack: none"; Map shows "No map data. Load the map pack (PC programmer)." (GPS position, track still drawn); Repeaters / Airfields: "load the map pack"; the auto repeater toggle says so and stays off; Home, scan, calls normal |
+| MP2 | Programmer 3.2 writes the map pack | 13 sectors, PASS; About "Map pack: DDM32 TR 1.1.0, 2026-11-19, 50 KB"; time noted (estimate 20-30 s) |
+| MP3 | Tools > Map, whole country, zoom in, districts; quiet, then during a DMR call with RadioID names (RX traffic) | draws like 1.0.6; keys stay responsive during the call; the map is not redrawn on every caller / RSSI change (the top strip and the line under the map only); stopwatch figure noted (estimate ~40-55 ms of reads per map-layer redraw) |
+| MP4 | Tools > Repeaters: scroll through a province and All | no visible lag (estimate ~30 ms a key) |
+| MP5 | Auto repeater on while moving | offers as in 1.0.6 |
+| MP6 | Airfields and the air watch with the user's air band pack | the air band pack's frequencies still win |
+| MP7 | Cross-band: a RadioID.net repeater's output as A, then a TRAC-only repeater's output; DOTA with the same two frequencies; once in the MP1 state (no map pack) and once after MP2 | both refused "Repeater frequency" in both states (the program-flash refusal set holds both sources' frequencies) |
+| MP8 | VFO on 156.800 (marine 16), PTT | refused as before (marine stays in program flash) |
+| MP9 | Write the map pack again | goes to the other slot, sequence + 1, in force |
+| MP10 | Boot time with both map slots written (after MP9) | at most ~0.15-0.2 s longer than 1.0.6 |
+| MP11 | DOTA: send the map pack to a second radio (if available) | ~7-9 min, accepted, in force; a pack for another version: "Map pack for another version", nothing erased |
+| MP12 (optional) | Downgrade to 1.0.6 and back | RadioID kept both ways; the map pack in force again on 1.1 |

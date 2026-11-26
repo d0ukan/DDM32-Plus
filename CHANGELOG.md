@@ -3,6 +3,27 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased
+
+Firmware (to be 1.1.0 with programmer 3.2.0, owner decision 2026-11-26). Host-tested only; not yet run on the radio.
+
+- **The map pack.** The Turkey map (provinces, districts), the repeater list and the airfields left program flash for
+  a new data pack on the data chip, the map pack (data pack type 3, `ddm32-ref-<version>.dpk`, a separate signed
+  release asset beside the firmware zip; docs/plus.md "The map pack and layout 2", docs/mappack-design.md). Without it
+  the map says "No map data. Load the map pack (PC programmer).", Repeaters and Airfields say "load the map pack", and
+  Settings > About has a "Map pack:" line ("none", "damaged, not used", "for another version"). Programmer 3.2 writes
+  it (13 sectors, ~20-30 s estimated); DOTA can send it to another radio ("Map pack", FM ~9 min, DMR ~7 min).
+- **Layout 2 of the data pack region**: the RadioID slots are 192 KB each (same starts as 1.0.x); the map pack takes
+  the former tails. A 1.0.x RadioID pack of up to 192 KB (the owner's 98 KB one) stays in force: no reload. A larger
+  one reads "too big for this firmware, rebuild it" and is not used. The firmware never writes the region by itself.
+  Use programmer 3.2 or later: an older programmer writing a RadioID pack over 192 KB can damage a map pack slot.
+- **Repeater refusals unchanged without a pack**: cross-band and DOTA refuse every listed repeater's output and input
+  from a frequency set kept in program flash (frequencies only), with or without the map pack; a user's own map pack
+  can only add refusals. Owner decision 2026-11-26: RadioID.net and the owner's TRAC list both ship, in the map pack's
+  repeater list and in that set, as in 1.0.x (TRAC states no licence; the owner takes the responsibility).
+- The map is drawn again from the chip only when something on it changes, not on every RSSI or caller change.
+- Program flash: about 40 KB freed (measured, see docs/plus.md); static RAM about +0.5 KB.
+
 ## v1.0.6 (2026-11-26, with programmer 3.1.0)
 
 Firmware. Host-tested only; not yet run on the radio. The programmer 3.1.0 is unchanged.

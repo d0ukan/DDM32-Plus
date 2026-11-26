@@ -850,7 +850,7 @@ time, and the `git` field check of E.3.
 | H.2 | **Update with an older programmer (3.1.0, or the retired C# 2.0)**: it installs 1.1 firmware but not the pack (it ignores `ref_pack`); map, repeaters, airfields and auto repeater say "load the map pack" until programmer 3.2 writes it (the cross-band / DOTA refusals keep working, C.7). An old programmer writing a > 192 KB RadioID pack can erase a map slot and still report PASS (B.4 N2) | coordinator's recommendation: release 1.1.0 with programmer 3.2.0 and a programmer self-update prompt; release notes "update the programmer first". Old programmers writing RadioID <= 192 KB keep working (same slot starts) |
 | H.3 | **Install order** | coordinator's recommendation, matching this design: update from 1.0.x with programmer 3.2: **pack first, then firmware** (1.0.6 ignores the map slot, so a failed firmware install leaves a working 1.0.6; `min_firmware` means "needed to use it", E.2); first install from stock: firmware first (no CPS before), then the pack |
 | H.4 | (revision 1: cross-band without a map pack) | **closed by B1**: the TX refusals use the flash frequency set (C.7); cross-band and DOTA behave the same with or without a pack. No owner question left here |
-| H.5 | **Repeater data in a public release (pack sections and the flash frequency set)**: TRAC states no licence; docs contradict (docs/plus.md:3381 vs :2201, THIRD_PARTY.md:64; E.5). The release gate (E.2) enforces the answer; until then it refuses "own" (TRAC) data in a public release, which differs from what 1.0.x releases shipped | **(d) recommended default, pending the owner:** the program-flash refusal set holds the repeater **frequencies** (outputs and inputs) of both sources, RadioID.net and TRAC, and nothing else (no names, cities, callsigns, positions, modes, tones); the public map pack's repeater **records** are RadioID.net only; TRAC records reach a radio only through the user's own PC-built pack. Every user keeps 1.0.x's refusal strength with or without a pack, and the TRAC list's content stays out of the release. Flash: the 0.7-0.9 KB set instead of 0.4 KB (+0.3-0.5 KB over (a)). Gate: the pack's source "own" refused, the flash set's "own" frequencies allowed, checked separately (E.2). `--plus` / `--public` stay one image. Whether frequencies alone may be published is part of the TRAC question. **(a)** RadioID.net only in both pack and set, TRAC built on the user's PC: **removes the TRAC-repeater TX refusals (cross-band and DOTA) for every public user who has no TRAC list of their own, compared with 1.0.x** (the OR rule restores them only where a user pack carries TRAC rows). **(b)** keep what 1.0.x ships (both sources in set and pack). **(c)** no repeaters in the release at all, all user-built (the public set is empty; only the band-plan segments refuse until a user pack is loaded). The format and the gate support all four |
+| H.5 | **DECIDED 2026-11-26: option (b)** (the owner replaced the recommended (d)): both repeater sources ship as in 1.0.x. The public map pack's repeater records carry RadioID.net and the owner's TRAC list ("own" / "own+RadioID.net"), and the program-flash refusal set holds the frequencies of both. The release gate allows "own" in the pack and in the set and still refuses "sample"; it keeps recording both sources in the build manifest. `--plus` / `--public` stay one image. The docs now say plainly that public builds and the public map pack include the TRAC-derived list on the owner's decision, that TRAC states no licence and that the owner takes the responsibility (docs/plus.md, THIRD_PARTY.md). The S-B rule (a user-built pack is never replaced silently) stays; since the release pack itself now carries "own", programmer 3.2 recognises a user-built pack **by its header tag** (anything other than the release builder's "build <version>"), not by "own" in RPT_INFO (section I). The options as they were weighed: **Repeater data in a public release (pack sections and the flash frequency set)**: TRAC states no licence; docs contradict (docs/plus.md:3381 vs :2201, THIRD_PARTY.md:64; E.5). The release gate (E.2) enforces the answer; until then it refuses "own" (TRAC) data in a public release, which differs from what 1.0.x releases shipped | **(d) recommended default, pending the owner:** the program-flash refusal set holds the repeater **frequencies** (outputs and inputs) of both sources, RadioID.net and TRAC, and nothing else (no names, cities, callsigns, positions, modes, tones); the public map pack's repeater **records** are RadioID.net only; TRAC records reach a radio only through the user's own PC-built pack. Every user keeps 1.0.x's refusal strength with or without a pack, and the TRAC list's content stays out of the release. Flash: the 0.7-0.9 KB set instead of 0.4 KB (+0.3-0.5 KB over (a)). Gate: the pack's source "own" refused, the flash set's "own" frequencies allowed, checked separately (E.2). `--plus` / `--public` stay one image. Whether frequencies alone may be published is part of the TRAC question. **(a)** RadioID.net only in both pack and set, TRAC built on the user's PC: **removes the TRAC-repeater TX refusals (cross-band and DOTA) for every public user who has no TRAC list of their own, compared with 1.0.x** (the OR rule restores them only where a user pack carries TRAC rows). **(b)** keep what 1.0.x ships (both sources in set and pack). **(c)** no repeaters in the release at all, all user-built (the public set is empty; only the band-plan segments refuse until a user pack is loaded). The format and the gate support all four |
 | H.6 | RadioID reload | not needed for the owner (98 KB). Only a pack > 196,544 B (multi-country) must be rebuilt; About says so (`DPK_BIG`) |
 | H.7 | 64 KB map slot is fixed by the layout; headroom ~14.8 KB | enough for the planned scans; if repeaters grow past ~+250, split them into a pack type of their own in the free 32 KB later |
 | H.8 | SPI read speed is an estimate (byte-polled SSI, no measured figure) | if MP3 / MP4 show lag, enlarge the window or add a key for districts; worst case still a draw well under 0.2 s |
@@ -859,3 +859,85 @@ time, and the `git` field check of E.3.
 | H.9c | Boot time grows ~150 ms with two map packs (S5) | accepted, or later check the losing slot only when it could win |
 | H.10 | Firmware-version check in the programmer uses the CPS info `git` text (15 characters) | confirm its content on the radio (read-only info command) before relying on it; it guards UX only |
 | H.11 | Version name: the map pack belongs to firmware 1.1.0 (a new minor version, since the release now has two parts) | owner picks the version |
+
+---
+
+## I. Implemented interface (job "mappack-fw", 2026-11-26): the facts the Rust programmer 3.2 must match
+
+What the firmware and the Python tools now do, byte for byte. Where this differs from sections A-H above, this
+section is the implementation.
+
+**Slots (layout 2)**, `datapack.c slots[]`, `tools/datapack.py SLOT / SLOT_ADDR`: RadioID 0xE70000 / 0xEB0000 size
+0x30000 (payload <= 196,544); air band 0xEF0000 / 0xEF4000 size 0x4000; map pack (type 3) **0xEA0000 / 0xEE0000 size
+0x10000 (payload <= 65,472)**. Region 0xE70000-0xEFFFFF only.
+
+**Header** (64 bytes, little-endian, unchanged layout): 0 magic "DPK1", 4 type u8 (1 RadioID, 2 air band, 3 map
+pack), 5 fmt u8 (1), 6 flags u16, 8 seq u32, 12 len u32, 16 crc u32 (CRC-32/zlib of the payload), 20 date char[8]
+"YYYYMMDD", 28 name char[16], 44 tag char[16], 60 hcrc u32 (CRC-32 of bytes 0-59). For type 3, flags = version hint =
+dir_version | (coord_id & 0xFF) << 8 (firmware 1.1: **0x1001**: directory version 1, coordinate id 0x056b6a10);
+**0 = no hint** (never a mismatch); a non-zero hint that differs is "another version". Types 1 and 2 keep 0. The
+release builder's tag is "build <version>" (e.g. "build 1.1.0"), its name "DDM32 TR <version>". A writer that rebuilds
+the header with a new sequence carries flags (and date, name, tag) from the .dpk unchanged (`datapack.reseq`).
+
+**Payload format 1**: a 16-byte head: 0 "REF1", 4 dir_version u8 (1), 5 n u8 (<= 16), 6 u16 0, 8 coord_id u32 =
+CRC-32 over the 7 int32 LE LON0_E7 250000000, LAT0_E7 355000000, UNIT_E7 10000, XMIN 663, YMIN 320, XMAX 19807,
+YMAX 6599 followed by the ASCII text "iso-8859-9" (= 0x056b6a10), 12 u32 0. Then n entries of 12 bytes: id u16,
+rec u16, off u32 (from the payload start), count u32. The builder writes the entries in id order and the sections in id
+order right after the directory (4-byte aligned, zero padded); readers must not rely on that order.
+
+| id | section | rec | count (1.1 pack) |
+|---:|---|---:|---|
+| 1 | map meta: lon0 i32, lat0 i32, unit i32, xmin / ymin / xmax / ymax i16, provinces / rings / steps / districts u16, 4 zero bytes | 32 | 1 |
+| 2 | provinces: first_ring u16, ring_count u8, plate u8, name u16, label x / y i16, min x / y i16, max x / y i16 | 18 | 81 |
+| 3 | rings: start x / y i16, first u16, count u16 | 8 | 85 |
+| 4 | steps: dx i8, dy i8 | 2 | 8,715 |
+| 5 | province names (NUL separated, ISO-8859-9, ends with a NUL) | 1 | 617 |
+| 6 | district positions: x / y i16 | 4 | 973 |
+| 7 | district first u16 | 2 | 82 |
+| 8 | district name first u16 | 2 | 81 |
+| 9 | district names (NUL separated, ends with a NUL) | 1 | 7,896 |
+| 10 | repeater info: count u32, sample u8, date char[11], source char[16] | 32 | 1 |
+| 11 | repeaters (rpt_entry_t): lat_e5 i32, lon_e5 i32, rx_hz u32, off i16 (1.25 kHz), ctcss10 u16, mode u8 (at 16), dmr u8, name char[11] (18), city char[13] (29), prov u8 (42), 1 pad | 44 | 252 |
+| 12 | repeater key: lat_e5 i32, lon_e5 i32, prov u8, mode u8 | 10 | 252 |
+| 13 | airfields (air_field_t): lat_e5 i32, lon_e5 i32, first u16 (8), count u8 (10), kind u8 (11), code char[8] (12), name char[23] (20), prov u8 (43) | 44 | 74 |
+| 14 | air frequencies: ch u16, type u8, 1 pad | 4 | 122 |
+| 15 | airfield key: lat_e5 i32, lon_e5 i32, prov u8, kind u8 | 10 | 74 |
+
+Groups: map = 1-9, repeaters = 10-12, airfields = 13-15; a group is all there or all absent (absent: that feature
+off, not an error). The 1.1 release pack is 50,724 bytes with its header (13 sectors).
+
+**Validation** (`ref_pack.c ref_validate`; `refpack.validate` applies the same rules; all arithmetic u32). OTHER first:
+dir_version != 1, coord_id != the firmware's, a non-zero flags != the hint, a known id with another rec. BAD: len < 16,
+no "REF1", n > 16, 16 + 12n > len, a known id twice, off % 4, off < 16 + 12n, off > len, count > (len - off) / rec,
+two known sections overlapping, a partial group; map: meta count 1 with origin / unit / bounds equal to the compiled
+ones, provinces 81 = meta, rings / steps / districts equal to meta, district first 82 entries, name first 81, both
+name blobs non-empty and NUL-ended, every ring count >= 1 and first + count <= steps, every province first_ring +
+ring_count <= rings, name < province-name bytes, min <= max; district first[0] = 0, non-decreasing, first[81] =
+districts; name first non-decreasing and < district-name bytes, and walking province p's names from name_first[p] finds
+first[p+1] - first[p] NUL-ended names inside the blob; repeaters: info count 1, RPT count = key count <= 65,534, each
+key's 8 position bytes, prov and mode equal to its record's (record offsets 42, 16); airfields: AIR count = key count
+<= 65,534, each key equal (prov at 43, kind at 11), count <= 64 and first + count <= the frequency count. All or nothing
+per slot. The firmware runs it at every scan and in dpk_commit before the header; a slot rejected as OTHER or BAD is
+never in force; the type's state when both slots are rejected: OTHER > BIG > BAD > NONE. A slot not starting with
+"DPK1" is NONE.
+
+**Slot choice for a PC write** (`datapack.inactive_slot`, `datapack.ref_write_slot`): in force = the valid slot (all
+the checks above) with the higher sequence; the new pack goes into the other one (rejected, empty or older); sequence =
+1 + the highest sequence of any slot whose header CRC checks; never overwrite the slot the RUNNING firmware uses (when
+its rules are not known: the higher-sequence slot whose header and payload CRC check); a slot that could not be read in
+full: write nothing. CPS order: the payload's sectors, the header's sector last, then C 5 so the radio rescans.
+
+**Release manifest** (`pc/release/make_release.py`; `pc/radiotools/signed_manifest.py check_ref_pack`), optional,
+inside each firmware entry:
+`"ref_pack": {"schema": 1, "version": "1.1.0", "file": "ddm32-ref-1.1.0.dpk", "url": "<URL_PREFIX><tag>/ddm32-ref-1.1.0.dpk", "sha256": "<64 hex>", "size": <int, at most 65536>, "pack_type": 3, "pack_format": 1, "dir_version": 1, "coord_crc": "0x056b6a10", "date": "20261119", "min_firmware": "1.1.0"}`.
+A schema above 1 is ignored ("update the programmer"), not an error. File name pattern
+`^ddm32-ref-<version>\.dpk$`; coord_crc `^0x[0-9a-f]{8}$`; date 8 digits. The firmware zip keeps its three files.
+`make_release.py verify` checks the nested object's size, SHA-256, header, CRCs, structure and the repeater gate.
+
+**Build manifest** (`rfoundry_dm32.json` "ref_pack"): file, sha256, size, pack_type, pack_format, dir_version,
+coord_crc, flags, date, name, rebuild_identical, repeater_sources {pack, pack_sample, freq_set, freq_set_sample,
+pack_switch, freq_switch}.
+
+**A user-built pack (S-B under option (b))**: the release pack's repeater info source is "own+RadioID.net" too, so
+"own" no longer marks a user's pack; recognise it by the header tag: "build <version>" = the release builder's,
+anything else (`refpack.py build --tag "user 20261201"`, the programmer's own tag) = user-built.

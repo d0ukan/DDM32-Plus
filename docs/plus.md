@@ -2198,8 +2198,11 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   with the raw files) into `research-data/repeaters.csv`: 174 entries, 3 under maintenance and 18 APRS digipeaters
   (144.800 simplex) left out, comma decimals and one "439275" fixed, 152 kept (151 FM with their CTCSS, 1 DMR; the
   site name is the "callsign", the branch the city; 57 without valid coordinates placed by the gazetteer). With
-  RadioID.net: 252 repeaters (DMR 101, FM 151), 11,120 B. TRAC states no licence: the owner's own radio only, never
-  in a published build. **Sources checked, not used** (before that): TRAC's
+  RadioID.net: 252 repeaters (DMR 101, FM 151), 11,120 B. TRAC states no licence. **Owner decision 2026-11-26
+  (docs/mappack-design.md H.5, option (b))**: public builds and the public map pack carry the TRAC-derived list
+  with RadioID.net's, as the 1.0.x releases did (the map pack's repeater records and the program-flash refusal set
+  of their frequencies); TRAC states no licence and the owner takes the responsibility for publishing it. (This
+  replaces the earlier "the owner's own radio only, never in a published build".) **Sources checked, not used** (before that): TRAC's
   role (repeater) lists (trac.org.tr and branch pages, e.g. old qsl.net copies from 2003): web pages, no licence,
   not current; RepeaterBook: its API terms forbid bulk extraction, mirroring and redistribution without written
   permission; HearHam (hearham.com/api/repeaters/v1, has coordinates; in Turkey only ~65 DMR repeaters, the same ones):
@@ -3378,7 +3381,10 @@ the panel, nothing else on its line, the footer and the art above it.
 **Public build**: `python3 tools/build_radiofoundry.py --plus --public --stack-check --verify-rebuild` →
 `build/dm32-p25-plus-public/` (logs `*-plus-public.log`; the owner's `dm32-p25-plus/` is never touched). The same
 firmware with `CONFIG_ID_DB=n`: nothing generated from `research-data/user.csv` (RadioID.net users) is compiled, and
-About has no "ID database" line. The repeater list ships (RadioID.net repeaters + the owner's TRAC list). Guards:
+About has no "ID database" line. The repeater list ships (RadioID.net repeaters + the owner's TRAC list; since
+1.1 in the public map pack `ddm32-ref-<version>.dpk` and, frequencies only, in the program-flash refusal set; TRAC
+states no licence, the owner publishes it on his own responsibility: owner decision 2026-11-26, docs/mappack-design.md
+H.5 option (b)). Guards:
 `--public` needs `--plus` and refuses `--feature ID_DB=…`; `plus_brand.public_command` refuses a make command whose
 last `CONFIG_ID_DB` is not `n`; after the link `plus_brand.public_audit` refuses an ELF holding any `iddb_*` symbol
 (manifest: `public_enabled`, `audits.public_id_db_absent`). `make test` runs `tools/plus_brand.py --self-test`:
@@ -3690,6 +3696,74 @@ Role Receive, Ready as for channels (the import rows do not matter for a pack; "
 `docs/r14.md` 7.6: the receiver has no "What: Data pack" of its own; it is asked about whatever pack a sender offers,
 and a sender of channels is received as before. Nothing reaches the codeplug; the new pack replaces the one of its
 type only when every byte arrived and checked, and About shows it at once.
+
+### The map pack and layout 2 (firmware 1.1, branch `mappack`; design `docs/mappack-design.md` rev. 4)
+
+The Turkey map (81 provinces, 85 rings, 8,715 steps, names), the 973 districts, the repeater list and the 74 airfields
+with their 122 frequencies left program flash for a **third pack type, the map pack** (`DPK_REF` = 3, format 1) on the
+data chip. Fonts, the Turkish text table and the marine table (it feeds the radio core's TX refusal, H.1) stay in
+flash. Code: `integration/radiofoundry/datapack/ref_pack.{c,h}` (validation, the UI task's readers), the users in
+`map/`, `rpt/`, `air/`, `xband/ui_xband.c`, `dota/`; builder `tools/refpack.py`; host tests `tests/plus/test_refpack.c`
+(T4-T10), `test_datapack.c` (T1, T2), `test_rpt.c` (T15), `tools/test_datapack.py` (T3, T5d), `pc/tests` (T16).
+
+- **Layout 2** (datapack.c `slots[]`): RadioID A 0xE70000 and B 0xEB0000, now **192 KB** each (payload up to
+  196,544 B; the same starts as 1.0.x, so a 1.0.x pack of up to 192 KB, the owner's 98 KB one, stays in force without
+  a reload, and a downgrade to 1.0.x keeps it); map pack A **0xEA0000** and B **0xEE0000**, 64 KB each (what were the
+  tails of 1.0.x's 256 KB slots); air band unchanged at 0xEF0000 / 0xEF4000; 0xEF8000-0xEFFFFF (32 KB) free. The
+  firmware never writes the region by itself (not at boot, not on update); writes stay the CPS session's journaled
+  sectors and a DOTA receive after the user's Yes. A 1.0.x RadioID pack over 196,544 B reads **DPK_BIG** ("RadioID
+  pack: too big for this firmware, rebuild it"; not used, nothing written). A slot whose first 4 bytes are not `DPK1`
+  is **NONE** (nothing committed: the header is written last), BAD stays for a `DPK1` header or payload that does not
+  check, so an upgraded radio's old payload bytes in a map slot never show "damaged".
+- **Format 1**: a 16-byte directory head (`REF1`, directory version 1, the section count, the map coordinate id =
+  CRC-32 of the 7 compiled coordinate constants and the charset text) and up to 16 entries (id, record size, offset,
+  count); sections 1-15 (map meta, provinces, rings, steps, province names, district positions / first / name first /
+  names, repeater info / records / key, airfields / frequencies / key), each 4-byte aligned, records in the exact C
+  struct layouts. The header's `flags` carry a version hint (directory version | coordinate id's low byte << 8);
+  **0 = no hint** (older writers), then the directory decides. Unknown section ids are ignored.
+- **Validation** (`ref_validate`, all arithmetic in u32): placement, overlap and groups (a feature's sections all or
+  none), the map's counts, rings, provinces, district index and name walk, NUL-ended blobs, repeater and airfield keys
+  equal to their records, air lists inside the frequencies and at most 64. A version item (another directory version,
+  a known section with another record size, another coordinate id, a non-zero hint that disagrees) makes the slot
+  **DPK_OTHER** ("Map pack: for another version, load the one for this firmware"), anything else BAD; all or nothing per
+  slot. It runs in `slot_check` (boot, CPS close, DOTA commit: only a validated slot is ever in force) and in
+  `dpk_commit` **before the header is programmed** (a DOTA transfer that checks by CRC but not by structure never
+  commits: "Bad pack"). Raw reads of the slot being checked only, its own 64-byte buffer after `payload_crc`'s.
+- **Readers** (UI task only): a directory copy owned by the UI task, reloaded from its own slot when the pack in force
+  changed (slot or sequence) at the next `ref_has` / `ref_count`, never mid-use; a 128-byte stream window (steps,
+  names, key passes) and a 48-byte record window; strings of copied records always terminated (S3). Without a pack:
+  "No map data. Load the map pack (PC programmer)." in the map area (GPS position, track, stations and waypoints still
+  draw; the line under the map gives the position), "No repeater data: load the map pack" (Repeaters, the map's #, the
+  auto repeater's toggle stays off), "No airfield data: load the map pack" (Airfields, air watch). Locator, trip meter
+  and the GPS dashboard never read the moved tables.
+- **The map's cheap frames** (S4): the map layer is read from the chip only when its key changes (view, theme, our
+  pixel, picks, station and waypoint marks in view, track, coverage, the pack's generation) or when the last frame on
+  the screen was not the map's own (`ui_app_draws`) or a banner or toast is or was up; a radio view or battery change
+  repaints only the top strip and the lines under the map (no `gfx_clear`, nothing read).
+- **TX refusals with or without a pack** (C.7): cross-band and DOTA refuse a listed repeater's output or input from
+  a frequency set in program flash (`build/rpt/rpt_freqs.c`, generated by `tools/rpt_list.py` at every prepare: the
+  frequencies only, 1.25 kHz steps above 135.99375 / 399.99375 MHz, searched in Hz with the old +-6,250 Hz test),
+  **or** the map pack's repeaters when it has them (a user's own pack only ever adds refusals). The build checks the
+  set against the old loop over its rows on 1.39 million frequencies (T15) and refuses a set that differs.
+- **Repeater sources** (owner decision 2026-11-26, H.5 option (b)): the public map pack's records and the flash set
+  both carry RadioID.net and the owner's TRAC list (`$RPT_PACK_SOURCES` / `$RPT_FREQ_SOURCES`, default `own,radioid`),
+  recorded in the build manifest (`ref_pack.repeater_sources`); `--plus` and `--public` stay one image.
+- **Build and release**: `build_radiofoundry.py --plus` writes `build/dm32-p25-plus*/ddm32-ref.dpk` (sequence 0, name
+  "DDM32 TR <version>", tag "build <version>", flags = the hint) from the committed map / district / airfield tables
+  and `build/rpt/rpt_data.c`, requires it to rebuild byte-identical with `--verify-rebuild`, and records its SHA-256,
+  size and sources in `rfoundry_dm32.json`; `plus_brand.table_audit` refuses an ELF still linking a moved table.
+  `pc/release/make_release.py` publishes it as `ddm32-ref-<version>.dpk`, a `ref_pack` object inside the firmware's
+  manifest entry (the firmware zip keeps its three files) after its gate: a whole pack the firmware takes, the one the
+  build made, repeater sources in the cleared lists ("sample" never). `--verify` walks the nested object.
+- **PC writes** (programmer 3.2, Rust; `tools/datapack.py` as the model): the map pack goes through the same CPS path
+  into the slot the firmware does not use (a rejected or empty one, else the older valid one; never the slot the
+  running firmware uses), sequence above every slot with a checking header, `flags` carried from the `.dpk`
+  (`datapack.reseq`), header sector last; 13 sectors.
+
+| Step | What | Public FLASH B | Public RAM B (free) |
+|---|---|---:|---:|
+| base | v1.0.6 (`ddm25` 580a16d) | 896,068 | 206,208 (5,248) |
+| mappack | the map pack: tables out, readers, validation, refusal set, cheap frames, DOTA type 3, About | see CHANGELOG / ROADMAP (measured) | |
 
 ## Last calls (`CONFIG_LAST_CALLS`, ours; branch `r14-xband`, ROADMAP item 43)
 

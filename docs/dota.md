@@ -880,3 +880,14 @@ four points of the receiver's writing: the old pack in force byte for byte each 
 packs: "Other version"); `test_ui_dota.c` (the What choice and the pack row, greyed "none", "Nothing to send", the
 request, "49/98 KB", the question with Yes and No, the results, English and Turkish, every page inside the screen).
 Radio rows DP6-DP10 in `docs/plus-radio-test.md`.
+
+**The map pack (firmware 1.1, `docs/mappack-design.md` E.4).** The same content type carries type 3 unchanged: What
+gains "Map pack" ("Harita paketi") after the two others (`WHATS` = 4 + `DPK_TYPES`, row `3 + rq.pack`), greyed "none"
+without one. ~50.7 KB in 120-byte chunks: ~423 frames, FM ~9 min, DMR ~7 min, plus 13 sector erases (the PC path is
+the better one). A receiver checks the HELLO's header first: a map pack whose `fmt` is not 1 or whose non-zero
+`flags` version hint is not this firmware's is refused at once ("Other version" to the sender) and the receiver shows
+"Map pack for another version" ("Başka sürümün harita paketi"), nothing erased; `flags` 0 (an older writer) is no
+hint. At END `dpk_commit` checks the pack's structure after the CRC and before the header (`ref_validate`): one that
+does not check is never committed and the receiver ends with "Bad pack" ("Bozuk paket"), the old pack in force. A
+1.0.x receiver refuses type 3 (`h.type > DPK_TYPES`) without writing; a 1.1 receiver refuses a 1.0.x RadioID pack over
+196,544 B (`dpk_hdr_ok`'s length) without writing. Radio row MP11 in `docs/plus-radio-test.md`.
