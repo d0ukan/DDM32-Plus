@@ -3722,7 +3722,8 @@ flash. Code: `integration/radiofoundry/datapack/ref_pack.{c,h}` (validation, the
   struct layouts. The header's `flags` carry a version hint (directory version | coordinate id's low byte << 8);
   **0 = no hint** (older writers), then the directory decides. Unknown section ids are ignored.
 - **Validation** (`ref_validate`, all arithmetic in u32): placement, overlap and groups (a feature's sections all or
-  none), the map's counts, rings, provinces, district index and name walk, NUL-ended blobs, repeater and airfield keys
+  none), the map's counts, rings and provinces' rings consecutive and disjoint (each step walked once by a draw,
+  whatever a crafted pack holds), district index and name walk, NUL-ended blobs, repeater and airfield keys
   equal to their records, air lists inside the frequencies and at most 64. A version item (another directory version,
   a known section with another record size, another coordinate id, a non-zero hint that disagrees) makes the slot
   **DPK_OTHER** ("Map pack: for another version, load the one for this firmware"), anything else BAD; all or nothing per
@@ -3754,7 +3755,10 @@ flash. Code: `integration/radiofoundry/datapack/ref_pack.{c,h}` (validation, the
   size and sources in `rfoundry_dm32.json`; `plus_brand.table_audit` refuses an ELF still linking a moved table.
   `pc/release/make_release.py` publishes it as `ddm32-ref-<version>.dpk`, a `ref_pack` object inside the firmware's
   manifest entry (the firmware zip keeps its three files) after its gate: a whole pack the firmware takes, the one the
-  build made, repeater sources in the cleared lists ("sample" never). `--verify` walks the nested object.
+  build made, repeater sources in the cleared lists ("sample" never). `--verify` walks the nested object. A build
+  with the map pack layout (its manifest's `ref_pack`, or `audits.map_pack_tables_absent`) is never released without
+  its pack: a missing `ddm32-ref.dpk` or `--no-ref-pack` is refused unless `--allow-no-ref-pack` (a loud warning).
+  The manifest checker refuses a `ref_pack.version` other than its firmware entry's.
 - **PC writes** (programmer 3.2, Rust; `tools/datapack.py` as the model): the map pack goes through the same CPS path
   into the slot the firmware does not use (a rejected or empty one, else the older valid one; never the slot the
   running firmware uses), sequence above every slot with a checking header, `flags` carried from the `.dpk`

@@ -911,8 +911,12 @@ dir_version != 1, coord_id != the firmware's, a non-zero flags != the hint, a kn
 no "REF1", n > 16, 16 + 12n > len, a known id twice, off % 4, off < 16 + 12n, off > len, count > (len - off) / rec,
 two known sections overlapping, a partial group; map: meta count 1 with origin / unit / bounds equal to the compiled
 ones, provinces 81 = meta, rings / steps / districts equal to meta, district first 82 entries, name first 81, both
-name blobs non-empty and NUL-ended, every ring count >= 1 and first + count <= steps, every province first_ring +
-ring_count <= rings, name < province-name bytes, min <= max; district first[0] = 0, non-decreasing, first[81] =
+name blobs non-empty and NUL-ended; **rings consecutive and disjoint**: ring 0's first = 0, every ring r's first =
+ring r-1's first + count, every count >= 1, and the last ring's first + count = steps exactly; **provinces' rings
+consecutive and disjoint**: province 0's first_ring = 0, every province p's first_ring = province p-1's first_ring +
+ring_count, and province 80's first_ring + ring_count = rings exactly (a province may have ring_count 0); every
+province's name < province-name bytes, min <= max (S1, verifier 2026-11-26: with overlapping or shared rings a
+CRC-valid 60 KB pack made one map draw walk 454 million steps; with this rule a draw walks each step once); district first[0] = 0, non-decreasing, first[81] =
 districts; name first non-decreasing and < district-name bytes, and walking province p's names from name_first[p] finds
 first[p+1] - first[p] NUL-ended names inside the blob; repeaters: info count 1, RPT count = key count <= 65,534, each
 key's 8 position bytes, prov and mode equal to its record's (record offsets 42, 16); airfields: AIR count = key count
@@ -941,3 +945,7 @@ pack_switch, freq_switch}.
 **A user-built pack (S-B under option (b))**: the release pack's repeater info source is "own+RadioID.net" too, so
 "own" no longer marks a user's pack; recognise it by the header tag: "build <version>" = the release builder's,
 anything else (`refpack.py build --tag "user 20261201"`, the programmer's own tag) = user-built.
+
+**After the verifier (2026-11-26):** `ref_pack.version` must equal its firmware entry's `version` (signed_manifest
+`check_ref_pack(e, where, firmware_version)`; Rust should refuse a mismatch too). `make_release.py` refuses to publish a
+firmware with the map pack layout without its pack unless `--allow-no-ref-pack`.
