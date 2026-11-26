@@ -10,7 +10,7 @@
 
 [![Lisans: GPL-3.0-or-later](https://img.shields.io/badge/lisans-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Temel: Open25-DM32](https://img.shields.io/badge/temel-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Sürüm: v1.1.0](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.1.0-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.1.0)
+[![Sürüm: v1.1.0](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.2.0-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.0)
 
 [English README](README.md)
 
@@ -40,11 +40,12 @@
 ## Durum
 
 DDM32 Plus **v1.0.0** (2026-11-23) ile **kararlı** sürüm hattındadır. Yayımlanmış en son sürüm
-**[v1.1.0](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.1.0)** (2026-11-26); programlayıcı **3.2.0** ile
+**[v1.2.0](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.0)** (2026-11-26); programlayıcı **3.2.0** ile
 birlikte (Rust, Windows kurulumu; Linux ve macOS paketleri sonra; kaynak [`rust/`](rust/) içinde). C# Windows programı
 2.0.0 emekliye ayrıldı. **1.1.0 harita, röle listesi ve havaalanlarını veri çipindeki bir harita paketine taşır**
-(program flash'ında ~40 KB yer açılır); **önce programlayıcıyı 3.2.0'a güncelleyin**, harita paketini o yazar.
-Aşağıda "(1.0.2)" - "(1.1.0)" yazan özellikler o sürümle geldi; **1.0.2 - 1.1.0
+(program flash'ında ~40 KB yer açılır); **önce programlayıcıyı 3.2.0'a güncelleyin**, harita paketini o yazar. **1.2.0 otomatik
+havaalanı ve röle taramasını getirir** (Araçlar > Hava tarama / Röle tarama).
+Aşağıda "(1.0.2)" - "(1.2.0)" yazan özellikler o sürümle geldi; **1.0.2 - 1.2.0
 telsizde tam denenmeden yayımlandı** (1.0.3'ten ISS basılı tuşu, arama ekranı ve Güneş & Ay telsizde çalışırken
 görüldü; gerisi yalnızca bilgisayarda test edildi).
 

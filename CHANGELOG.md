@@ -3,9 +3,10 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased
+## v1.2.0 (2026-11-26)
 
-Host-tested only; not yet run on the radio (docs/plus-radio-test.md AS1 ... AS12).
+Firmware 1.2.0; the programmer stays 3.2.0 (it writes the 1.2.0 map pack). Host-tested only; not yet run on the
+radio (docs/plus-radio-test.md AS1 ... AS12).
 
 - **Auto airfield scan and auto repeater scan** (Tools > Air scan, Tools > Repeater scan, or a held digit set in
   Settings > Keys; docs/plus.md, docs/autoscan-design.md). With the map pack and a GPS fix the multi-watch ring watches

@@ -10,7 +10,7 @@ by **d0ukan · TA2DOU**
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Based on Open25-DM32](https://img.shields.io/badge/based%20on-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Release: v1.1.0](https://img.shields.io/badge/release-v1.1.0-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.1.0)
+[![Release: v1.1.0](https://img.shields.io/badge/release-v1.2.0-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.0)
 
 [Türkçe README](README.tr.md)
 
@@ -38,11 +38,12 @@ by **d0ukan · TA2DOU**
 ## Status
 
 DDM32 Plus has been a **stable** release line since **v1.0.0** (2026-11-23). The latest published release is
-**[v1.1.0](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.1.0)** (2026-11-26), with the programmer **3.2.0**
+**[v1.2.0](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.0)** (2026-11-26), with the programmer **3.2.0**
 (Rust, Windows setup; Linux and macOS packages follow; source in [`rust/`](rust/)). The C# Windows programmer 2.0.0
 is retired. **1.1.0 moves the map, the repeater list and the airfields into a map pack on the data chip** (about 40 KB
-of program flash freed); **update the programmer to 3.2.0 first**, it writes the map pack. Features marked
-"(1.0.2)" - "(1.1.0)" below came with that version; **1.0.2 - 1.1.0 were published before a full radio test** (from 1.0.3 the ISS hold key, the search screen and Sun & Moon were seen working on
+of program flash freed); **update the programmer to 3.2.0 first**, it writes the map pack. **1.2.0 adds the auto
+airfield scan and the auto repeater scan** (Tools > Air scan / Repeater scan). Features marked
+"(1.0.2)" - "(1.2.0)" below came with that version; **1.0.2 - 1.2.0 were published before a full radio test** (from 1.0.3 the ISS hold key, the search screen and Sun & Moon were seen working on
 the radio; the rest is host-tested only).
 
 Every feature below is built and covered by host tests (a simulator of the radio's screens, radio core and modems), but
