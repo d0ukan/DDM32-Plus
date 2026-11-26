@@ -62,6 +62,11 @@ def prepare(transform, dest, write):
          '    else{kv_ok_gen=g;kv_ok_sig=storage_crc32(0,h,sizeof h);kv_ok=1u;}\n'
          '   }\n'
          '   if(!c->done){c->root_crc=get32(h+8);c->root_next=get32(h+12);}}\n'),
+        ('e->key=get16(b);e->len=get16(b+2);e->addr=',
+         'e->key=get16(b);e->len=get16(b+2);\n'
+         '  /* DDM32 Plus: a trusted page skips page_check\'s entry walk; never step past the page */\n'
+         '  if((uint32_t)w->at+4u+e->len>w->len){w->done=true;break;}\n'
+         '  e->addr='),
         ('  kv_walk_t walk={c->page,c->next,c->crc,c->hdr,c->len,c->at,c->done,c->started};kv_entry_t e;\n',
          '  if(!c->done&&(kv_ok&1u)&&kv_ok_gen==codeplug_kv_generation())kv_ok|=2u;\t// pages checked: headers only\n'
          '  kv_walk_t walk={c->page,c->next,c->crc,c->hdr,c->len,c->at,c->done,c->started};kv_entry_t e;\n'),

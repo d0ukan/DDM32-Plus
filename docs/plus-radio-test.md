@@ -1065,3 +1065,14 @@ the map pack (MP2) and a GPS fix. PTT rows transmit: only on the owner's license
 | AS10 | Tools > Air scan near an airport | AM letters, "LTxx TWR" labels, no ATIS; PTT refused (AM) |
 | AS11 | During a scan start DOTA (receive) or cross-band | the scan ends ("... off"), the session runs; after it the radio is as before the scan; the beacon and satellite hold work again (no stuck air state) |
 | AS12 | During a scan write a new map pack (programmer); then the scan's held digit on a VFO | the letters chosen again from the new pack; the digit starts / stops the scan in VFO mode |
+
+## Channels list speed (branch `chlag`, docs/plus.md "Channels list speed")
+
+No transmit. Uses the owner's own codeplug (about 27 channels, 13 P25 tags). Compare with v1.2.0 if still known.
+
+| Row | Do | Expect |
+|---|---|---|
+| CL1 | Menu > Channels, time from the press to the full list | clearly faster than on 1.2.0 (target: no visible wait) |
+| CL2 | Hold Down through the whole list, then Up | each move follows the key, no stutter |
+| CL3 | Change a P25 channel's NAC / TG with the programmer, then open Channels and Home on it | the new values are shown and used at once |
+| CL4 | Power off and on, open Channels | same list, same values |

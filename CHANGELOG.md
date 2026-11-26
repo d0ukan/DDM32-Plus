@@ -3,9 +3,10 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased
+## v1.2.1 (2026-11-27)
 
-Host-tested only; not yet run on the radio.
+Firmware 1.2.1; the programmer stays 3.2.0. Host-tested only; not yet run on the radio (docs/plus-radio-test.md
+CL1 ... CL4).
 
 - **Menu > Channels opens and moves faster** (owner's report on v1.2.0: the list came up late and lagged while
   moving). Every channel load checked the whole codeplug settings area again (each page's CRC and entry walk, twice
@@ -13,7 +14,8 @@ Host-tested only; not yet run on the radio.
   the list reads its zone once per draw instead of once per row. On the host fixture (tests/plus/test_kv_cache.c)
   27 channels with 13 P25 tags: opening the list 5,557 -> 613 data-chip reads, a move 1,304 -> 119; 60 channels with
   30 tags: 24,707 -> 2,323 and 2,864 -> 187. A damaged settings area is still refused at the first lookup after any
-  change, as before (docs/plus.md "Channels list speed").
+  write, reload or power-on; damage appearing with no write in between (bit rot) is now noticed only then, and a
+  walk never steps past a page (docs/plus.md "Channels list speed").
 
 ## v1.2.0 (2026-11-26)
 
