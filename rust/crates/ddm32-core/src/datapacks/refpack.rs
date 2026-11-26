@@ -181,109 +181,125 @@ pub fn hint(coord: u32) -> u16 {
     DIR_VERSION as u16 | ((coord & 0xFF) as u16) << 8
 }
 
-/// The firmware's structural validation of a map pack payload (`ref_validate`, C.2): version items first
-/// (-> Other), then rules 1-6 (-> Bad). All or nothing: any failing known section rejects the whole pack.
+/// The firmware's structural validation of a map pack payload (`ref_pack.c ref_validate`, docs/mappack-design.md
+/// section I), in the firmware's order: the head's version items (directory version, coordinate id, a non-zero hint
+/// that differs) -> Other; the directory's size -> Bad; per known entry another record size -> Other (even after a
+/// bad entry), a known id twice, alignment, an offset inside the directory or past the payload, a count past it ->
+/// Bad; then overlaps, partial groups and the group rules -> Bad. Unknown section ids are ignored entirely. All or
+/// nothing: any failing known section rejects the whole pack.
 pub fn validate(payload: &[u8], flags: u16, rules: &Rules) -> Verdict {
     let bad = |s: String| Verdict::Bad(s);
     let other = |s: String| Verdict::Other(s);
+    let len = payload.len() as u64;
     if payload.len() > PAYLOAD_MAX {
         return bad(format!("{} bytes: the map slot holds {PAYLOAD_MAX}", payload.len()));
     }
     if payload.len() < DIR_HEAD || &payload[..4] != MAGIC {
         return bad("no REF1 directory".into());
     }
-    // version items (checked first)
+    // the head's version items first
+    let coord = le32(payload, 8);
+    let fw_coord = rules.coord.unwrap_or(coord);
+    let fw_hint = rules.dir_version as u16 | ((fw_coord & 0xFF) as u16) << 8;
     if payload[4] != rules.dir_version {
         return other(format!("directory version {} (this firmware reads {})", payload[4], rules.dir_version));
+    }
+    if coord != fw_coord {
+        return other(format!("map coordinate id 0x{coord:08X} (this firmware: 0x{fw_coord:08X})"));
+    }
+    if flags != 0 && flags != fw_hint {
+        return other(format!("version hint 0x{flags:04X} (this firmware: 0x{fw_hint:04X})"));
     }
     let d = match directory(payload) {
         Ok(d) => d,
         Err(e) => return bad(e),
     };
+    let dir_end = (DIR_HEAD + d.entries.len() * DIR_ENTRY) as u64;
+    let mut seen: Vec<u16> = Vec::new();
+    let mut spans: Vec<(u64, u64)> = Vec::new();
+    let mut entry_bad: Option<String> = None;
     for e in &d.entries {
-        if let Some(r) = expected_rec(e.id) {
-            if e.rec != r {
-                return other(format!("section {} has {}-byte records (this firmware: {r})", e.id, e.rec));
+        let Some(r) = expected_rec(e.id) else { continue }; // unknown sections are ignored
+        if e.rec != r {
+            return other(format!("section {} has {}-byte records (this firmware: {r})", e.id, e.rec));
+        }
+        let (off, count) = (e.off as u64, e.count as u64);
+        if seen.contains(&e.id)
+            || !off.is_multiple_of(4)
+            || off < dir_end
+            || off > len
+            || count > (len - off) / r as u64
+        {
+            entry_bad.get_or_insert_with(|| format!("section {} at {}: misplaced", e.id, e.off));
+            continue;
+        }
+        seen.push(e.id);
+        spans.push((off, off + r as u64 * count));
+    }
+    if let Some(e) = entry_bad {
+        return bad(e);
+    }
+    // no two known sections overlap (empty ones never do)
+    for (i, a) in spans.iter().enumerate() {
+        for b in &spans[i + 1..] {
+            if a.1 > a.0 && b.1 > b.0 && a.0 < b.1 && b.0 < a.1 {
+                return bad("two sections overlap".into());
             }
         }
     }
-    let fw_coord = rules.coord.unwrap_or(d.coord);
-    if flags != 0 && ((flags & 0xFF) as u8 != rules.dir_version || (flags >> 8) as u32 != (fw_coord & 0xFF)) {
-        return other(format!("version hint 0x{flags:04X} (this firmware: 0x{:04X})", hint(fw_coord)));
-    }
-    if d.coord != fw_coord {
-        return other(format!("map coordinate id 0x{:08X} (this firmware: 0x{fw_coord:08X})", d.coord));
-    }
-    // rule 1: every entry aligned and inside the payload, known sections once and not overlapping
-    let len = payload.len() as u64;
-    let mut spans: Vec<(u64, u64, u16)> = Vec::new();
-    for e in &d.entries {
-        if !e.off.is_multiple_of(4) {
-            return bad(format!("section {} at {}: not 4-byte aligned", e.id, e.off));
-        }
-        let end = e.off as u64 + e.rec as u64 * e.count as u64;
-        if e.off as u64 > len || end > len {
-            return bad(format!("section {} runs past the payload", e.id));
-        }
-        if expected_rec(e.id).is_some() {
-            let start = e.off as u64;
-            // two non-empty half-open spans overlap when each starts before the other ends
-            if end > start && spans.iter().any(|s| s.1 > s.0 && start < s.1 && s.0 < end) {
-                return bad(format!("section {} overlaps another", e.id));
-            }
-            spans.push((e.off as u64, end, e.id));
+    let present = |g: &[u16]| g.iter().filter(|id| seen.contains(id)).count();
+    for (g, what) in [(&MAP_GROUP[..], "map"), (&RPT_GROUP[..], "repeater"), (&AIR_GROUP[..], "airfield")] {
+        let n = present(g);
+        if n != 0 && n != g.len() {
+            return bad(format!("the {what} sections are incomplete"));
         }
     }
-    let present = |g: &[u16]| g.iter().filter(|id| d.get(**id).is_some()).count();
     let mut f = Features::default();
-    // the map group (rules 2-5)
-    match present(&MAP_GROUP) {
-        0 => {}
-        n if n < MAP_GROUP.len() => return bad("the map sections are incomplete".into()),
-        _ => {
-            if let Err(e) = map_rules(payload, &d) {
-                return bad(e);
-            }
-            f.map = true;
+    if present(&MAP_GROUP) != 0 {
+        if let Err(e) = map_rules(payload, &d, fw_coord) {
+            return bad(e);
         }
+        f.map = true;
     }
-    // repeaters (rule 6)
-    match present(&RPT_GROUP) {
-        0 => {}
-        n if n < RPT_GROUP.len() => return bad("the repeater sections are incomplete".into()),
-        _ => {
-            if let Err(e) = rpt_rules(payload, &d) {
-                return bad(e);
-            }
-            f.rpt = d.count(RPT) > 0;
+    if present(&RPT_GROUP) != 0 {
+        if let Err(e) = rpt_rules(payload, &d) {
+            return bad(e);
         }
+        f.rpt = d.count(RPT) > 0;
     }
-    // airfields (rule 6)
-    match present(&AIR_GROUP) {
-        0 => {}
-        n if n < AIR_GROUP.len() => return bad("the airfield sections are incomplete".into()),
-        _ => {
-            if let Err(e) = air_rules(payload, &d) {
-                return bad(e);
-            }
-            f.air = d.count(AIR) > 0;
+    if present(&AIR_GROUP) != 0 {
+        if let Err(e) = air_rules(payload, &d) {
+            return bad(e);
         }
+        f.air = d.count(AIR) > 0;
     }
     Verdict::Valid(f)
 }
 
-/// MAP_META's counts (ASSUMED layout, docs/mappack-design.md C.2 names the fields, not their offsets): lon0, lat0,
-/// unit (i32 at 0, 4, 8), XMIN, YMIN, XMAX, YMAX (i16 at 12..20), then the counts PROVINCES, RINGS, STEPS,
-/// DISTRICTS (u16 at 20, 22, 24, 26), 4 reserved bytes.
+/// Firmware 1.1's map coordinate id (docs/mappack-design.md section I): CRC-32 of its origin, unit and bounds and the
+/// charset name. Only for this id does the programmer know the compiled origin / unit / bounds MAP_META must equal.
+pub const COORD_1_1: u32 = 0x056B_6A10;
+/// turkey_map_data.h of firmware 1.1: LON0_E7, LAT0_E7, UNIT_E7 (i32), XMIN, YMIN, XMAX, YMAX (i16).
+pub const META_1_1: ([i32; 3], [i16; 4]) = ([250_000_000, 355_000_000, 10_000], [663, 320, 19_807, 6_599]);
+
+/// MAP_META (docs/mappack-design.md section I): lon0, lat0, unit (i32 at 0, 4, 8), XMIN, YMIN, XMAX, YMAX (i16 at
+/// 12..20), then the counts PROVINCES, RINGS, STEPS, DISTRICTS (u16 at 20, 22, 24, 26), 4 zero bytes.
 pub const META_PROVINCES: usize = 20;
 pub const META_RINGS: usize = 22;
 pub const META_STEPS: usize = 24;
 pub const META_DISTRICTS: usize = 26;
 
-fn map_rules(p: &[u8], d: &Directory) -> Result<(), String> {
+fn map_rules(p: &[u8], d: &Directory, fw_coord: u32) -> Result<(), String> {
     let meta = d.bytes(p, MAP_META);
     if d.count(MAP_META) != 1 || meta.len() != 32 {
         return Err("MAP_META: one record".into());
+    }
+    // the origin, unit and bounds the firmware was compiled with (known here for firmware 1.1's coordinate id)
+    if fw_coord == COORD_1_1 {
+        let (ints, shorts) = META_1_1;
+        if (0..3).any(|i| le32(meta, i * 4) as i32 != ints[i]) || (0..4).any(|i| lei16(meta, 12 + i * 2) != shorts[i]) {
+            return Err("MAP_META origin, unit or bounds differ from the firmware's".into());
+        }
     }
     let (provinces, rings, steps, dists) = (d.count(PROVINCES), d.count(RINGS), d.count(STEPS), d.count(DIST_POS));
     if le16(meta, META_PROVINCES) as u32 != provinces
@@ -399,15 +415,27 @@ fn air_rules(p: &[u8], d: &Directory) -> Result<(), String> {
         return Err("AIR / AIR_KEY counts".into());
     }
     let freqs = d.count(AIR_FREQ);
-    let recs = d.bytes(p, AIR);
+    let (recs, keys) = (d.bytes(p, AIR), d.bytes(p, AIR_KEY));
     for i in 0..n as usize {
         let r = &recs[i * 44..i * 44 + 44];
+        if keys[i * 10..i * 10 + 10] != air_key(r) {
+            return Err(format!("airfield {i}: its key differs from its record"));
+        }
         let (first, count) = (le16(r, 8) as u32, r[10] as u32);
         if count > AIR_FREQS_MAX || first + count > freqs {
             return Err(format!("airfield {i}: frequencies {first}+{count} of {freqs}"));
         }
     }
     Ok(())
+}
+
+/// An airfield record's key: lat_e5, lon_e5, prov (record offset 43), kind (offset 11) (section 15).
+pub fn air_key(rec: &[u8]) -> [u8; 10] {
+    let mut k = [0u8; 10];
+    k[..8].copy_from_slice(&rec[..8]);
+    k[8] = rec[43];
+    k[9] = rec[11];
+    k
 }
 
 /// A directory with its sections, 4-byte aligned in the given order (the builder of tools/refpack.py's layout; used

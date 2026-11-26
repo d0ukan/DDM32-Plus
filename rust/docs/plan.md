@@ -152,8 +152,13 @@ pages"; `tests/parity.rs`, screenshots, a11y and hidpi passes extended):
   walking it. The data pack tool: three types in `read` (JSON "ref", "state"), type 3 in `write`, `update-ref`.
 - Window: the third row on Data packs, the wizard's map card (step 1 over DDM32 Plus, step 5 after a stock install),
   the user-built pack question, the start-up question's line.
-- Host-tested only. To check with the firmware job: the MAP_META offsets (assumed, refpack.rs), the CPS `git` text
-  of a 1.1 build, a real release pack from `tools/refpack.py` through `files::check_image`. Radio rows: MP2, MP9.
+- Aligned with the firmware job's interface (docs/mappack-design.md section I, branch mappack 1cf87ec): the checker
+  follows `ref_validate`'s order (unknown sections skipped entirely, a known id twice / an offset inside the directory
+  bad, airfield keys checked, MAP_META's origin / unit / bounds for firmware 1.1's id 0x056b6a10), the manifest's
+  `ref_pack` as `check_ref_pack` (pack_format 1, `ddm32-ref-<version>.dpk`, `0x` + 8 lowercase hex). The real public
+  1.1 pack (50,724 B, flags 0x1001) checks valid (test by path, not committed: RadioID.net rows).
+- Host-tested only. Still unconfirmed on the radio: the CPS `git` text of a 1.1 build ("ddm32-plus-1.1."). Radio
+  rows: MP2, MP9.
 
 ### Still to do in stage 2
 

@@ -66,7 +66,7 @@ fn catalog(with_ref: bool) -> Catalog {
         let img = map_image("build 1.1.0");
         e["ref_pack"] = json!({"schema": 1, "version": "1.1.0", "file": "ddm32-ref-1.1.0.dpk",
             "url": format!("{}v1.1.0/ddm32-ref-1.1.0.dpk", CURRENT.url_prefix()), "sha256": sm::sha256_hex(&img),
-            "size": img.len(), "pack_type": 3, "pack_format": 1, "dir_version": 1, "coord_crc": format!("0x{COORD:08X}"),
+            "size": img.len(), "pack_type": 3, "pack_format": 1, "dir_version": 1, "coord_crc": format!("0x{COORD:08x}"),
             "date": "20261119", "min_firmware": "1.1.0"});
     }
     let m = json!({"format": CURRENT.format, "repo": CURRENT.repo, "release": "v1.1.0",

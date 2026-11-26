@@ -338,25 +338,34 @@ pub fn check_ref_pack(r: &Value, w: &str, schema: &ManifestSchema) -> Result<Opt
     }
     let a = asset(r, w, schema)?;
     need(a.size <= REF_PACK_MAX, &format!("{w}.size"))?;
-    need(body(&a.file).ends_with(".dpk"), &format!("{w}.file"))?;
+    // ^ddm32-ref-<version>\.dpk$ (pc/radiotools/signed_manifest.py RE_REF_FILE)
+    let ref_file = body(&a.file)
+        .strip_prefix("ddm32-ref-")
+        .and_then(|f| f.strip_suffix(".dpk"))
+        .is_some_and(|v| ReleaseVersion::parse(v).is_ok());
+    need(ref_file, &format!("{w}.file"))?;
     let small = |name: &str, lo: u64, hi: u64| -> Result<u64, ManifestError> {
         let v = py_int(get(r, name), false);
         need(v.as_ref().is_some_and(|v| *v >= BigInt::from(lo) && *v <= BigInt::from(hi)), &format!("{w}.{name}"))?;
         Ok(to_u64(v.as_ref().unwrap()))
     };
     let pack_type = small("pack_type", 3, 3)? as u8;
-    let pack_format = small("pack_format", 1, 255)? as u8;
+    let pack_format = small("pack_format", 1, 1)? as u8;
     let dir_version = small("dir_version", 1, 255)? as u8;
     let coord = str_of(get(r, "coord_crc"));
+    // ^0x[0-9a-f]{8}$
     let coord_crc = coord.and_then(|c| {
-        let h = c.strip_prefix("0x").or_else(|| c.strip_prefix("0X"))?;
-        (!h.is_empty() && h.len() <= 8 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+        let h = body(c).strip_prefix("0x")?;
+        (h.len() == 8 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
             .then(|| u32::from_str_radix(h, 16).ok())
             .flatten()
     });
     need(coord_crc.is_some(), &format!("{w}.coord_crc"))?;
     let date = str_of(get(r, "date"));
-    need(date.is_some_and(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit())), &format!("{w}.date"))?;
+    need(
+        date.is_some_and(|d| body(d).len() == 8 && body(d).bytes().all(|b| b.is_ascii_digit())),
+        &format!("{w}.date"),
+    )?;
     let minf = str_of(get(r, "min_firmware"));
     need(minf.is_some(), &format!("{w}.min_firmware"))?;
     ReleaseVersion::parse(minf.unwrap())?;
@@ -371,7 +380,7 @@ pub fn check_ref_pack(r: &Value, w: &str, schema: &ManifestSchema) -> Result<Opt
         pack_format,
         dir_version,
         coord_crc: coord_crc.unwrap(),
-        date: date.unwrap().to_string(),
+        date: body(date.unwrap()).to_string(),
         min_firmware: minf.unwrap().to_string(),
     }))
 }

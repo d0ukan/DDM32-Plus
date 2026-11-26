@@ -73,10 +73,15 @@ fn a_well_formed_pack_is_valid_with_its_features() {
     let s: Vec<_> = ref_sections(&[], "").into_iter().filter(|s| !(10..=12).contains(&s.0)).collect();
     let p = rp::assemble(COORD, &s).unwrap();
     assert_eq!(Verdict::Valid(rp::Features { map: true, rpt: false, air: true }), rp::validate(&p, 0, &rules()));
-    // an unknown section id is ignored
+    // an unknown section id is ignored, even misplaced (the firmware skips it entirely)
     let mut s = ref_sections(&two_rpts(), "x");
     s.push((99, 3, vec![1, 2, 3]));
-    assert!(rp::validate(&rp::assemble(COORD, &s).unwrap(), 0, &rules()).is_valid());
+    let mut p = rp::assemble(COORD, &s).unwrap();
+    assert!(rp::validate(&p, 0, &rules()).is_valid());
+    let e = 16 + 15 * 12;
+    p[e + 4..e + 8].copy_from_slice(&3u32.to_le_bytes());
+    p[e + 8..e + 12].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(rp::validate(&p, 0, &rules()).is_valid());
 }
 
 #[test]
@@ -162,6 +167,22 @@ fn every_structural_rule_broken_once_is_bad() {
     let mut p = g.clone();
     p[air + 10] = 65;
     cases.push(("air count > 64", p));
+    let (akey, _) = sec(&g, rp::AIR_KEY);
+    for (off, what) in [(0usize, "airfield key position"), (8, "airfield key prov"), (9, "airfield key kind")] {
+        let mut p = g.clone();
+        p[akey + off] ^= 1;
+        cases.push((what, p));
+    }
+    let mut p = g.clone();
+    p[air + 43] = 7;
+    cases.push(("airfield prov differing from its key", p));
+    let mut p = g.clone();
+    set32(&mut p, e + 4, 16);
+    cases.push(("a section inside the directory", p));
+    let (_, nfe) = sec(&g, rp::DIST_NAME_FIRST);
+    let mut p = g.clone();
+    set16(&mut p, nfe, rp::DIST_FIRST); // same record size (2): a duplicate, not another version
+    cases.push(("a known id twice", p));
     let (meta, _) = sec(&g, rp::MAP_META);
     let mut p = g.clone();
     set16(&mut p, meta + rp::META_RINGS, 80);
@@ -197,6 +218,20 @@ fn version_items_are_another_version_and_flags_zero_is_no_hint() {
     let mut p = g.clone();
     p[4] = 2;
     p[5] = 17;
+    assert!(is_other(rp::validate(&p, 0, &rules())));
+    // firmware 1.1's hint: 0x1001, little-endian bytes 0x01, 0x10
+    assert_eq!(0x1001, rp::hint(rp::COORD_1_1));
+    assert_eq!([0x01, 0x10], rp::hint(rp::COORD_1_1).to_le_bytes());
+    // the head's version items come before the directory's size: a pack for another id with 17 sections is OTHER
+    let mut p = g.clone();
+    p[5] = 17;
+    assert!(is_other(rp::validate(&p, 0, &Rules::new(Some(COORD ^ 1)))));
+    // a known id with another record size after a misplaced entry: still OTHER (the firmware returns at once)
+    let mut p = g.clone();
+    let (_, e_steps) = sec(&g, rp::STEPS);
+    set32(&mut p, e_steps + 4, 2);
+    let (_, e_rpt) = sec(&g, rp::RPT);
+    set16(&mut p, e_rpt + 2, 48);
     assert!(is_other(rp::validate(&p, 0, &rules())));
     // a .dpk whose firmware is not known: its own coordinate id stands in
     assert!(rp::validate(&g, rp::hint(COORD), &Rules::new(None)).is_valid());
@@ -426,7 +461,7 @@ fn a_map_dpk_is_loaded_only_when_it_checks() {
 fn ref_entry(release: &str, data: &[u8]) -> serde_json::Value {
     json!({"schema": 1, "version": "1.1.0", "file": "ddm32-ref-1.1.0.dpk", "url": url(release, "ddm32-ref-1.1.0.dpk"),
            "sha256": sm::sha256_hex(data), "size": data.len(), "pack_type": 3, "pack_format": 1, "dir_version": 1,
-           "coord_crc": format!("0x{COORD:08X}"), "date": "20261119", "min_firmware": "1.1.0"})
+           "coord_crc": format!("0x{COORD:08x}"), "date": "20261119", "min_firmware": "1.1.0"})
 }
 
 fn fw_with(rp_obj: Option<serde_json::Value>) -> serde_json::Value {
@@ -463,6 +498,13 @@ fn manifest_ref_pack_is_parsed_and_checked() {
         ("file", json!("ddm32-ref.zip")),
         ("url", json!("https://example.com/ddm32-ref-1.1.0.dpk")),
         ("coord_crc", json!("1A2B3C4D")),
+        ("coord_crc", json!("0x1A2B3C4D")),
+        ("coord_crc", json!("0x1a2b3c4")),
+        ("pack_format", json!(2)),
+        ("file", json!("ddm32-ref-latest.dpk")),
+        ("file", json!("ref-1.1.0.dpk")),
+        ("dir_version", json!(0)),
+        ("dir_version", json!(256)),
         ("coord_crc", json!(12)),
         ("date", json!("2026-11-19")),
         ("min_firmware", json!("one")),
@@ -523,4 +565,59 @@ fn the_release_map_pack_is_downloaded_and_checked() {
     let e = client::download_ref_pack(&fv, t2.path(), &net, None).unwrap_err();
     assert_eq!(Some(ddm32_core::releases::VerifyFailure::HashMismatch), e.kind());
     assert!(!t2.path().join("refpacks/1.1.0/ddm32-ref-1.1.0.dpk").exists());
+}
+
+#[test]
+fn firmware_1_1_meta_must_be_its_compiled_origin() {
+    // with firmware 1.1's coordinate id MAP_META must carry its origin, unit and bounds
+    let mut s = ref_sections(&two_rpts(), "x");
+    let mut meta = s[0].2.clone();
+    let (ints, shorts) = rp::META_1_1;
+    for (i, v) in ints.iter().enumerate() {
+        meta[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    for (i, v) in shorts.iter().enumerate() {
+        meta[12 + i * 2..14 + i * 2].copy_from_slice(&v.to_le_bytes());
+    }
+    s[0].2 = meta.clone();
+    let r11 = Rules::new(Some(rp::COORD_1_1));
+    assert!(rp::validate(&rp::assemble(rp::COORD_1_1, &s).unwrap(), 0x1001, &r11).is_valid());
+    meta[16] ^= 1; // XMAX
+    s[0].2 = meta;
+    assert!(is_bad(rp::validate(&rp::assemble(rp::COORD_1_1, &s).unwrap(), 0x1001, &r11)));
+    // a zeroed origin passes only for another coordinate id (its compiled values are not known here)
+    assert!(rp::validate(&good(), 0, &rules()).is_valid());
+}
+
+/// The real public 1.1 map pack built by tools/refpack.py (job mappack-fw). Not committed (its repeater rows come
+/// from RadioID.net, docs/mappack-design.md E.5); checked when the file is there (DDM32_REF_PACK or the job's path).
+#[test]
+fn the_real_public_pack_is_valid_when_present() {
+    let path = std::env::var("DDM32_REF_PACK")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("E:/GIT-REPO/ddm32-wt/mp-scripts/ddm32-ref-public.dpk"));
+    let Ok(data) = std::fs::read(&path) else {
+        eprintln!("{} not here: skipped", path.display());
+        return;
+    };
+    let pk = files::check_image(&data, "ddm32-ref-public.dpk").unwrap();
+    assert_eq!(REF, pk.ptype);
+    assert_eq!(0x1001, pk.header.flags);
+    let payload = &data[64..];
+    let d = rp::directory(payload).unwrap();
+    assert_eq!(rp::COORD_1_1, d.coord);
+    assert_eq!(
+        Verdict::Valid(rp::Features { map: true, rpt: true, air: true }),
+        rp::validate(payload, pk.header.flags, &Rules::new(Some(rp::COORD_1_1)))
+    );
+    assert_eq!(SlotVerdict::Valid, rp::judge(&ref_image_seq(&data, 5), &Rules::new(Some(rp::COORD_1_1))));
+    assert!(rp::is_release_built(&pk.header.tag), "{}", pk.header.tag);
+    // a 1.2 with another id calls it another version
+    assert!(is_other(rp::validate(payload, pk.header.flags, &Rules::new(Some(0x1234_5678)))));
+}
+
+/// The pack with another sequence, its flags, date, name and tag carried (as the writer rebuilds it).
+fn ref_image_seq(data: &[u8], seq: u32) -> Vec<u8> {
+    let h = dp::parse(data).0.unwrap();
+    dp::image(REF, &data[64..], &h.date, &h.name, seq, &h.tag, h.flags).unwrap()
 }
