@@ -3,9 +3,17 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased
+## v1.1.0 (2026-11-26, with programmer 3.2.0)
 
-Firmware (to be 1.1.0 with programmer 3.2.0, owner decision 2026-11-26). Host-tested only; not yet run on the radio.
+Firmware 1.1.0 and programmer 3.2.0 (owner decision 2026-11-26). Host-tested only; not yet run on the radio.
+**Update the programmer to 3.2.0 first**: only 3.2.0 writes the map pack. Programmer 3.1.0 still installs the
+firmware, but the map, Repeaters and Airfields then say "load the map pack" until 3.2.0 writes it.
+
+- **Programmer 3.2.0**: writes the map pack (Data packs page and the update wizard; pack first over an installed
+  DDM32 Plus, firmware first from stock firmware), downloads it from the signed release (`ref_pack` in the manifest)
+  and checks it with the same rules as the firmware. A map pack you built yourself is never replaced without asking
+  (rebuild / keep / use the release pack). It refuses RadioID packs over 192 KB, never writes the map pack slot the
+  running firmware uses, and asks before writing a map pack over the tail of an oversized 1.0.x RadioID pack.
 
 - **The map pack.** The Turkey map (provinces, districts), the repeater list and the airfields left program flash for
   a new data pack on the data chip, the map pack (data pack type 3, `ddm32-ref-<version>.dpk`, a separate signed
@@ -22,7 +30,9 @@ Firmware (to be 1.1.0 with programmer 3.2.0, owner decision 2026-11-26). Host-te
   can only add refusals. Owner decision 2026-11-26: RadioID.net and the owner's TRAC list both ship, in the map pack's
   repeater list and in that set, as in 1.0.x (TRAC states no licence; the owner takes the responsibility).
 - The map is drawn again from the chip only when something on it changes, not on every RSSI or caller change.
-- Program flash: 41,120 B freed (public build 854,948 B, was 896,068 B); static RAM +544 B (206,752 B of 211,456 B).
+- A map pack is checked as a whole before it is used or committed (also over DOTA): overlapping or shared ring ranges,
+  out-of-range sections and records for another firmware version are refused, so a crafted pack cannot stall the map.
+- Program flash: 41,096 B freed (public build 854,972 B, was 896,068 B); static RAM +544 B (206,752 B of 211,456 B).
 
 ## v1.0.6 (2026-11-26, with programmer 3.1.0)
 
