@@ -60,14 +60,24 @@ More: the programmer [`rust/README.md`](rust/README.md) (source: [`rust/`](rust/
 
 **Modes**
 
-| Mode | Receive | Transmit |
-| --- | :---: | :---: |
-| FM / AM | ✅ | ✅ FM |
-| DMR | ✅ | ✅ |
-| P25 Phase 1 | ✅ | ✅ |
-| YSF (C4FM) | ✅ | ⚙️ VW (off by default) |
-| NXDN48 | ✅ | — |
-| dPMR | ✅ | — |
+| Mode | Receive | Transmit | Frequency search |
+| --- | :---: | :---: | :---: |
+| FM / AM | ✅ | ✅ FM | — |
+| DMR Tier I (on a 446 MHz channel you enter, 0.5 W) | ✅ | ✅ | ✅ |
+| DMR Tier II | ✅ | ✅ | ✅ |
+| DMR Tier III / Trunk | ✅ following \* | — | — |
+| P25 Phase 1 | ✅ | ✅ | ✅ |
+| P25 Trunk (Phase 1) | ✅ following \* | — | — |
+| P25 Phase 2 (TDMA) | 🕓 Planned | — | 🕓 Planned |
+| YSF (C4FM) | ✅ | ⚙️ VW (off by default) | ✅ |
+| NXDN48 | ✅ | — | ✅ |
+| dPMR | ✅ | — | 🕓 Planned |
+
+\* Trunk: follows the control channel and plays the calls (Tools > P25 trunk / DMR trunk). Host-tested, not yet tried
+on a radio.
+
+Frequency search: **P25 search**, **DMR search** and **All digital search**, which finds P25 / DMR / YSF / NXDN
+together (Tools). You enter your own range and step; the finds are listed.
 
 **Listening**
 - Watch 2–6 channels at once (rows A–F on Home).
@@ -142,6 +152,7 @@ These are **plans, not promises**; order and dates may change.
 - **Talk through the ISS repeater**: a 437.800 repeater choice on the ISS page (listen 437.800, talk 145.990, Doppler
   corrected). In progress.
 - **Faster P25 search**: recognise P25 in software to cut the wait per frequency.
+- **P25 Phase 2 (TDMA) receive** and **dPMR frequency search**.
 - **Repeater list**: NXDN repeaters, single slot and colour code for DMR repeaters.
 - **Two-radio tests** of DOTA Transfer and Cross-band.
 - **Programmer**: Linux and macOS packages.

@@ -60,14 +60,24 @@ Daha fazlası: programlayıcı [`rust/README.md`](rust/README.md) (kaynak: [`rus
 
 **Modlar**
 
-| Mod | Dinleme | Konuşma |
-| --- | :---: | :---: |
-| FM / AM | ✅ | ✅ FM |
-| DMR | ✅ | ✅ |
-| P25 Faz 1 | ✅ | ✅ |
-| YSF (C4FM) | ✅ | ⚙️ VW (kapalı gelir) |
-| NXDN48 | ✅ | — |
-| dPMR | ✅ | — |
+| Mod | Dinleme | Konuşma | Frekans tarama |
+| --- | :---: | :---: | :---: |
+| FM / AM | ✅ | ✅ FM | — |
+| DMR Tier I (446 MHz kanal girilirse, 0,5 W) | ✅ | ✅ | ✅ |
+| DMR Tier II | ✅ | ✅ | ✅ |
+| DMR Tier III / Trunk | ✅ takip \* | — | — |
+| P25 Faz 1 | ✅ | ✅ | ✅ |
+| P25 Trunk (Faz 1) | ✅ takip \* | — | — |
+| P25 Faz 2 (TDMA) | 🕓 Planlandı | — | 🕓 Planlandı |
+| YSF (C4FM) | ✅ | ⚙️ VW (kapalı gelir) | ✅ |
+| NXDN48 | ✅ | — | ✅ |
+| dPMR | ✅ | — | 🕓 Planlandı |
+
+\* Trunk: kontrol kanalını takip edip konuşmaları dinler (Araçlar > P25 trunk / DMR trunk). Bilgisayarda test edildi,
+telsizde henüz denenmedi.
+
+Frekans tarama: **P25 arama**, **DMR arama** ve P25 / DMR / YSF / NXDN'i birlikte bulan **Tüm dijital arama**
+(Araçlar). Kendi aralığınızı ve adımınızı girersiniz, bulunanlar listelenir.
 
 **Dinleme**
 - 2–6 kanalı aynı anda izleme (ana ekranda A–F satırları).
@@ -142,6 +152,7 @@ Bunlar **plan**, söz değil; sıra ve tarih değişebilir.
 - **ISS rölesi üzerinden konuşma**: ISS sayfasında 437.800 röle seçeneği (dinle 437.800, konuş 145.990, Doppler
   düzeltmeli). Üzerinde çalışılıyor.
 - **Daha hızlı P25 arama**: P25 sinyalini yazılımla tanıyarak frekans başına bekleme süresini kısaltmak.
+- **P25 Faz 2 (TDMA) dinleme** ve **dPMR frekans tarama**.
 - **Röle listesi**: NXDN röleleri, DMR rölelerinde tek slot ve renk kodu bilgisi.
 - **İki telsizle testler**: DOTA Transfer ve Çapraz bant'ın gerçek iki telsiz arasında denenmesi.
 - **Programlayıcı**: Linux ve macOS paketleri.
