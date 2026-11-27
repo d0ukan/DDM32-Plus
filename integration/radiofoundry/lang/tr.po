@@ -4929,6 +4929,10 @@ msgid "145.800 voice / SSTV"
 msgstr "145.800 ses / SSTV"
 
 #: core/ui/ui_sat.c
+msgid "437.800 repeater"
+msgstr "437.800 röle"
+
+#: core/ui/ui_sat.c
 msgid "Track from AOS-10 min"
 msgstr "AOS-10 dk'dan takip"
 

@@ -55,6 +55,8 @@ void sat_sky_close(void) { sky_closes++; }
 void sat_track(uint8_t idx)
 {
 	track_calls++;
+	if (idx == SAT_NONE)
+		fake_auto = false;	/* an auto track ended by it too (sat_svc.c track_request) */
 	fv.track = idx;
 	fv.track_state = idx == SAT_NONE ? SAT_TRK_OFF : SAT_TRK_ON;
 	if (idx != SAT_NONE) {
@@ -185,7 +187,8 @@ static void fake_reset(bool clock)
 	start_sat = SAT_NONE;
 	start_mode = mode_now = 0;
 	pop = SAT_NONE;
-	iss_aprs = false;
+	iss_ch = ISS_VOICE;
+	iss_sync_hold = false;
 	sky_page = false;
 	sky_n = 0;
 	sky_idx = SAT_NONE;
@@ -432,7 +435,30 @@ static void prep_up(void)
 static void prep_hand(void) { fv.track = iss; fv.track_state = SAT_TRK_ON; }	/* a track by hand (not auto) */
 static void prep_no_clock(void) { fv.clock = SAT_CLOCK_NONE; }
 static void prep_frozen(void) { fv.clock = SAT_CLOCK_NONE; fake_frozen = true; }
-static void prep_aprs(void) { iss_aprs = true; }
+static void prep_aprs(void) { iss_ch = ISS_APRS; }
+static void prep_rpt(void) { iss_ch = ISS_RPT; }
+static void prep_rpt_up(void) { prep_up(); iss_ch = ISS_RPT; }
+/* The repeater's VFO track running above the horizon (its corrected RX / TX in the view) */
+static void prep_rpt_track(void)
+{
+	prep_rpt_up();
+	prep_hand();
+	fv.rx_hz = 437810000u;
+	fv.tx_hz = 145988000u;
+}
+static void prep_rpt_held(void) { prep_held(); iss_ch = ISS_RPT; }
+static void prep_held_aprs(void) { prep_held(); fv.rx_hz = 145827000u; iss_enter(); }	/* the page entered again (a key off it would end the track) */
+/* An ISS VFO track started on the Satellites list, 145.800 chosen on Tools > ISS */
+static void prep_vfo_track(void)
+{
+	prep_rpt_track();
+	iss_ch = ISS_VOICE;
+}
+static void prep_so50_track(void) { fv.track = so50; fv.track_state = SAT_TRK_ON; }
+/* A held track still waiting for the radio core's hold (not in the view yet), the alarm's rise SO-50's or the ISS's */
+static void prep_so50_wait(void) { fake_auto = true; fv.alarm.sat = so50; }
+static void prep_iss_wait(void) { fake_auto = true; fv.alarm.sat = iss; }
+static void prep_rpt_em(void) { iss_ch = ISS_RPT; ui_svc_emergency(true); }
 /* Hold keys: the codes are the Tools numbers + 1 (Position 1, Satellites 15, Single-freq repeater 4: ui_menus.c enum) */
 static void prep_h7pos(void) { hold_set(7, 2); }
 static void prep_h4sat(void) { hold_set(4, 16); }
@@ -480,7 +506,8 @@ static int iss_checks(void)
 	bad += iss_flow("ISS page", ISSP, NULL, "shot:iss-page",
 			T("screen=iss shows=AOS_in_5:00__47 shows=AOS_ shows=LOS_ shows=145.800_voice_/_SSTV "
 			  "shows=145.825_APRS shows=Before_AOS shows=Auto_track shows=Every_pass hides=For "
-			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80 shows=Show_orbit hides=2_sky",
+			  "shows=OK_track__#_APRS__1_freq shows=RX_145.80 shows=Show_orbit hides=2_sky hides=Az_ "
+			  "shows=OK:_track_in_the_VFO",
 			  "screen=iss shows=AOS'a_5:00 shows=AOS_ shows=145.800_ses_/_SSTV shows=145.825_APRS "
 			  "shows=OK_takip__#_APRS__1_frek shows=ster"), true);
 	/* OK within 10 min of AOS: the held track on 145.800 */
@@ -514,10 +541,88 @@ static int iss_checks(void)
 	bad += iss_flow(n = "ISS OK stops a held track", ISSP, prep_held, "1 ok",
 			T("screen=iss toast=Auto_track_off:_radio_back", "screen=iss"), false);
 	ISS_CHECK(cancels == 0 && track_calls == 1 && fv.track == SAT_NONE && mode_now == SAT_AUTO_APRS, n);
+	/* 1 cycles the three choices: 145.800, 145.825, the 437.800 repeater, 145.800 again (the repeater never given to
+	 * sat_auto_mode). The ISS live with the repeater chosen: its TX line, the two downlinks on one row (room) */
+	bad += iss_flow(n = "ISS 1 1: the repeater", ISSP, NULL, "1 1",
+			T("shows=>_437.800_repeater shows=145.800_/_145.825 hides=>_145 hides=voice shows=TX_145.98 shows=Show_orbit "
+			  "shows=OK:_track_in_the_VFO",
+			  "shows=>_437.800_r shows=145.800_/_145.825 hides=>_145 hides=repeater shows=TX_145.98"), true);
+	ISS_CHECK(iss_ch == ISS_RPT && mode_now == SAT_AUTO_APRS && starts == 0 && track_calls == 0, n);
+	bad += iss_flow(n = "ISS 1 1 1: back to 145.800", ISSP, NULL, "1 1 1",
+			T("shows=>_145.800_voice shows=437.800_repeater hides=>_437", "shows=>_145.800_ses shows=437.800_r hides=>_437"), false);
+	ISS_CHECK(iss_ch == ISS_VOICE && mode_now == SAT_AUTO_DOWN, n);
+	/* OK on the repeater: the Satellites list's VFO track (sat_track), its toast; no held track */
+	bad += iss_flow(n = "ISS OK on the repeater: the VFO track", ISSP, prep_rpt, "ok",
+			T("toast=VFO_tracks_the_pass", "toast=VFO_ge"), false);
+	ISS_CHECK(track_calls == 1 && fv.track == iss && starts == 0, n);
+	bad += iss_flow(n = "ISS OK on the repeater too early", ISSP, prep_late, "1 1 ok",
+			T("toast=Track_from_AOS-10_min", "toast=AOS-10_dk'dan_takip"), false);
+	ISS_CHECK(track_calls == 0 && starts == 0, n);
+	/* ... above now: RX 437.800 and TX 145.990 corrected, the uplink tone; under the track the track's own */
+	bad += iss_flow("ISS repeater above now", ISSP, prep_rpt_up, "wait:1200",
+			T("shows=>_437.800_repeater shows=RX_437.8 shows=TX_145.98 shows=67.0 shows=Az_123 shows=Before_AOS "
+			  "shows=OK:_track_in_the_VFO",
+			  "shows=>_437.800_r shows=RX_437.8 shows=TX_145.98 shows=67.0"), true);
+	bad += iss_flow(n = "ISS repeater tracked", ISSP, prep_rpt_track, "wait:1200",
+			T("shows=RX_437.810 shows=TX_145.988 shows=Tracking_Doppler shows=OK_stop",
+			  "shows=RX_437.810 shows=TX_145.988 shows=OK_durdur"), true);
+	bad += iss_flow(n = "ISS OK stops the repeater track", ISSP, prep_rpt_track, "ok",
+			T("toast=Tracking_off:_VFO_stays", "toast=Takip_bitti:_VFO_kal"), false);
+	ISS_CHECK(track_calls == 1 && fv.track == SAT_NONE && starts == 0, n);
+	/* 1 under a track: the other kind stops (said as OK says it), OK starts the new one; the same kind runs on */
+	bad += iss_flow(n = "ISS 1 to the repeater stops a held track", ISSP, prep_held, "1 1",
+			T("screen=iss toast=Auto_track_off:_radio_back", "screen=iss"), false);
+	ISS_CHECK(track_calls == 1 && fv.track == SAT_NONE && starts == 0 && mode_now == SAT_AUTO_APRS && cancels == 0, n);
+	bad += iss_flow(n = "ISS 1 to the repeater, then OK: the VFO track", ISSP, prep_held, "1 1 ok",
+			T("toast=VFO_tracks_the_pass", "toast=VFO_ge"), false);
+	ISS_CHECK(track_calls == 2 && fv.track == iss && starts == 0, n);
+	bad += iss_flow(n = "ISS 1 off the repeater stops the VFO track", ISSP, prep_rpt_track, "1",
+			T("toast=Tracking_off:_VFO_stays", "toast=Takip_bitti:_VFO_kal"), false);
+	ISS_CHECK(track_calls == 1 && fv.track == SAT_NONE && iss_ch == ISS_VOICE && mode_now == 0 && starts == 0, n);
+	/* The choice follows the ISS track that runs, whoever started it: a held track (the alarm's auto track) with the
+	 * repeater chosen shows its downlink (145.800 here), and 1 then switches it to 145.825 */
+	bad += iss_flow(n = "ISS held track with the repeater chosen: its downlink shown", ISSP, prep_rpt_held, "wait:1200",
+			T("shows=>_145.800_voice hides=>_437 hides=TX_", "shows=>_145.800_ses hides=>_437 hides=TX_"), true);
+	ISS_CHECK(iss_ch == ISS_VOICE && track_calls == 0 && fv.track == iss, n);
+	bad += iss_flow(n = "ISS held track with the repeater chosen: 1 switches it", ISSP, prep_rpt_held, "1",
+			"toast=none", false);
+	ISS_CHECK(track_calls == 0 && fv.track == iss && iss_ch == ISS_APRS && mode_now == SAT_AUTO_APRS, n);
+	bad += iss_flow(n = "ISS held 145.825 track: shown on entry", ISSP, prep_held_aprs, "wait:1200",
+			"shows=>_145.825_APRS", false);
+	ISS_CHECK(iss_ch == ISS_APRS, n);
+	/* ... an ISS VFO track from the Satellites list with 145.800 chosen: the repeater shown with the track's RX / TX */
+	bad += iss_flow(n = "ISS VFO track from Satellites: the repeater shown", ISSP, prep_vfo_track, "wait:1200",
+			T("shows=>_437.800_repeater shows=RX_437.810 shows=TX_145.988 shows=Tracking_Doppler",
+			  "shows=>_437.800_r shows=RX_437.810 shows=TX_145.988 hides=repeater"), true);
+	ISS_CHECK(iss_ch == ISS_RPT && track_calls == 0, n);
+	/* ... Home's hold-4 and the pop-up's OK with the repeater chosen start the held 145.800 track: the page says so */
+	bad += iss_flow(n = "Home hold 4 with the repeater chosen, then the page", "", prep_rpt, "long:4 " ISSP "wait:300",
+			T("screen=iss shows=>_145.800_voice hides=>_437", "screen=iss shows=>_145.800_ses hides=>_437"), false);
+	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_DOWN && iss_ch == ISS_VOICE, n);
+	bad += iss_flow(n = "Pop-up OK with the repeater chosen, then the page", ARMED, prep_rpt, "wait:10500 ok " ISSP "wait:300",
+			T("screen=iss shows=>_145.800_voice hides=>_437", "screen=iss shows=>_145.800_ses hides=>_437"), false);
+	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_DOWN && iss_ch == ISS_VOICE, n);
+	/* 1 leaves another satellite's track alone (an SO-50 VFO track; another satellite's held track still waiting) */
+	bad += iss_flow(n = "ISS 1 under SO-50's VFO track: left alone", ISSP, prep_so50_track, "1 1 1", "toast=none", false);
+	ISS_CHECK(track_calls == 0 && fv.track == so50, n);
+	bad += iss_flow(n = "ISS 1 under SO-50's waiting held track: left alone", ISSP, prep_so50_wait, "1 1", "toast=none", false);
+	ISS_CHECK(track_calls == 0 && cancels == 0, n);
+	/* The ISS's held track still waiting for the radio core (the alarm's rise): 1 to the repeater stops it, OK too */
+	bad += iss_flow(n = "ISS 1 1 under the ISS's waiting held track: stopped", ISSP, prep_iss_wait, "1 1",
+			T("toast=Auto_track_off:_radio_back", "toast=Oto._izleme_kapal"), false);
+	ISS_CHECK(track_calls == 1 && !fake_auto, n);
+	bad += iss_flow(n = "ISS OK under the ISS's waiting held track: stopped", ISSP, prep_iss_wait, "ok",
+			T("toast=Auto_track_off:_radio_back", "toast=Oto._izleme_kapal"), false);
+	ISS_CHECK(track_calls == 1 && starts == 0, n);
+	/* An emergency running: OK on the repeater refuses (the VFO would leave the emergency's channel) */
+	bad += iss_flow(n = "ISS OK on the repeater during an emergency: refused", ISSP, prep_rpt_em, "ok",
+			T("toast=Can't_track:_radio_busy", "toast=Takip_olmaz:_telsiz_me"), false);
+	ISS_CHECK(track_calls == 0 && starts == 0 && fv.track == SAT_NONE, n);
 	/* Above now: "Above now, LOS in", the live azimuth / elevation, the Doppler */
 	bad += iss_flow("ISS above now", ISSP, prep_up, "wait:1200",
-			T("shows=LOS_in_7:00 shows=Above_now,_max_47 shows=Az_123 shows=El_23.4 shows=+1.9_kHz",
-			  "shows=LOS'a_7:00 shows=tepede,_maks_47 shows=Az_123 shows=El_23.4"), true);
+			T("shows=LOS_in_7:00 hides=Above_now hides=AOS_1 shows=Az_123 shows=El_23.4 shows=+1.9_kHz "
+			  "shows=OK:_track_in_the_VFO",
+			  "shows=LOS'a_7:00 hides=tepede shows=Az_123 shows=El_23.4 shows=OK:_VFO"), true);
 	bad += iss_flow("ISS without the GPS time", ISSP, prep_no_clock, "wait:1200",
 			T("shows=Waiting_for_the_GPS_time shows=Before_AOS", "screen=iss shows=GPS"), true);
 	/* Every pass on: the ISS armed for every pass and kept; off again: off and forgotten */
@@ -548,6 +653,10 @@ static int iss_checks(void)
 			T("screen=home toast=Can't_track:_radio_busy", "screen=home toast=Takip_olmaz:_telsiz_me"), false);
 	bad += iss_flow(n = "Pop-up OK tracks 145.825", ARMED, prep_aprs, "wait:10500 ok", "screen=home banner=none", false);
 	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_APRS, n);
+	/* The repeater chosen: the pop-up's OK stays the held, receive-only 145.800 track (no VFO track from Home) */
+	bad += iss_flow(n = "Pop-up OK with the repeater chosen: held 145.800", ARMED, prep_rpt, "wait:10500 ok",
+			"screen=home banner=none", false);
+	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_DOWN && track_calls == 0, n);
 	bad += iss_flow(n = "Pop-up Back dismisses", ARMED, NULL, "wait:10500 back", "screen=home banner=none toast=none",
 			false);
 	ISS_CHECK(starts == 0, n);
@@ -632,6 +741,8 @@ static int iss_checks(void)
 	bad += iss_flow(n = "Home hold 4: the service's word", "", NULL, "long:4 wait:1500", TRACKING, false);
 	bad += iss_flow(n = "Home hold 4 on 145.825", "", prep_aprs, "long:4", "screen=home", false);
 	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_APRS, n);
+	bad += iss_flow(n = "Home hold 4 with the repeater chosen: held 145.800", "", prep_rpt, "long:4", "screen=home", false);
+	ISS_CHECK(starts == 1 && start_mode == SAT_AUTO_DOWN && track_calls == 0, n);
 	bad += iss_flow(n = "Home hold 4 too early: Tools > ISS opens", "", prep_late, "long:4", "screen=iss", false);
 	ISS_CHECK(starts == 0, n);
 	bad += iss_flow(n = "Home hold 4 over a track by hand: Tools > ISS opens", "", prep_hand, "long:4", "screen=iss", false);
@@ -912,7 +1023,7 @@ static int sky_checks(void)
 	/* OK on the plot does not track; the page's keys are not the plot's */
 	bad += iss_flow(n = "Sky from ISS: OK and # do nothing", ISSP, prep_real, "2 wait:300 ok 1 wait:300",
 			T("screen=iss shows=Max_", "screen=iss shows=Maks_"), false);
-	ISS_SKY_CHECK(starts == 0 && track_calls == 0 && !iss_aprs, n);
+	ISS_SKY_CHECK(starts == 0 && track_calls == 0 && iss_ch == ISS_VOICE, n);
 	/* not yet risen: the dot absent, the time to the rise */
 	bad += iss_flow(n = "Sky from ISS: before the rise", ISSP, NULL, "2 wait:1200",
 			T("screen=iss shows=AOS_in_", "screen=iss shows=AOS'a_"), true);

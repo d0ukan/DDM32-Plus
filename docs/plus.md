@@ -1836,7 +1836,8 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
   - **Tools > ISS** ("ISS" in both languages) is tool 40, after All digital search: only Battery (now 41, last by
     design) and the zone offer's 0 move one on, every other tool keeps its number. One page (240 x 320, small font
     where a line is long): "AOS in 1h05  47°" ("LOS in 5:12  47°" in the rx color under way), "AOS 14:27  LOS 14:38"
-    (local time, the Satellites screen's offset; "Above now, max 47°" under way), the live "Az 123°  El 23.4°", the
+    (local time, the Satellites screen's offset; under way the live "Az 123°  El 23.4°" in its place since the ISS
+    repeater choice, see below), the
     two downlinks "> 145.800 voice / SSTV" and "145.825 APRS" (the one in use marked), "RX 145.803 +2.6 kHz" (that one
     with the Doppler of now; the tuned frequency during a held track), a line, then the pass alarm page's rows from
     Before AOS on (Before AOS, Min. elevation, Every pass, Auto track) in the small font, and a status line
@@ -1853,6 +1854,45 @@ Third round (owner, 2026-11-17): 1 DMR scanner, 2 DMR any CC/TG/TS, 3 call histo
     under a running held track too (the next second's tune). Hint "OK track  # APRS  1 freq" ("OK stop ..." while
     tracking). While a held track runs, keys on this page stay the page's (they do not end it as on other screens);
     PTT and monitor still do. The page counts as idle for the automatic auto track (as Home and Satellites).
+  - **ISS FM repeater** (owner's request 2026-11-27, Unreleased; host-tested only): the page has a third choice
+    "437.800 repeater" ("437.800 röle") under the two downlinks, and key 1 cycles 145.800 -> 145.825 -> 437.800 repeater
+    -> 145.800 (`ui_sat.c` `iss_ch`, a uint8_t in place of the old bool). With the repeater chosen, OK starts the
+    Satellites list's normal VFO track `sat_track(i)` (the same pass window, the same toast "VFO tracks the pass" / "VFO
+    geçişi takip ediyor"): VFO RX 437.800 and TX 145.990 with the 67.0 Hz uplink CTCSS, both Doppler corrected by the
+    service, FM wide; PTT transmits on the corrected uplink as from the Satellites list; the VFO stays where it is after
+    the set (moved back to nominal) or after OK. Live, the page then shows "RX 437.8xx +n.n kHz" and "TX 145.98x -n.n kHz
+    67.0" (the track's own frequencies while it runs, as on the Satellites screen). Key 1 while a track runs: a choice
+    needing the other kind of track (the held, receive-only track for 145.800 / 145.825, the VFO track for the repeater)
+    stops the running one with OK's toast ("Auto track off: radio back" / "Tracking off: VFO stays"); OK then starts the
+    new one. 145.800 <-> 145.825 under a held track still switches it with `sat_auto_mode` (never called with the
+    repeater). Key 1 stops only the ISS's track: another satellite's (an SO-50 VFO track from the Satellites list, a
+    held track of another alarm target) is left alone (OK still stops any track). A held track still waiting for the
+    radio core's hold is not in the view yet (`view.track` is set once held); it counts as the ISS's when the alarm's
+    rise is the ISS (`v->alarm.sat`), the only waiting target the service exposes; one the page itself asked for is
+    not counted while it waits (a second at most; OK stops it). OK also stops a held track still waiting. OK on the
+    repeater during an emergency (`ui_svc_emergency_active`) is refused with "Can't track: radio busy" (the VFO track
+    would leave the emergency's channel; the Satellites list is unchanged). **The choice follows the ISS track that
+    runs** (`iss_sync`, on entry and each draw): an ISS VFO track (from the Satellites list) shows the repeater with
+    its RX / TX; a held ISS track with the repeater chosen (the alarm's auto track) shows the downlink it tuned (from
+    `v->rx_hz`: 145.825 or 145.800); on entry the held track's downlink is taken whatever was chosen. A stop the page
+    asked for is not followed back until the view shows it. Home's hold-4 and the pop-up's OK set the choice to 145.800
+    when they start the held track with the repeater chosen. **Home's hold-4 and the AOS pop-up's
+    OK stay on the held track** (145.800 when the repeater is chosen): `sat_track` opens the VFO from a channel
+    (`radio_req_vfo_set`), overwrites the VFO's frequency, mode and tones and leaves it there, and unlike the held track
+    it has no radio-core busy check (scan, dual watch, hotspot, emergency); from a single key on Home, or an OK pressed
+    out of habit at the pop-up, that is not clean. Talking through the ISS goes through Tools > ISS (or Satellites).
+    The Auto track setting (Off / On / APRS) stays receive-only; no TX limit was added or changed; the held track's TX
+    refusal is unchanged. **Display (rows freed)**: on 240 x 320 the page had no spare row: the third choice alone
+    pushed the status line ("OK: track in the VFO", "Tracking ...", the alarm) below the screen (the simulator drops
+    text drawn wholly off screen without a layout report; the tests now check the status line). So the line under the
+    pass is now one line, not two: before the pass "AOS 14:27  LOS 14:38" (no Az / El: the ISS is below the horizon;
+    the sky plot, key 2, shows where it rises), under way the live "Az 123°  El 23.4°" (the old "Above now, max 47°"
+    repeated the first line's LOS and top; it stays only when there is no live look). With the repeater chosen and the
+    ISS live the TX line is added, and then the two unchosen downlinks share one dim row ("145.800 / 145.825"), so
+    the page keeps its old height in every case (layout checks pass: plain, repeater live, repeater tracked).
+    **Cost** (Plus public build against 29965db, both built the same way): FLASH 862,168 -> 862,880 B (+712 B,
+    95.76 %), RAM 207,136 B unchanged (the two new bytes, `iss_ch` in place of the bool and `iss_sync_hold`, fit in
+    padding), UI task free stack 164 B unchanged (its deepest path is not through the ISS page).
   - **The held track** (`sat_auto_start(idx, mode)`, a UI request to the service): the auto track's machinery started
     by the user. The pass: the screens' search result when there is one, else the last alarm rise's pass (the service
     keeps the rise's satellite, top, AOS and LOS: what the pop-up offers from Home, where no screen searched); only a

@@ -3,6 +3,19 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
+## Unreleased
+
+Host-tested only; not yet run on the radio (docs/plus-radio-test.md IR1 ... IR4).
+
+- **Tools > ISS: the ISS FM repeater** (owner's request). Key 1 now cycles three choices: 145.800 voice / SSTV,
+  145.825 APRS and "437.800 repeater" ("437.800 röle"). With the repeater chosen, OK starts the same VFO track as OK on
+  the ISS in Tools > Satellites: RX 437.800, TX 145.990 with 67.0 Hz, both Doppler corrected, so PTT talks through the
+  ISS; the page shows the RX and TX lines, and the VFO stays after the pass. Key 1 under a running track of the other
+  kind stops it (OK starts the new one). Home's hold-4 and the AOS pop-up stay on the receive-only 145.800 track
+  (they never move the radio to the VFO track); the Auto track setting stays receive-only. To make room, the page
+  shows the AOS / LOS times before a pass and the live azimuth / elevation during it (not both) (docs/plus.md "ISS FM
+  repeater").
+
 ## v1.2.1 (2026-11-27)
 
 Firmware 1.2.1; the programmer stays 3.2.0. Host-tested only; not yet run on the radio (docs/plus-radio-test.md

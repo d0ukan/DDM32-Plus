@@ -17,12 +17,16 @@
  * was 30 s after the set; "ISS tracking" once the radio holds, else a toast says why not), Back hides it, other keys
  * are Home's. Elsewhere it is the plain 8 s banner.
  *
- * Tools > ISS (ui_iss_screen): the ISS alone on one page: its next pass (or "Above now"), AOS / LOS, the live
- * azimuth, elevation and the Doppler of the downlink in use, the two downlinks (145.800 FM voice / SSTV, 145.825
- * APRS), and the pass alarm page's rows from Before AOS on (always the ISS's alarm: Every pass arms its notifications
- * at once, replacing another satellite's alarm with a toast; another's is shown, not changed). OK:
- * the held track now (as the pop-up's; under way or due within 10 min, else it says when) or stop, #: APRS via ISS,
- * 1: the other downlink (switched under a track too). */
+ * Tools > ISS (ui_iss_screen): the ISS alone on one page: its next pass (or LOS under way), then AOS / LOS before
+ * it or the live azimuth and elevation during it (one line: the page has no row to spare), the Doppler of the frequency in use, the three choices (145.800 FM voice / SSTV, 145.825
+ * APRS, the 437.800 FM repeater: TX 145.990, 67.0 Hz), and the pass alarm page's rows from Before AOS on (always the
+ * ISS's alarm: Every pass arms its notifications at once, replacing another satellite's alarm with a toast; another's
+ * is shown, not changed). OK: the held track now (as the pop-up's; under way or due within 10 min, else it says when)
+ * or, on the repeater, the Satellites list's VFO track (RX 437.800, TX 145.990 with its tone, Doppler corrected, the
+ * VFO stays after), or stop; #: APRS via ISS; 1: the next choice (145.800 and 145.825 switched under a held track too;
+ * a running track of the other kind is stopped, OK starts the new one). Home's hold-4 and the pop-up's OK stay on the
+ * held, receive-only track (145.800 when the repeater is chosen): the VFO track would leave a channel for the VFO
+ * and keep it there without the radio core's busy check. */
 #include "config.h"
 #if CONFIG_SATELLITES
 #include <math.h>
@@ -51,9 +55,12 @@ static const uint8_t lead_min[] = { 2, 5, 10 };
 static const uint8_t min_el[] = { 0, 10, 20, 30, 45 };
 #define A_ROWS	5
 #define ISS_ROWS	6	/* Tools > ISS: the alarm rows from Before AOS on, then Show orbit (the sky plot) */
-/* Tools > ISS: the downlink it tracks is 145.825 (else 145.800); the AOS pop-up's satellite (SAT_NONE: none; bit 7:
- * its banner not made longer yet) and its title (the banner's, to know it is still up) */
-static bool iss_aprs;
+/* Tools > ISS: what it tracks (ISS_VOICE 145.800, ISS_APRS 145.825: the held track; ISS_RPT the repeater: the VFO
+ * track); the AOS pop-up's satellite (SAT_NONE: none; bit 7: its banner not made longer yet) and its title (the
+ * banner's, to know it is still up) */
+enum { ISS_VOICE, ISS_APRS, ISS_RPT, ISS_CHOICES };
+static uint8_t iss_ch;
+static bool iss_sync_hold;	/* the page asked for a stop: the track still in the view is not followed (iss_sync) */
 static uint8_t pop = SAT_NONE;
 static char al_text[40];
 #define POP_MORE_MS	22000u	/* the pop-up's banner: 30 s instead of 8 (an OK out of habit tracks less long) */
@@ -572,9 +579,19 @@ static bool pop_up(void)
 	return ui_st.banner.kind == UI_BANNER_INFO && strcmp(ui_st.banner.title, al_text) == 0;
 }
 
+/* The held track's downlink (the repeater chosen: 145.800, for Home's hold-4 and the pop-up) */
 static uint8_t iss_mode(void)
 {
-	return iss_aprs ? SAT_AUTO_APRS : SAT_AUTO_DOWN;
+	return iss_ch == ISS_APRS ? SAT_AUTO_APRS : SAT_AUTO_DOWN;
+}
+
+/* Home's hold-4 and the pop-up's OK start the held track: with the repeater chosen it is 145.800, and Tools > ISS
+ * shows that from now on */
+static uint8_t iss_held_mode(void)
+{
+	if (iss_ch == ISS_RPT)
+		iss_ch = ISS_VOICE;
+	return iss_mode();
 }
 
 /* Every UI tick (ui_app.c), on any screen: the stored alarm armed at the first; whether an auto track may take the
@@ -654,7 +671,7 @@ bool ui_sat_auto_key(const input_event_t *ev)
 		pop = SAT_NONE;
 		ui_st.banner.kind = UI_BANNER_NONE;
 		if (ev->action == ACT_SELECT)
-			sat_auto_start(i, is_iss(i) ? iss_mode() : SAT_AUTO_DOWN);	/* the service says (ui_sat_alarm) */
+			sat_auto_start(i, is_iss(i) ? iss_held_mode() : SAT_AUTO_DOWN);	/* the service says (ui_sat_alarm) */
 		ui_dirty();
 		return true;
 	}
@@ -1072,8 +1089,9 @@ static int iss_orbit_row(int y, const font_t *f)
 	return y + rh;
 }
 
-/* The pass and the live lines: "AOS in 1h05  47°" (or "LOS in 5:12  47°" under way), "AOS 14:27  LOS 14:38" (or
- * "Above now, max 47°"), azimuth and elevation, the two downlinks (the one in use marked) and its Doppler */
+/* The pass and the live lines: "AOS in 1h05  47°" (or "LOS in 5:12  47°" under way), then before the pass "AOS 14:27
+ * LOS 14:38", under way the live azimuth and elevation ("Above now, max 47°" without a live look), the three choices
+ * (the one in use marked), its Doppler corrected RX and, for the repeater, TX */
 static int __attribute__((noinline)) iss_pass(int y, const sat_view_t *v, uint8_t i)
 {
 	char buf[40];
@@ -1098,7 +1116,10 @@ static int __attribute__((noinline)) iss_pass(int y, const sat_view_t *v, uint8_
 	}
 	gfx_text(m, 0, y, buf, up ? ui_col.rx : ui_col.fg);
 	y += m->h + 1;
-	if (p->state == SAT_PASS_OK) {
+	/* One line under it (the third choice and the repeater's TX line need the room): before the pass its times, under
+	 * way the live look (the first line already says LOS and the top; "Above now" without a live look) */
+	bool live = v->live == i && v->live_ok;
+	if (p->state == SAT_PASS_OK && !(up && live)) {
 		sb_init(&b, buf, sizeof buf);
 		if (up) {
 			sb_str(&b, TR("Above now, max "));
@@ -1112,32 +1133,88 @@ static int __attribute__((noinline)) iss_pass(int y, const sat_view_t *v, uint8_
 		gfx_text(s, 0, y, buf, up ? ui_col.rx : ui_col.fg);
 		y += s->h + 1;
 	}
-	bool live = v->live == i && v->live_ok;
-	if (live) {
+	if (live && (up || p->state != SAT_PASS_OK)) {
 		sb_init(&b, buf, sizeof buf);
 		sb_azel(&b, v);
 		gfx_text(s, 0, y, buf, v->el10 >= 0 ? ui_col.fg : ui_col.dim);
 		y += s->h + 1;
 	}
-	/* The downlinks, the one in use marked */
-	gfx_text(s, 0, y, iss_aprs ? "  " : "> ", ui_col.rx);
-	gfx_text(s, 2 * s->w, y, TR("145.800 voice / SSTV"), iss_aprs ? ui_col.dim : ui_col.fg);
-	y += s->h + 1;
-	gfx_text(s, 0, y, iss_aprs ? "> 145.825 APRS" : "  145.825 APRS", iss_aprs ? ui_col.fg : ui_col.dim);
-	y += s->h + 1;
+	/* The three choices, the one in use marked; the repeater's TX line shown (live), the two downlinks share a row: the
+	 * page has room for one line more than before, not two */
+	for (uint8_t k = 0; k < ISS_CHOICES; k++) {
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, k == iss_ch ? "> " : "  ");
+		if (live && iss_ch == ISS_RPT && k == ISS_VOICE) {
+			sb_str(&b, "145.800 / 145.825");
+			k++;
+		} else {
+			sb_str(&b, k == ISS_VOICE ? TR("145.800 voice / SSTV") : k == ISS_APRS ? "145.825 APRS" :
+			       TR("437.800 repeater"));
+		}
+		gfx_text(s, 0, y, buf, k == iss_ch ? ui_col.fg : ui_col.dim);
+		y += s->h + 1;
+	}
 	if (live) {
-		uint32_t hz = iss_aprs ? SAT_ISS_APRS_HZ : SAT_ISS_VOICE_HZ;
-		int32_t dd = sat_doppler_rx(hz, (float)v->rate_ms / 1000.0f);
+		const sat_info_t *t = &sat_table[i];
+		bool rpt = iss_ch == ISS_RPT, ours = v->track == i && sat_auto_on() != rpt;	/* our kind of track runs */
+		float rate = (float)v->rate_ms / 1000.0f;
+		uint32_t hz = rpt ? t->down_hz : iss_ch == ISS_APRS ? SAT_ISS_APRS_HZ : SAT_ISS_VOICE_HZ;
+		int32_t dd = sat_doppler_rx(hz, rate);
 		sb_init(&b, buf, sizeof buf);
 		sb_str(&b, "RX ");
-		sb_freq(&b, v->track == i && sat_auto_on() ? v->rx_hz : sat_tune_hz(hz, dd));
+		sb_freq(&b, ours ? v->rx_hz : sat_tune_hz(hz, dd));
 		sb_chr(&b, ' ');
 		sb_khz(&b, dd);
 		sb_str(&b, " kHz");
 		gfx_text(s, 0, y, buf, ui_col.fg);
 		y += s->h + 1;
+		if (rpt) {
+			/* the uplink, its shift and tone (" kHz" where the line has room), as on the Satellites list */
+			int32_t du = sat_doppler_tx(t->up_hz, rate);
+			for (uint8_t k = 0; k < 2; k++) {
+				sb_init(&b, buf, sizeof buf);
+				sb_str(&b, "TX ");
+				sb_freq(&b, ours ? v->tx_hz : sat_tune_hz(t->up_hz, du));
+				sb_chr(&b, ' ');
+				sb_khz(&b, du);
+				if (k == 0)
+					sb_str(&b, " kHz");
+				if (t->ctcss10) {
+					subtone_t tone = { TONE_CTCSS, t->ctcss10 };
+					sb_chr(&b, ' ');
+					sb_tone(&b, &tone);
+				}
+				if (gfx_text_width(s, buf) <= gfx_width())
+					break;
+			}
+			gfx_text(s, 0, y, buf, ui_col.fg);
+			y += s->h + 1;
+		}
 	}
 	return y;
+}
+
+/* The ISS's track runs: in the view, or a held one still waiting for the radio core whose pass is the alarm's rise (the
+ * service shows no other waiting target: one the page asked for is not counted while it waits; OK stops any) */
+static bool iss_runs(const sat_view_t *v, uint8_t i)
+{
+	return i != SAT_NONE && (v->track == i || (v->track == SAT_NONE && sat_auto_on() && v->alarm.sat == i));
+}
+
+/* The choice follows the ISS track that runs, whoever started it (Satellites, Home, the pop-up, the alarm): a VFO track
+ * is the repeater; a held track with the repeater chosen (or on entry: full) the downlink it tuned (145.825 or
+ * 145.800). Not while a stop the page asked for is on its way */
+static void iss_sync(const sat_view_t *v, uint8_t i, bool full)
+{
+	if (v->track == SAT_NONE)
+		iss_sync_hold = false;
+	if (iss_sync_hold || i == SAT_NONE || v->track != i)
+		return;
+	if (!sat_auto_on())
+		iss_ch = ISS_RPT;
+	else if (full || iss_ch == ISS_RPT)
+		iss_ch = v->rx_hz > (SAT_ISS_VOICE_HZ + SAT_ISS_APRS_HZ) / 2 && v->rx_hz < SAT_ISS_APRS_HZ + 12500u ?
+			 ISS_APRS : ISS_VOICE;
 }
 
 static void iss_draw(void)
@@ -1151,6 +1228,7 @@ static void iss_draw(void)
 	if (i != SAT_NONE)
 		sat_seen(i);
 	sat_view(&v);
+	iss_sync(&v, i, false);
 	int y = ui_draw_top(ui_view(), &ui_st, sky_page ? TR("Sky") : "ISS", sky_page ? "ISS" : pos_name(&v)) + 2;
 	if (sky_page) {
 		sky_draw(&v, i, y);
@@ -1183,31 +1261,60 @@ static void iss_draw(void)
 	ui_draw_banner(&ui_st);
 }
 
-/* OK: stop a track (any), else the held track now, else when it can */
+/* A track runs (a held one also while it waits for the radio core): stopped, said how the radio is left */
+static void iss_stop(void)
+{
+	bool held = sat_auto_on();
+	sat_track(SAT_NONE);
+	iss_sync_hold = true;	/* the view still shows it until the service has stopped it */
+	ui_toast(held ? TR("Auto track off: radio back") : TR("Tracking off: VFO stays"));
+}
+
+/* OK: stop a track (any), else the held track now (the repeater: the Satellites list's VFO track), else when it can */
 static void __attribute__((noinline)) iss_ok(const sat_view_t *v, uint8_t i)
 {
-	if (v->track != SAT_NONE) {
-		bool held = sat_auto_on();
-		sat_track(SAT_NONE);
-		ui_toast(held ? TR("Auto track off: radio back") : TR("Tracking off: VFO stays"));
+	if (v->track != SAT_NONE || sat_auto_on()) {
+		iss_stop();
 	} else if (i != SAT_NONE && can_track(v, i)) {
-		sat_auto_start(i, iss_mode());	/* "ISS tracking" once the radio holds, else why not (ui_sat_alarm) */
+		if (iss_ch == ISS_RPT && ui_svc_emergency_active()) {
+			ui_toast(TR("Can't track: radio busy"));	/* the VFO would leave the emergency's channel */
+		} else if (iss_ch == ISS_RPT) {
+			sat_track(i);	/* RX 437.800, TX 145.990 67.0 Hz, Doppler corrected; the VFO stays after */
+			ui_toast(TR("VFO tracks the pass"));
+		} else {
+			sat_auto_start(i, iss_mode());	/* "ISS tracking" once the radio holds, else why not (ui_sat_alarm) */
+		}
 	} else {
 		ui_toast(TR("Track from AOS-10 min"));
 	}
 }
 
+/* 1: the next choice. The ISS's running track of the other kind (held for 145.800 / 145.825, the VFO track for the
+ * repeater) stops, OK starts the new one; another satellite's track is left alone (OK stops that); 145.800 and
+ * 145.825 switch a held track as it runs */
+static void __attribute__((noinline)) iss_next(const sat_view_t *v, uint8_t i)
+{
+	iss_sync(v, i, false);
+	iss_ch = (uint8_t)((iss_ch + 1u) % ISS_CHOICES);
+	bool held = sat_auto_on();
+	if (iss_runs(v, i) && held == (iss_ch == ISS_RPT))
+		iss_stop();
+	else if (iss_ch != ISS_RPT)
+		sat_auto_mode(iss_mode());	/* a held track of the ISS follows it */
+}
+
 /* Home's hold-4 key (ui_app.c ui_home_key; the hint "4 ISS"): the held track of the ISS now when a pass is under
  * way or due within 10 min (as OK on Tools > ISS; the service says "ISS tracking" or why not), else Tools > ISS opens
- * (it searches the pass and says when; OK there tracks). A track by hand running: the page too (OK stops it).
- * noinline: off ui_home_key's frame, which must not hold a sat_view_t */
+ * (it searches the pass and says when; OK there tracks). A track by hand running: the page too (OK stops it). The
+ * repeater chosen on the page: the held 145.800 track (iss_held_mode, the page then shows 145.800), never the VFO
+ * track from Home. noinline: off ui_home_key's frame, which must not hold a sat_view_t */
 void __attribute__((noinline)) ui_sat_home_iss(void)
 {
 	sat_view_t v;
 	uint8_t i = iss_index();
 	sat_view(&v);
 	if (i != SAT_NONE && v.track == SAT_NONE && can_track(&v, i))
-		sat_auto_start(i, iss_mode());
+		sat_auto_start(i, iss_held_mode());
 	else
 		ui_push(SCR_ISS, 0);
 }
@@ -1263,8 +1370,8 @@ static bool iss_key(const input_event_t *ev)
 		return true;
 	}
 	if (ev->action == ACT_DIGIT_1) {
-		iss_aprs = !iss_aprs;
-		sat_auto_mode(iss_mode());	/* a held track of the ISS follows it */
+		sat_view(&v);
+		iss_next(&v, i);
 		ui_dirty();
 		return true;
 	}
@@ -1276,6 +1383,7 @@ static void iss_enter(void)
 	sat_view_t v;
 	uint8_t i = iss_index();
 	sat_view(&v);
+	iss_sync(&v, i, true);	/* the choice as the ISS track that runs (started elsewhere) */
 	if (v.alarm.target == i)
 		alarm_open(&v);	/* the ISS's alarm: its values */
 	else
