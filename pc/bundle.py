@@ -11,7 +11,7 @@ What goes in beside the GUI (read by the tools at run time, all public sources):
   debug protocol, codec slot writer, board registry, DM32 codec maps, licence), each checked against its SHA-256 at
   build time (the build refuses a different file) and again at run time. The tree is found as the tools find it
   (DDM32_UPSTREAM, or research/upstream/radiofoundry of the repository).
-- LICENSE, LICENSING.md, THIRD_PARTY.md of the repository.
+- LICENSE (GPL-3.0), LICENSES/Open25-MIT.txt, LICENSING.md, THIRD_PARTY.md of the repository.
 Never bundled: backups, release packages (.bin), RadioID/TRAC lists, stock firmware, codec bytes, logs, settings,
 signing keys. `check` enforces that on the result. The user's data lives in %LOCALAPPDATA%\\DDM32Plus, not here.
 """
@@ -35,7 +35,7 @@ sys.path.insert(0, str(HERE))
 TOOLS = ('install_plus', 'install_firstboot', 'dm32_readonly_backup', 'radio_detect', 'plus_txdiag', 'plus_live',
          'prepare_unit_image', 'signed_manifest', 'ed25519', 'upstream', 'native_modem', '__init__')
 UPSTREAM_DEST = 'research/upstream/radiofoundry'
-REPO_FILES = ('LICENSE', 'LICENSING.md', 'THIRD_PARTY.md')
+REPO_FILES = ('LICENSE', 'LICENSES/Open25-MIT.txt', 'LICENSING.md', 'THIRD_PARTY.md')
 LOCAL_MODULES = {'radiotools', 'rfoundry', 'stubtool', 'f4stub', 'rfoundry_debug', 'hrc7000_codec'}
 EXCLUDES = ('PyQt5.QtWebEngineWidgets', 'PyQt5.QtWebEngineCore', 'PyQt5.QtQml', 'PyQt5.QtQuick', 'PyQt5.QtMultimedia',
             'PyQt5.QtBluetooth', 'PyQt5.QtSql', 'PyQt5.QtTest', 'tkinter', 'unittest.mock', 'radiotools')

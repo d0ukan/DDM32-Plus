@@ -527,7 +527,7 @@ def prepare():
             raise SystemExit(f"Preserving unexpected local changes: {retired_license}")
         retired_license.unlink()
         OWNED.pop(key)
-    write_owned(DEST / "COPYING-OPEN25", (ROOT / "LICENSE").read_bytes())
+    write_owned(DEST / "COPYING-OPEN25", (ROOT / "LICENSES/Open25-MIT.txt").read_bytes())
     write_owned(DEST / "COPYING-P25-CAI", (cai / "LICENSE").read_bytes())
     write_owned(DEST / "COPYING-P25-IMBE", (ROOT / "third_party/imbe/LICENSE").read_bytes())
     write_owned(DEST / "P25-DERIVATIVE.txt", (
@@ -907,7 +907,7 @@ def main():
         if not prefix.with_suffix(".codec.bin").exists():
             raise SystemExit("No recognized local stock codec; not claiming preserved DMR voice")
     inputs = [ROOT / "tools/build_radiofoundry.py", ROOT / "tools/codec_cache.py", ROOT / "tools/classic_channels.py", ROOT / "tools/classic_standard.py",
-              ROOT / "tools/sources.py", ROOT / "sources.lock.json", ROOT / "LICENSE",
+              ROOT / "tools/sources.py", ROOT / "sources.lock.json", ROOT / "LICENSES/Open25-MIT.txt",
               ROOT / "src/runtime/memory.c", ROOT / "LICENSES/RadioFoundry-MIT.txt"] + [p for folder in
               (ROOT / "src/p25", ROOT / "src/modem", ROOT / "src/codec", ROOT / "integration/radiofoundry",
                ROOT / "third_party/p25cai", ROOT / "third_party/imbe")

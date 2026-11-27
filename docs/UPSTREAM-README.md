@@ -204,7 +204,7 @@ and cause loss of life.
 
 Open25-DM32 builds on [RadioFoundry](https://github.com/RadioFoundry/RadioFoundry)
 and other open-source projects. Project code, the P25 CAI library and the
-shared fixed-point C full-rate IMBE codec use the [MIT license](LICENSE).
+shared fixed-point C full-rate IMBE codec use the [MIT license](../LICENSES/Open25-MIT.txt).
 The earlier GPL IMBE implementation and patches are replaced in this source
 release. Other dependencies retain their original terms.
 Original dependency notices and attributions are preserved; see
