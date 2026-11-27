@@ -11,7 +11,7 @@ P25, DMR, YSF, NXDN, dPMR, APRS, çevrimdışı Türkiye haritası, uydu takibi 
 
 [![Lisans: GPL-3.0-or-later](https://img.shields.io/badge/lisans-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Temel: Open25-DM32](https://img.shields.io/badge/temel-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Sürüm: v1.2.1](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.2.1-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.1)
+[![Sürüm: v1.2.2](https://img.shields.io/badge/s%C3%BCr%C3%BCm-v1.2.2-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.2)
 
 **Türkçe** · [English](README.en.md)
 
@@ -35,7 +35,7 @@ P25, DMR, YSF, NXDN, dPMR, APRS, çevrimdışı Türkiye haritası, uydu takibi 
 DM-32UV telsizinin içindeki yazılımın yerine geçen, baştan sona Türkçe bir firmware. Telsize P25 dahil birçok dijital
 mod, harita, röle listesi, uydu takibi ve onlarca araç ekler. İngilizce arayüz de seçilebilir.
 
-- **Son sürüm:** [v1.2.1](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.1) (2026-11-26), programlayıcı 3.2.0.
+- **Son sürüm:** [v1.2.2](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.2) (2026-11-27), programlayıcı 3.2.0.
 - **Ne kadar denendi:** v1.0.0'dan beri kararlı sürüm. Her özellik bilgisayarda testlerden geçer, ama **1.0.2'den
   sonraki birçok yenilik telsizde henüz tam denenmedi**. Hangi sürümde neyin telsizde denendiği
   [CHANGELOG.md](CHANGELOG.md) içinde; telsiz test listesi [`docs/plus-radio-test.md`](docs/plus-radio-test.md).
@@ -63,18 +63,21 @@ Daha fazlası: programlayıcı [`rust/README.md`](rust/README.md) (kaynak: [`rus
 | Mod | Dinleme | Konuşma | Frekans tarama |
 | --- | :---: | :---: | :---: |
 | FM / AM | ✅ | ✅ FM | — |
-| DMR Tier I (446 MHz kanal girilirse, 0,5 W) | ✅ | ✅ | ✅ |
+| DMR Tier I (446 MHz direkt; yasal sınır 0,5 W, firmware sınırlamaz) | ✅ | ✅ | ✅ |
 | DMR Tier II | ✅ | ✅ | ✅ |
 | DMR Tier III / Trunk | ✅ takip \* | — | — |
 | P25 Faz 1 | ✅ | ✅ | ✅ |
 | P25 Trunk (Faz 1) | ✅ takip \* | — | — |
-| P25 Faz 2 (TDMA) | 🕓 Planlandı | — | 🕓 Planlandı |
-| YSF (C4FM) | ✅ | ⚙️ VW (kapalı gelir) | ✅ |
+| P25 Faz 2 (TDMA) | ❌ bu donanımda mümkün değil \*\* | — | — |
+| YSF (C4FM) | ✅ | — (deneysel, yalnızca kendi derlemenizde) | ✅ |
 | NXDN48 | ✅ | — | ✅ |
 | dPMR | ✅ | — | 🕓 Planlandı |
 
 \* Trunk: kontrol kanalını takip edip konuşmaları dinler (Araçlar > P25 trunk / DMR trunk). Bilgisayarda test edildi,
 telsizde henüz denenmedi.
+
+\*\* P25 Faz 2 araştırıldı: H-DQPSK 6000 sembol/s gerekiyor; bu telsizin modemi 4800 sembol/s ile sınırlı ve
+ses yolu yetmiyor ([`docs/plus.md`](docs/plus.md)). Yeni bir yol bulunursa yeniden bakılır.
 
 Frekans tarama: **P25 arama**, **DMR arama** ve P25 / DMR / YSF / NXDN'i birlikte bulan **Tüm dijital arama**
 (Araçlar). Kendi aralığınızı ve adımınızı girersiniz, bulunanlar listelenir.
@@ -89,7 +92,11 @@ Frekans tarama: **P25 arama**, **DMR arama** ve P25 / DMR / YSF / NXDN'i birlikt
 - Çevrimdışı Türkiye haritası: 81 il, 973 ilçe, 252 röle, havalimanları, APRS istasyonları.
 - Otomatik röle taraması ve otomatik havalimanı taraması (1.2.0).
 - APRS gönderme / alma, mesaj, SOS, GPS ile hedefe gitme, Güneş ve Ay.
-- Uydular ve ISS: geçiş zamanı, alarm, Doppler düzeltmeli takip, gökyüzü grafiği.
+- Uydular ve ISS: geçiş zamanı, alarm, Doppler düzeltmeli takip, gökyüzü grafiği. ISS rölesi üzerinden konuşma
+  (Araçlar > ISS, 1 tuşu ile "437.800 röle": dinle 437.800, konuş 145.990, 67 Hz; 1.2.2, telsizde henüz denenmedi).
+  Röle takibinden sonra telsiz VFO'da kalır (VFO ayarlarınızın yerine röle frekansları yazılır); kanalınıza kendiniz
+  dönün. Ana ekranda basılı `4` ve "ISS tepede" penceresi yalnızca 145.800'ü dinler; konuşmak için Araçlar > ISS'te
+  röleyi seçip OK'e basın.
 
 **Araçlar**
 - DOTA Transfer: kanalları başka bir DDM32 Plus telsize havadan gönderme (beta).
@@ -149,10 +156,8 @@ Tüm teknik ayrıntılar: [`docs/plus.md`](docs/plus.md).
 
 Bunlar **plan**, söz değil; sıra ve tarih değişebilir.
 
-- **ISS rölesi üzerinden konuşma**: ISS sayfasında 437.800 röle seçeneği (dinle 437.800, konuş 145.990, Doppler
-  düzeltmeli). Üzerinde çalışılıyor.
 - **Daha hızlı P25 arama**: P25 sinyalini yazılımla tanıyarak frekans başına bekleme süresini kısaltmak.
-- **P25 Faz 2 (TDMA) dinleme** ve **dPMR frekans tarama**.
+- **dPMR frekans tarama**.
 - **Röle listesi**: NXDN röleleri, DMR rölelerinde tek slot ve renk kodu bilgisi.
 - **İki telsizle testler**: DOTA Transfer ve Çapraz bant'ın gerçek iki telsiz arasında denenmesi.
 - **Programlayıcı**: Linux ve macOS paketleri.

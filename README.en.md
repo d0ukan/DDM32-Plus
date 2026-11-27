@@ -11,7 +11,7 @@ P25, DMR, YSF, NXDN, dPMR, APRS, an offline map of Turkey, satellite tracking an
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSING.md)
 [![Based on Open25-DM32](https://img.shields.io/badge/based%20on-Open25--DM32%20r13-6f42c1)](https://github.com/tylerwatt12/Open25-DM32)
-[![Release: v1.2.1](https://img.shields.io/badge/release-v1.2.1-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.1)
+[![Release: v1.2.2](https://img.shields.io/badge/release-v1.2.2-green)](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.2)
 
 [Türkçe](README.md) · **English**
 
@@ -35,7 +35,7 @@ P25, DMR, YSF, NXDN, dPMR, APRS, an offline map of Turkey, satellite tracking an
 Replacement firmware for the DM-32UV handheld. It adds many digital modes including P25, a map, a repeater list,
 satellite tracking and dozens of tools. The radio runs in Turkish by default; English can be chosen.
 
-- **Latest release:** [v1.2.1](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.1) (2026-11-26), programmer 3.2.0.
+- **Latest release:** [v1.2.2](https://github.com/d0ukan/DDM32-Plus/releases/tag/v1.2.2) (2026-11-27), programmer 3.2.0.
 - **How well tested:** a stable line since v1.0.0. Every feature passes host tests, but **many changes after 1.0.2 have
   not yet been fully tried on a radio**. [CHANGELOG.md](CHANGELOG.md) says per release what ran on a radio; the radio
   test list is [`docs/plus-radio-test.md`](docs/plus-radio-test.md).
@@ -63,18 +63,21 @@ More: the programmer [`rust/README.md`](rust/README.md) (source: [`rust/`](rust/
 | Mode | Receive | Transmit | Frequency search |
 | --- | :---: | :---: | :---: |
 | FM / AM | ✅ | ✅ FM | — |
-| DMR Tier I (on a 446 MHz channel you enter, 0.5 W) | ✅ | ✅ | ✅ |
+| DMR Tier I (446 MHz direct; the legal limit is 0.5 W, the firmware does not enforce it) | ✅ | ✅ | ✅ |
 | DMR Tier II | ✅ | ✅ | ✅ |
 | DMR Tier III / Trunk | ✅ following \* | — | — |
 | P25 Phase 1 | ✅ | ✅ | ✅ |
 | P25 Trunk (Phase 1) | ✅ following \* | — | — |
-| P25 Phase 2 (TDMA) | 🕓 Planned | — | 🕓 Planned |
-| YSF (C4FM) | ✅ | ⚙️ VW (off by default) | ✅ |
+| P25 Phase 2 (TDMA) | ❌ not possible on this hardware \*\* | — | — |
+| YSF (C4FM) | ✅ | — (experimental, own build only) | ✅ |
 | NXDN48 | ✅ | — | ✅ |
 | dPMR | ✅ | — | 🕓 Planned |
 
 \* Trunk: follows the control channel and plays the calls (Tools > P25 trunk / DMR trunk). Host-tested, not yet tried
 on a radio.
+
+\*\* P25 Phase 2 was studied: it needs H-DQPSK at 6000 symbols/s; this radio's modem is fixed at 4800 symbols/s and the
+audio path is not enough ([`docs/plus.md`](docs/plus.md)). If a new way turns up, it will be looked at again.
 
 Frequency search: **P25 search**, **DMR search** and **All digital search**, which finds P25 / DMR / YSF / NXDN
 together (Tools). You enter your own range and step; the finds are listed.
@@ -89,7 +92,11 @@ together (Tools). You enter your own range and step; the finds are listed.
 - Offline map of Turkey: 81 provinces, 973 districts, 252 repeaters, airfields, APRS stations.
 - Auto repeater scan and auto airfield scan (1.2.0).
 - APRS send / receive, messages, SOS, GPS Go-To, Sun & Moon.
-- Satellites and the ISS: pass times, alarm, Doppler-corrected tracking, sky plot.
+- Satellites and the ISS: pass times, alarm, Doppler-corrected tracking, sky plot. Talk through the ISS repeater
+  (Tools > ISS, key 1 to "437.800 repeater": listen 437.800, talk 145.990, 67 Hz; 1.2.2, not yet tried on a radio).
+  After a repeater track the radio stays in the VFO (the repeater frequencies replace your VFO settings); switch back
+  to your channel yourself. Hold `4` on Home and the "ISS overhead" pop-up only listen on 145.800; to talk, choose the
+  repeater on Tools > ISS and press OK.
 
 **Tools**
 - DOTA Transfer: send channels to another DDM32 Plus radio over the air (beta).
@@ -149,10 +156,8 @@ All technical details: [`docs/plus.md`](docs/plus.md).
 
 These are **plans, not promises**; order and dates may change.
 
-- **Talk through the ISS repeater**: a 437.800 repeater choice on the ISS page (listen 437.800, talk 145.990, Doppler
-  corrected). In progress.
 - **Faster P25 search**: recognise P25 in software to cut the wait per frequency.
-- **P25 Phase 2 (TDMA) receive** and **dPMR frequency search**.
+- **dPMR frequency search**.
 - **Repeater list**: NXDN repeaters, single slot and colour code for DMR repeaters.
 - **Two-radio tests** of DOTA Transfer and Cross-band.
 - **Programmer**: Linux and macOS packages.

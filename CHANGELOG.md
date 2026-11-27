@@ -3,9 +3,9 @@
 DDM32 Plus is a fork of Open25-DM32 Classic (r13) for the Baofeng DM-32UV. See the disclaimer in
 [README.md](README.md) before installing anything.
 
-## Unreleased
+## v1.2.2 (2026-11-27)
 
-Host-tested only; not yet run on the radio (docs/plus-radio-test.md IR1 ... IR4).
+Host-tested only; not yet run on the radio (docs/plus-radio-test.md IR1 ... IR8). The programmer stays 3.2.0.
 
 - **Tools > ISS: the ISS FM repeater** (owner's request). Key 1 now cycles three choices: 145.800 voice / SSTV,
   145.825 APRS and "437.800 repeater" ("437.800 röle"). With the repeater chosen, OK starts the same VFO track as OK on
@@ -14,7 +14,13 @@ Host-tested only; not yet run on the radio (docs/plus-radio-test.md IR1 ... IR4)
   kind stops it (OK starts the new one). Home's hold-4 and the AOS pop-up stay on the receive-only 145.800 track
   (they never move the radio to the VFO track); the Auto track setting stays receive-only. To make room, the page
   shows the AOS / LOS times before a pass and the live azimuth / elevation during it (not both) (docs/plus.md "ISS FM
-  repeater").
+  repeater"). The page always shows the track that really runs (also one started from Home, the pop-up, the alarm or
+  Tools > Satellites); key 1 stops only the ISS's own track, never another satellite's; OK on the repeater is refused
+  ("Can't track: radio busy") while an emergency runs.
+- **README** in Turkish by default (README.md), English in README.en.md, shorter, with a modes table and a "Coming
+  next" list of plans.
+- **Licence files**: the root `LICENSE` is now the full GPL-3.0 text (the licence of the DDM32 Plus additions and of
+  the firmware image); upstream's MIT notice is kept unchanged in `LICENSES/Open25-MIT.txt`. No file changed licence.
 
 ## v1.2.1 (2026-11-27)
 

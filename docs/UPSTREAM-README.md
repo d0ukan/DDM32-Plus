@@ -145,8 +145,8 @@ success after the new codeplug and requested edit are saved.
 
 This repository contains **Classic source only**. Next source remains private.
 Firmware ZIPs are hosted on kd8zmm.com; GitHub contains no firmware downloads.
-See [BUILD.md](BUILD.md) to build Classic and its application-only installer ZIP,
-and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency notices.
+See [BUILD.md](../BUILD.md) to build Classic and its application-only installer ZIP,
+and [THIRD_PARTY.md](../THIRD_PARTY.md) for dependency notices.
 
 ### Installing Classic
 
@@ -208,7 +208,7 @@ shared fixed-point C full-rate IMBE codec use the [MIT license](../LICENSES/Open
 The earlier GPL IMBE implementation and patches are replaced in this source
 release. Other dependencies retain their original terms.
 Original dependency notices and attributions are preserved; see
-[THIRD_PARTY.md](THIRD_PARTY.md) for the component licenses.
+[THIRD_PARTY.md](../THIRD_PARTY.md) for the component licenses.
 
 ## Support development
 

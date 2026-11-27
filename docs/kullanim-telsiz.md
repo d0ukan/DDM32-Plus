@@ -74,7 +74,7 @@ tutarak, **\* 7** ile ya da **SK2**'ye basarak başlatın.
 | **FM / AM** | Alma ve gönderme (AM yalnız alma: hava bandı 108-136 MHz) | CTCSS / DCS tonları; Araçlar > Ton bulucu bilinmeyen tonu bulur |
 | **DMR** | Alma ve gönderme, Tier I/II | Renk kodu, slot ve RX grubu **Any** olabilir; **SK1** dijital dinleme (her çağrı); SMS, acil çağrı, roaming |
 | **P25** | Faz 1 alma ve gönderme | NAC **desimal** yazılır: "659 ($293)"; **#** RX'te Any, TX'te "RX ile aynı". Ayrı RX / TX NAC; Any talkgroup |
-| **YSF** | DN ve VW alma; başlıktan çağrı işareti | VW gönderme deneysel, varsayılan kapalı |
+| **YSF** | DN ve VW alma; başlıktan çağrı işareti | VW gönderme deneysel; bu sürümde yok (yalnızca kendi derlemenizde) |
 | **NXDN48** | Yalnız alma | |
 | **dPMR** | Yalnız alma | |
 
@@ -101,6 +101,11 @@ Kanal düzenleyicide **Mod** satırı modu seçer; her modun kendi satırları a
   önce; bir havalimanında **OK** frekansları, bir frekansta **OK** VFO'yu AM'e ayarlar, **#** hepsini
   birlikte izler (hava izleme: meydanın frekansları çoklu izlemede). Frekanslar hava bandı veri paketinden gelir.
 - **Deniz VHF**: kanal tablosu, yalnız alma. **Uydular**, **Güneş ve Ay**, **Hedefe git**, **GPS** de Araçlar'dadır.
+- **ISS** (Araçlar > ISS): sonraki geçiş, AOS / LOS. **1** üç seçenek arasında geçer: 145.800 ses / SSTV, 145.825
+  APRS (ikisi yalnız dinleme; geçiş bitince telsiz kanalına döner) ve **437.800 röle**. Röle seçiliyken **OK**
+  geçişi VFO'da takip eder (RX 437.800, TX 145.990, 67 Hz, Doppler düzeltmeli) ve **PTT** ile konuşulur (yalnız
+  lisansla). Geçişten sonra telsiz VFO'da kalır, kanalına kendin dön. Ana ekranda basılı **4** ve "ISS tepede"
+  penceresi yalnız 145.800'ü dinler. **OK** çalışan takibi durdurur.
 
 ## 8. Son çağrılar ve DOTA Aktarım
 
